@@ -6,8 +6,10 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { useLocale } from "@/context/LocaleContext";
 
 export function MCPSection() {
+  const { t } = useLocale();
   const backendUrl =
     process.env.NEXT_PUBLIC_BACKEND_URL ||
     (typeof window !== "undefined" ? window.location.origin : "");
@@ -27,16 +29,15 @@ export function MCPSection() {
   return (
     <div className="grid gap-6">
       <div className="grid gap-2">
-        <Label>MCP Endpoint</Label>
+        <Label>{t('mcp.endpointLabel')}</Label>
         <p className="text-xs text-muted-foreground">
-          Connect an MCP-compatible AI assistant to this URL over Streamable
-          HTTP. Requires an API key in the X-API-Key header.{" "}
+          {t('mcp.endpointDescription')}{' '}
           <Link
             href="/api-keys"
             target="_blank"
             className="text-primary underline hover:no-underline"
           >
-            Get your API key
+            {t('mcp.getApiKey')}
           </Link>
         </p>
         <div className="flex items-center gap-2">
@@ -48,6 +49,7 @@ export function MCPSection() {
             size="icon"
             className="shrink-0"
             onClick={() => handleCopy(endpoint, setEndpointCopied)}
+            aria-label={t('common.copy')}
           >
             {endpointCopied ? (
               <Check className="h-4 w-4" />
@@ -59,15 +61,14 @@ export function MCPSection() {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        For step-by-step setup with Claude Code, Claude Desktop, Cursor, and
-        other clients, see the{" "}
+        {t('mcp.guidePrefix')}{' '}
         <Link
           href="https://docs.dograh.com/integrations/mcp"
           target="_blank"
           rel="noopener noreferrer"
           className="text-primary underline hover:no-underline"
         >
-          MCP integration guide
+          {t('mcp.guideLink')}
         </Link>
         .
       </p>

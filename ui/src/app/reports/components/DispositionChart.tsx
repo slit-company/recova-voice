@@ -12,6 +12,7 @@ import {
 } from 'recharts';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useLocale } from '@/context/LocaleContext';
 
 interface DispositionData {
   disposition: string;
@@ -24,15 +25,16 @@ interface DispositionChartProps {
 }
 
 const COLORS = [
-  '#3b82f6', // blue-500
-  '#10b981', // emerald-500
-  '#f59e0b', // amber-500
-  '#8b5cf6', // violet-500
-  '#ef4444', // red-500
-  '#6b7280', // gray-500 for "Other"
+  '#3b82f6',
+  '#10b981',
+  '#f59e0b',
+  '#8b5cf6',
+  '#ef4444',
+  '#6b7280',
 ];
 
 export function DispositionChart({ data }: DispositionChartProps) {
+  const { t, formatNumber } = useLocale();
   const chartData = data.map((item, index) => ({
     ...item,
     fill: COLORS[index % COLORS.length],
@@ -40,12 +42,12 @@ export function DispositionChart({ data }: DispositionChartProps) {
 
   const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ payload: DispositionData & { fill: string } }> }) => {
     if (active && payload && payload[0]) {
-      const data = payload[0].payload;
+      const tooltipData = payload[0].payload;
       return (
         <div className="bg-background border rounded-lg shadow-lg p-3">
-          <p className="font-semibold">{data.disposition}</p>
-          <p className="text-sm">Count: {data.count}</p>
-          <p className="text-sm">{data.percentage}% of total</p>
+          <p className="font-semibold">{tooltipData.disposition}</p>
+          <p className="text-sm">{t('reports.count', { count: formatNumber(tooltipData.count) })}</p>
+          <p className="text-sm">{t('reports.percentOfTotal', { percentage: tooltipData.percentage })}</p>
         </div>
       );
     }
@@ -55,12 +57,12 @@ export function DispositionChart({ data }: DispositionChartProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Disposition Distribution</CardTitle>
+        <CardTitle>{t('reports.dispositionDistribution')}</CardTitle>
       </CardHeader>
       <CardContent>
         {data.length === 0 ? (
           <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-            No disposition data available
+            {t('reports.noDispositionData')}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={300}>
@@ -78,9 +80,7 @@ export function DispositionChart({ data }: DispositionChartProps) {
                 interval={0}
                 tick={{ fontSize: 12 }}
               />
-              <YAxis
-                tick={{ fontSize: 12 }}
-              />
+              <YAxis tick={{ fontSize: 12 }} />
               <Tooltip content={<CustomTooltip />} />
               <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                 {chartData.map((entry, index) => (

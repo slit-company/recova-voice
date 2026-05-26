@@ -4,6 +4,7 @@ import { Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useLocale } from "@/context/LocaleContext";
 import { cn } from "@/lib/utils";
 
 interface ThemeToggleProps {
@@ -19,11 +20,10 @@ export default function ThemeToggle({
   variant = "ghost",
   size = "icon"
 }: ThemeToggleProps) {
-  // Start with null to avoid hydration mismatch - theme is set by inline script in layout.tsx
+  const { t } = useLocale();
   const [theme, setTheme] = useState<"light" | "dark" | null>(null);
 
   useEffect(() => {
-    // Read the current theme from the DOM (already set by inline script in layout.tsx)
     const isDark = document.documentElement.classList.contains("dark");
     setTheme(isDark ? "dark" : "light");
   }, []);
@@ -54,9 +54,11 @@ export default function ThemeToggle({
         !showLabel && "absolute"
       )} />
       {showLabel && theme && (
-        <span className="ml-2">{theme === "light" ? "Light" : "Dark"} Mode</span>
+        <span className="ml-2">
+          {theme === "light" ? t('theme.lightMode') : t('theme.darkMode')}
+        </span>
       )}
-      <span className="sr-only">Toggle theme</span>
+      <span className="sr-only">{t('theme.toggle')}</span>
     </Button>
   );
 }

@@ -24,6 +24,7 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
+import { useLocale } from '@/context/LocaleContext';
 import { useUserConfig } from '@/context/UserConfigContext';
 import { useAuth } from '@/lib/auth';
 import { usageFilterAttributes } from '@/lib/filterAttributes';
@@ -37,6 +38,7 @@ export default function UsagePage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { userConfig, saveUserConfig, loading: userConfigLoading, organizationPricing } = useUserConfig();
+    const { t, formatCurrency, formatDateTime, formatNumber } = useLocale();
     const auth = useAuth();
 
     // MPS credits state
@@ -189,11 +191,11 @@ export default function UsagePage() {
                 a.remove();
                 window.URL.revokeObjectURL(url);
             } else {
-                toast.error('Failed to download report');
+                toast.error(t('usage.downloadFailed'))
             }
         } catch (error) {
             console.error('Failed to download usage report:', error);
-            toast.error('Failed to download report');
+            toast.error(t('usage.downloadFailed'))
         } finally {
             setIsDownloadingReport(false);
         }
@@ -299,30 +301,25 @@ export default function UsagePage() {
         router.push(`/workflow/${run.workflow_id}/run/${run.id}`);
     };
 
-    // Format datetime for display with timezone support
-    const formatDateTime = (dateString: string) => {
-        const date = new Date(dateString);
+    const formatRunDateTime = (dateString: string) => {
         const tzValue = typeof selectedTimezone === 'string' ? selectedTimezone : selectedTimezone.value;
-        // Use local timezone if none selected (during loading)
         const effectiveTz = tzValue || localTimezone;
-        return date.toLocaleString('en-US', {
+        return formatDateTime(dateString, {
             timeZone: effectiveTz,
             year: 'numeric',
             month: 'short',
             day: 'numeric',
             hour: '2-digit',
             minute: '2-digit',
-            hour12: true
         });
     };
 
-    // Format duration for display
     const formatDuration = (seconds: number) => {
         const minutes = Math.floor(seconds / 60);
         const remainingSeconds = seconds % 60;
-        if (minutes === 0) return `${remainingSeconds}s`;
-        if (remainingSeconds === 0) return `${minutes}m`;
-        return `${minutes}m ${remainingSeconds}s`;
+        if (minutes === 0) return `${formatNumber(remainingSeconds)}s`;
+        if (remainingSeconds === 0) return `${formatNumber(minutes)}m`;
+        return `${formatNumber(minutes)}m ${formatNumber(remainingSeconds)}s`;
     };
 
     return (
@@ -330,8 +327,8 @@ export default function UsagePage() {
             <div>
                 <div className="flex justify-between items-start">
                     <div>
-                        <h1 className="text-3xl font-bold mb-2">Agent Runs</h1>
-                        <p className="text-muted-foreground">See all your Agent Runs across all Voice Agents. You can use filters to filter out required Agent Runs.</p>
+                        <h1 className="text-3xl font-bold mb-2">{t('usage.title')}</h1>
+                        <p className="text-muted-foreground">{t('usage.description')}</p>
                     </div>
                         <div className="flex items-center gap-2">
                             <Globe className="h-4 w-4 text-muted-foreground" />
@@ -341,7 +338,7 @@ export default function UsagePage() {
                                     value={selectedTimezone}
                                     onChange={handleTimezoneChange}
                                     isDisabled={savingTimezone || userConfigLoading}
-                                    placeholder={userConfigLoading ? "Loading..." : "Select timezone"}
+                                    placeholder={userConfigLoading ? t('common.loading') : t('usage.timezonePlaceholder')}
                                     styles={{
                                         control: (base, state) => ({
                                             ...base,
@@ -412,9 +409,9 @@ export default function UsagePage() {
                 {/* MPS Credits Card */}
                 <Card className="mb-6">
                     <CardHeader>
-                        <CardTitle>Dograh Model Credits</CardTitle>
+                        <CardTitle>{t('usage.creditsTitle')}</CardTitle>
                         <CardDescription>
-                            These track usage of Dograh models using Dograh Service Keys.
+                            {t('usage.creditsDescription')}
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -429,13 +426,13 @@ export default function UsagePage() {
                                 <div className="flex justify-between items-baseline">
                                     <div>
                                         <p className="text-2xl font-bold">
-                                            {mpsCredits.total_credits_used.toFixed(2)} <span className="text-lg font-normal text-muted-foreground">/ {mpsCredits.total_quota.toFixed(2)}</span>
+                                            {formatNumber(mpsCredits.total_credits_used, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-lg font-normal text-muted-foreground">/ {formatNumber(mpsCredits.total_quota, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                         </p>
-                                        <p className="text-sm text-muted-foreground">Credits Used</p>
+                                        <p className="text-sm text-muted-foreground">{t('usage.creditsUsed')}</p>
                                     </div>
                                     <div className="text-right">
-                                        <p className="text-lg font-semibold">{mpsCredits.remaining_credits.toFixed(2)}</p>
-                                        <p className="text-sm text-muted-foreground">Remaining</p>
+                                        <p className="text-lg font-semibold">{formatNumber(mpsCredits.remaining_credits, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                        <p className="text-sm text-muted-foreground">{t('usage.remaining')}</p>
                                     </div>
                                 </div>
 
@@ -444,7 +441,7 @@ export default function UsagePage() {
                                 )}
                             </div>
                         ) : (
-                            <p className="text-muted-foreground">No Dograh service keys configured. Set up a service key in your model configuration to see usage.</p>
+                            <p className="text-muted-foreground">{t('usage.noServiceKeys')}</p>
                         )}
                     </CardContent>
                 </Card>
@@ -478,7 +475,7 @@ export default function UsagePage() {
                                 disabled={isDownloadingReport}
                             >
                                 <Download className="h-4 w-4 mr-2" />
-                                {isDownloadingReport ? 'Preparing...' : 'Download Filtered Results'}
+                                {isDownloadingReport ? t('usage.preparing') : t('usage.downloadFilteredResults')}
                             </Button>
                         </div>
                     )}
@@ -489,9 +486,9 @@ export default function UsagePage() {
                     <CardHeader>
                         <div className="flex justify-between items-start">
                             <div className="space-y-1.5">
-                                <CardTitle>All Runs</CardTitle>
+                                <CardTitle>{t('usage.allRunsTitle')}</CardTitle>
                                 <CardDescription>
-                                    Every agent run across your organization, with usage details
+                                    {t('usage.allRunsDescription')}
                                 </CardDescription>
                             </div>
                         </div>
@@ -509,17 +506,17 @@ export default function UsagePage() {
                                     <Table>
                                         <TableHeader>
                                             <TableRow className="bg-muted/50">
-                                                <TableHead className="font-semibold">Run ID</TableHead>
-                                                <TableHead className="font-semibold">Agent Name</TableHead>
-                                                <TableHead className="font-semibold">Call Type</TableHead>
-                                                <TableHead className="font-semibold">Phone Number</TableHead>
-                                                <TableHead className="font-semibold">Disposition</TableHead>
-                                                <TableHead className="font-semibold">Date</TableHead>
-                                                <TableHead className="font-semibold text-right">Duration</TableHead>
+                                                <TableHead className="font-semibold">{t('usage.runId')}</TableHead>
+                                                <TableHead className="font-semibold">{t('usage.agentName')}</TableHead>
+                                                <TableHead className="font-semibold">{t('usage.callType')}</TableHead>
+                                                <TableHead className="font-semibold">{t('usage.phoneNumber')}</TableHead>
+                                                <TableHead className="font-semibold">{t('usage.disposition')}</TableHead>
+                                                <TableHead className="font-semibold">{t('common.date')}</TableHead>
+                                                <TableHead className="font-semibold text-right">{t('common.duration')}</TableHead>
                                                 <TableHead className="font-semibold text-right">
-                                                    {organizationPricing?.price_per_second_usd ? 'Cost (USD)' : 'Tokens'}
+                                                    {organizationPricing?.price_per_second_usd ? t('usage.costUsd') : t('usage.tokens')}
                                                 </TableHead>
-                                                <TableHead className="font-semibold">Actions</TableHead>
+                                                <TableHead className="font-semibold">{t('common.actions')}</TableHead>
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
@@ -533,7 +530,7 @@ export default function UsagePage() {
                                                     >
                                                         #{run.id}
                                                     </TableCell>
-                                                    <TableCell>{run.workflow_name || 'Unknown'}</TableCell>
+                                                    <TableCell>{run.workflow_name || t('common.unknown')}</TableCell>
                                                     <TableCell>
                                                         <CallTypeCell mode={run.mode} callType={run.call_type} />
                                                     </TableCell>
@@ -551,14 +548,14 @@ export default function UsagePage() {
                                                             <span className="text-sm text-muted-foreground">-</span>
                                                         )}
                                                     </TableCell>
-                                                    <TableCell>{formatDateTime(run.created_at)}</TableCell>
+                                                    <TableCell>{formatRunDateTime(run.created_at)}</TableCell>
                                                     <TableCell className="text-right">
                                                         {formatDuration(run.call_duration_seconds)}
                                                     </TableCell>
                                                     <TableCell className="text-right font-medium">
                                                         {organizationPricing?.price_per_second_usd && run.charge_usd !== undefined && run.charge_usd !== null
-                                                            ? `$${run.charge_usd.toFixed(2)}`
-                                                            : run.dograh_token_usage.toLocaleString()
+                                                            ? formatCurrency(run.charge_usd)
+                                                            : formatNumber(run.dograh_token_usage)
                                                         }
                                                     </TableCell>
                                                     <TableCell>
@@ -579,8 +576,8 @@ export default function UsagePage() {
                                 {appliedFilters.length > 0 && (
                                     <div className="mt-4 p-3 bg-muted rounded-md">
                                         <p className="text-sm text-muted-foreground">
-                                            Total for filtered period: <span className="font-semibold text-foreground">
-                                                {usageHistory.total_dograh_tokens.toLocaleString()} Dograh Tokens
+                                            {t('usage.totalFilteredPeriod')} <span className="font-semibold text-foreground">
+                                                {formatNumber(usageHistory.total_dograh_tokens)} {t('usage.dograhTokens')}
                                             </span>
                                             {' • '}
                                             <span className="font-semibold text-foreground">
@@ -594,7 +591,7 @@ export default function UsagePage() {
                                 {usageHistory.total_pages > 1 && (
                                     <div className="flex items-center justify-between mt-6">
                                         <p className="text-sm text-muted-foreground">
-                                            Page {usageHistory.page} of {usageHistory.total_pages} ({usageHistory.total_count} total runs)
+                                            {t('usage.pageSummary', { page: usageHistory.page, totalPages: usageHistory.total_pages, totalCount: formatNumber(usageHistory.total_count) })}
                                         </p>
                                         <div className="flex gap-2">
                                             <Button
@@ -604,7 +601,7 @@ export default function UsagePage() {
                                                 disabled={currentPage === 1}
                                             >
                                                 <ChevronLeft className="h-4 w-4" />
-                                                Previous
+                                                {t('common.previous')}
                                             </Button>
                                             <Button
                                                 variant="outline"
@@ -612,7 +609,7 @@ export default function UsagePage() {
                                                 onClick={() => handlePageChange(currentPage + 1)}
                                                 disabled={currentPage === usageHistory.total_pages}
                                             >
-                                                Next
+                                                {t('common.next')}
                                                 <ChevronRight className="h-4 w-4" />
                                             </Button>
                                         </div>
@@ -620,7 +617,7 @@ export default function UsagePage() {
                                 )}
                             </>
                         ) : (
-                            <p className="text-center py-8 text-muted-foreground">No runs found</p>
+                            <p className="text-center py-8 text-muted-foreground">{t('usage.noRuns')}</p>
                         )}
                     </CardContent>
                 </Card>

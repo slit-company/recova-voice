@@ -9,6 +9,7 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
+import { useLocale } from '@/context/LocaleContext';
 
 interface DailyUsageTableProps {
     data: DailyUsageBreakdownResponse | null;
@@ -16,22 +17,14 @@ interface DailyUsageTableProps {
 }
 
 export function DailyUsageTable({ data, isLoading }: DailyUsageTableProps) {
-    // Format date for display
-    const formatDate = (dateString: string) => {
-        const date = new Date(dateString);
-        return date.toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric'
-        });
-    };
+    const { t, formatCurrency, formatDate, formatNumber } = useLocale();
 
     if (isLoading) {
         return (
             <Card>
                 <CardHeader>
-                    <CardTitle>Daily Usage Breakdown</CardTitle>
-                    <CardDescription>Last 7 days of usage</CardDescription>
+                    <CardTitle>{t('dailyUsage.title')}</CardTitle>
+                    <CardDescription>{t('dailyUsage.description')}</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <div className="animate-pulse space-y-3">
@@ -48,11 +41,11 @@ export function DailyUsageTable({ data, isLoading }: DailyUsageTableProps) {
         return (
             <Card>
                 <CardHeader>
-                    <CardTitle>Daily Usage Breakdown</CardTitle>
-                    <CardDescription>Last 7 days of usage</CardDescription>
+                    <CardTitle>{t('dailyUsage.title')}</CardTitle>
+                    <CardDescription>{t('dailyUsage.description')}</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <p className="text-center py-8 text-gray-500">No usage data available</p>
+                    <p className="text-center py-8 text-gray-500">{t('dailyUsage.noData')}</p>
                 </CardContent>
             </Card>
         );
@@ -61,49 +54,53 @@ export function DailyUsageTable({ data, isLoading }: DailyUsageTableProps) {
     return (
         <Card>
             <CardHeader>
-                <CardTitle>Daily Usage Breakdown</CardTitle>
-                <CardDescription>Last 7 days of usage</CardDescription>
+                <CardTitle>{t('dailyUsage.title')}</CardTitle>
+                <CardDescription>{t('dailyUsage.description')}</CardDescription>
             </CardHeader>
             <CardContent>
                 <div className="bg-white border rounded-lg overflow-hidden shadow-sm">
                     <Table>
                         <TableHeader>
                             <TableRow className="bg-gray-50">
-                                <TableHead className="font-semibold">Date</TableHead>
-                                <TableHead className="font-semibold text-right">Usage (minutes)</TableHead>
-                                <TableHead className="font-semibold text-right">Cost (USD)</TableHead>
-                                <TableHead className="font-semibold text-right">Calls</TableHead>
+                                <TableHead className="font-semibold">{t('common.date')}</TableHead>
+                                <TableHead className="font-semibold text-right">{t('dailyUsage.usageMinutes')}</TableHead>
+                                <TableHead className="font-semibold text-right">{t('dailyUsage.costUsd')}</TableHead>
+                                <TableHead className="font-semibold text-right">{t('dailyUsage.calls')}</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {data.breakdown.map((day) => (
                                 <TableRow key={day.date}>
                                     <TableCell className="font-medium">
-                                        {formatDate(day.date)}
+                                        {formatDate(day.date, {
+                                            month: 'short',
+                                            day: 'numeric',
+                                            year: 'numeric',
+                                        })}
                                     </TableCell>
                                     <TableCell className="text-right">
-                                        {day.minutes.toFixed(1)}
+                                        {formatNumber(day.minutes, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                                     </TableCell>
                                     <TableCell className="text-right font-medium">
-                                        ${(day.cost_usd || 0).toFixed(2)}
+                                        {formatCurrency(day.cost_usd || 0)}
                                     </TableCell>
                                     <TableCell className="text-right">
-                                        {day.call_count}
+                                        {formatNumber(day.call_count)}
                                     </TableCell>
                                 </TableRow>
                             ))}
                         </TableBody>
                         <TableFooter>
                             <TableRow className="bg-gray-50 font-semibold">
-                                <TableCell>Total</TableCell>
+                                <TableCell>{t('common.total')}</TableCell>
                                 <TableCell className="text-right">
-                                    {data.total_minutes.toFixed(1)}
+                                    {formatNumber(data.total_minutes, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                                 </TableCell>
                                 <TableCell className="text-right">
-                                    ${(data.total_cost_usd || 0).toFixed(2)}
+                                    {formatCurrency(data.total_cost_usd || 0)}
                                 </TableCell>
                                 <TableCell className="text-right">
-                                    {data.breakdown.reduce((sum, day) => sum + day.call_count, 0)}
+                                    {formatNumber(data.breakdown.reduce((sum, day) => sum + day.call_count, 0))}
                                 </TableCell>
                             </TableRow>
                         </TableFooter>

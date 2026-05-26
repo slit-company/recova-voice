@@ -11,6 +11,7 @@ import { SentryErrorBoundary } from "@/components/SentryErrorBoundary";
 import SpinLoader from "@/components/SpinLoader";
 import { Toaster } from "@/components/ui/sonner";
 import { AppConfigProvider } from "@/context/AppConfigContext";
+import { LocaleProvider } from "@/context/LocaleContext";
 import { OnboardingProvider } from "@/context/OnboardingContext";
 import { TelephonyConfigWarningsProvider } from "@/context/TelephonyConfigWarningsContext";
 import { UserConfigProvider } from "@/context/UserConfigContext";
@@ -66,7 +67,8 @@ export default function RootLayout({
             <AppConfigProvider>
               <Suspense fallback={<SpinLoader />}>
                 <UserConfigProvider>
-                  <TelephonyConfigWarningsProvider>
+                  <LocaleProvider>
+                    <TelephonyConfigWarningsProvider>
                     <OnboardingProvider>
                       <PostHogIdentify />
                       <AppLayout>
@@ -75,7 +77,8 @@ export default function RootLayout({
                       <Toaster />
                       <ChatwootWidget />
                     </OnboardingProvider>
-                  </TelephonyConfigWarningsProvider>
+                    </TelephonyConfigWarningsProvider>
+                  </LocaleProvider>
                 </UserConfigProvider>
               </Suspense>
             </AppConfigProvider>

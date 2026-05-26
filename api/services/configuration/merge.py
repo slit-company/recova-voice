@@ -74,4 +74,7 @@ def merge_user_configurations(
     if "timezone" in incoming_partial:
         merged["timezone"] = incoming_partial["timezone"]
 
+    if "ui_language" in incoming_partial:
+        merged["ui_language"] = incoming_partial["ui_language"]
+
     return UserConfiguration.model_validate(merged)

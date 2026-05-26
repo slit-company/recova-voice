@@ -3,6 +3,7 @@
 import { ArrowDownLeft, ArrowUpRight, Globe, MessageSquare, Phone } from "lucide-react";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useLocale } from "@/context/LocaleContext";
 
 const WEB_CALL_MODES = new Set(["webrtc", "smallwebrtc"]);
 const TEXT_CHAT_MODES = new Set(["textchat"]);
@@ -20,17 +21,19 @@ export function CallTypeCell({
     mode?: string | null;
     callType?: string | null;
 }) {
+    const { t } = useLocale();
+
     if (!mode && !callType) {
         return <span className="text-sm text-muted-foreground">-</span>;
     }
 
     const channel = getCallChannel(mode);
     const ChannelIcon = channel === "chat" ? MessageSquare : channel === "web" ? Globe : Phone;
-    const channelLabel = channel === "chat" ? "Text chat" : channel === "web" ? "Web call" : "Phone call";
+    const channelLabel = channel === "chat" ? t('callType.chat') : channel === "web" ? t('callType.web') : t('callType.phone');
 
     const isInbound = callType === "inbound";
     const DirectionIcon = isInbound ? ArrowDownLeft : ArrowUpRight;
-    const directionLabel = isInbound ? "Inbound" : "Outbound";
+    const directionLabel = isInbound ? t('callType.inbound') : t('callType.outbound');
 
     return (
         <Tooltip>

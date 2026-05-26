@@ -4076,6 +4076,10 @@ export type UserConfigurationRequestResponseSchema = {
      */
     timezone?: string | null;
     /**
+     * Ui Language
+     */
+    ui_language?: "en" | "ko" | null;
+    /**
      * Organization Pricing
      */
     organization_pricing?: {

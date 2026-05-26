@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from typing import Literal
+
 from pydantic import BaseModel, model_validator
 
 from api.services.configuration.registry import (
@@ -20,6 +22,7 @@ class UserConfiguration(BaseModel):
     is_realtime: bool = False
     test_phone_number: str | None = None
     timezone: str | None = None
+    ui_language: Literal["en", "ko"] = "en"
     last_validated_at: datetime | None = None
 
     @model_validator(mode="before")

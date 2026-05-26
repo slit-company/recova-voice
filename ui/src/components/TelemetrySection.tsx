@@ -12,9 +12,11 @@ import type { LangfuseCredentialsResponse } from "@/client/types.gen";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useLocale } from "@/context/LocaleContext";
 import { useAuth } from "@/lib/auth";
 
 export function TelemetrySection() {
+  const { t } = useLocale();
   const { user, loading: authLoading } = useAuth();
   const [credentials, setCredentials] = useState<LangfuseCredentialsResponse>({
     host: "",
@@ -61,10 +63,10 @@ export function TelemetrySection() {
       if (error) {
         throw new Error("Failed to save");
       }
-      toast.success("Telemetry credentials saved");
+      toast.success(t('telemetry.saved'));
       await fetchCredentials();
     } catch {
-      toast.error("Failed to save telemetry credentials");
+      toast.error(t('telemetry.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -75,25 +77,25 @@ export function TelemetrySection() {
     try {
       await deleteLangfuseCredentialsApiV1OrganizationsLangfuseCredentialsDelete();
       setCredentials({ host: "", public_key: "", secret_key: "", configured: false });
-      toast.success("Telemetry credentials removed");
+      toast.success(t('telemetry.removed'));
     } catch {
-      toast.error("Failed to remove telemetry credentials");
+      toast.error(t('telemetry.removeFailed'));
     } finally {
       setSaving(false);
     }
   }
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading...</p>;
+    return <p className="text-sm text-muted-foreground">{t('telemetry.loading')}</p>;
   }
 
   return (
     <form onSubmit={handleSave} className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Connect your Langfuse project to receive call tracing data.
+        {t('telemetry.descriptionText')}
       </p>
       <div className="space-y-2">
-        <Label htmlFor="langfuse-host">Host</Label>
+        <Label htmlFor="langfuse-host">{t('telemetry.host')}</Label>
         <Input
           id="langfuse-host"
           placeholder="https://cloud.langfuse.com"
@@ -103,7 +105,7 @@ export function TelemetrySection() {
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="langfuse-public-key">Public Key</Label>
+        <Label htmlFor="langfuse-public-key">{t('telemetry.publicKey')}</Label>
         <Input
           id="langfuse-public-key"
           placeholder="pk-lf-..."
@@ -113,7 +115,7 @@ export function TelemetrySection() {
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="langfuse-secret-key">Secret Key</Label>
+        <Label htmlFor="langfuse-secret-key">{t('telemetry.secretKey')}</Label>
         <Input
           id="langfuse-secret-key"
           type="password"
@@ -125,11 +127,11 @@ export function TelemetrySection() {
       </div>
       <div className="flex gap-2">
         <Button type="submit" disabled={saving}>
-          {saving ? "Saving..." : "Save"}
+          {saving ? t('common.saving') : t('common.save')}
         </Button>
         {credentials.configured && (
           <Button type="button" variant="destructive" disabled={saving} onClick={handleDelete}>
-            Remove
+            {t('common.remove')}
           </Button>
         )}
       </div>
