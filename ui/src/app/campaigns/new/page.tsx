@@ -26,6 +26,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { useLocale } from '@/context/LocaleContext';
 import { useAuth } from '@/lib/auth';
 
 import CampaignAdvancedSettings, { getTimezoneValue, type TimeSlot } from '../CampaignAdvancedSettings';
@@ -33,6 +34,7 @@ import CsvUploadSelector from '../CsvUploadSelector';
 
 export default function NewCampaignPage() {
     const { user, getAccessToken, redirectToLogin, loading } = useAuth();
+    const { t } = useLocale();
     const router = useRouter();
 
     // Form state
@@ -240,7 +242,7 @@ export default function NewCampaignPage() {
         setCreateError(null);
 
         if (!campaignName || !selectedWorkflowId || !sourceId || !selectedTelephonyConfigId) {
-            toast.error('Please fill in all fields');
+            toast.error(t('campaignNew.fillAllFields'));
             return;
         }
 
@@ -248,14 +250,14 @@ export default function NewCampaignPage() {
         const maxConcurrencyValue = maxConcurrency ? parseInt(maxConcurrency) : null;
         if (maxConcurrencyValue !== null) {
             if (isNaN(maxConcurrencyValue) || maxConcurrencyValue < 1 || maxConcurrencyValue > 100) {
-                toast.error('Max concurrent calls must be between 1 and 100');
+                toast.error(t('campaignNew.maxConcurrentRange'));
                 return;
             }
             if (maxConcurrencyValue > effectiveLimit) {
                 if (availableFromNumbersCount > 0 && availableFromNumbersCount < orgConcurrentLimit) {
-                    toast.error(`Max concurrent calls cannot exceed ${effectiveLimit}. The selected configuration has ${availableFromNumbersCount} phone number(s) — add more CLIs to increase concurrency.`);
+                    toast.error(t('campaignNew.maxConcurrentPhoneLimit', { limit: effectiveLimit, count: availableFromNumbersCount }));
                 } else {
-                    toast.error(`Max concurrent calls cannot exceed organization limit (${effectiveLimit})`);
+                    toast.error(t('campaignNew.maxConcurrentOrgLimit', { limit: effectiveLimit }));
                 }
                 return;
             }
@@ -314,19 +316,19 @@ export default function NewCampaignPage() {
             if (response.error) {
                 // Extract error message from API response
                 const errorDetail = (response.error as { detail?: string })?.detail;
-                const errorMessage = errorDetail || 'Failed to create campaign';
+                const errorMessage = errorDetail || t('campaignNew.createFailed');
                 setCreateError(errorMessage);
                 toast.error(errorMessage);
                 return;
             }
 
             if (response.data) {
-                toast.success('Campaign created successfully');
+                toast.success(t('campaignNew.createSuccess'));
                 router.push(`/campaigns/${response.data.id}`);
             }
         } catch (error: unknown) {
             console.error('Failed to create campaign:', error);
-            const errorMessage = 'Failed to create campaign';
+            const errorMessage = t('campaignNew.createFailed');
             setCreateError(errorMessage);
             toast.error(errorMessage);
         } finally {
@@ -355,54 +357,54 @@ export default function NewCampaignPage() {
                     className="mb-4"
                 >
                     <ArrowLeft className="h-4 w-4 mr-2" />
-                    Back to Campaigns
+                    {t('campaignNew.back')}
                 </Button>
-                <h1 className="text-3xl font-bold mb-2">Create New Campaign</h1>
-                <p className="text-muted-foreground">Set up a new campaign to execute workflows at scale</p>
+                <h1 className="text-3xl font-bold mb-2">{t('campaignNew.title')}</h1>
+                <p className="text-muted-foreground">{t('campaignNew.description')}</p>
             </div>
 
             <Card>
                     <CardHeader>
-                        <CardTitle>Campaign Details</CardTitle>
+                        <CardTitle>{t('campaignNew.details')}</CardTitle>
                         <CardDescription>
-                            Configure your campaign settings
+                            {t('campaignNew.detailsDescription')}
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
                         <form onSubmit={handleSubmit} className="space-y-6">
                             <div className="space-y-2">
-                                <Label htmlFor="campaign-name">Campaign Name</Label>
+                                <Label htmlFor="campaign-name">{t('campaignNew.name')}</Label>
                                 <Input
                                     id="campaign-name"
-                                    placeholder="Enter campaign name"
+                                    placeholder={t('campaignNew.namePlaceholder')}
                                     value={campaignName}
                                     onChange={(e) => setCampaignName(e.target.value)}
                                     maxLength={255}
                                     required
                                 />
                                 <p className="text-sm text-muted-foreground">
-                                    Choose a descriptive name for your campaign
+                                    {t('campaignNew.nameHelp')}
                                 </p>
                             </div>
 
                             <div className="space-y-2">
-                                <Label htmlFor="workflow">Workflow</Label>
+                                <Label htmlFor="workflow">{t('campaignNew.workflow')}</Label>
                                 <Select
                                     value={selectedWorkflowId}
                                     onValueChange={setSelectedWorkflowId}
                                     required
                                 >
                                     <SelectTrigger id="workflow">
-                                        <SelectValue placeholder="Select a workflow" />
+                                        <SelectValue placeholder={t('campaignNew.selectWorkflow')} />
                                     </SelectTrigger>
                                     <SelectContent>
                                         {isLoadingWorkflows ? (
                                             <SelectItem value="loading" disabled>
-                                                Loading workflows...
+                                                {t('campaignNew.loadingWorkflows')}
                                             </SelectItem>
                                         ) : workflows.length === 0 ? (
                                             <SelectItem value="none" disabled>
-                                                No workflows found
+                                                {t('campaignNew.noWorkflows')}
                                             </SelectItem>
                                         ) : (
                                             workflows.map((workflow) => (
@@ -417,22 +419,22 @@ export default function NewCampaignPage() {
                                     </SelectContent>
                                 </Select>
                                 <p className="text-sm text-muted-foreground">
-                                    Select the workflow to execute for each row in the data source
+                                    {t('campaignNew.workflowHelp')}
                                 </p>
                             </div>
 
                             <div className="space-y-2">
-                                <Label htmlFor="telephony-config">Telephony Configuration</Label>
+                                <Label htmlFor="telephony-config">{t('campaignNew.telephonyConfig')}</Label>
                                 {!isLoadingTelephonyConfigs && telephonyConfigs.length === 0 ? (
                                     <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                                        No telephony configurations yet.{' '}
+                                        {t('campaignNew.noTelephonyStart')}{' '}
                                         <Link
                                             href="/telephony-configurations"
                                             className="underline text-foreground"
                                         >
-                                            Add one
+                                            {t('campaignNew.addOne')}
                                         </Link>{' '}
-                                        to create a campaign.
+                                        {t('campaignNew.noTelephonyEnd')}
                                     </div>
                                 ) : (
                                     <Select
@@ -441,12 +443,12 @@ export default function NewCampaignPage() {
                                         required
                                     >
                                         <SelectTrigger id="telephony-config">
-                                            <SelectValue placeholder="Select a telephony configuration" />
+                                            <SelectValue placeholder={t('campaignNew.selectTelephony')} />
                                         </SelectTrigger>
                                         <SelectContent>
                                             {isLoadingTelephonyConfigs ? (
                                                 <SelectItem value="loading" disabled>
-                                                    Loading configurations...
+                                                    {t('campaignNew.loadingConfigurations')}
                                                 </SelectItem>
                                             ) : (
                                                 telephonyConfigs.map((config) => (
@@ -455,7 +457,7 @@ export default function NewCampaignPage() {
                                                         value={config.id.toString()}
                                                     >
                                                         {config.name} ({config.provider})
-                                                        {config.is_default_outbound ? ' — default' : ''}
+                                                        {config.is_default_outbound ? ` — ${t('campaignNew.default')}` : ''}
                                                     </SelectItem>
                                                 ))
                                             )}
@@ -463,12 +465,12 @@ export default function NewCampaignPage() {
                                     </Select>
                                 )}
                                 <p className="text-sm text-muted-foreground">
-                                    Outbound calls for this campaign will use this configuration&apos;s caller IDs
+                                    {t('campaignNew.telephonyHelp')}
                                 </p>
                             </div>
 
                             <div className="space-y-2">
-                                <Label htmlFor="source-type">Data Source Type</Label>
+                                <Label htmlFor="source-type">{t('campaignNew.dataSourceType')}</Label>
                                 <Select
                                     value={sourceType}
                                     onValueChange={(value) => {
@@ -479,14 +481,14 @@ export default function NewCampaignPage() {
                                     required
                                 >
                                     <SelectTrigger id="source-type">
-                                        <SelectValue placeholder="Select source type" />
+                                        <SelectValue placeholder={t('campaignNew.selectSourceType')} />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="csv">CSV File</SelectItem>
+                                        <SelectItem value="csv">{t('campaignNew.csvFile')}</SelectItem>
                                     </SelectContent>
                                 </Select>
                                 <p className="text-sm text-muted-foreground">
-                                    Choose where your contact data is stored
+                                    {t('campaignNew.sourceHelp')}
                                 </p>
                             </div>
 
@@ -502,7 +504,7 @@ export default function NewCampaignPage() {
                                 className="border rounded-lg"
                             >
                                 <CollapsibleTrigger className="flex items-center justify-between w-full p-4 hover:bg-muted/50 transition-colors">
-                                    <span className="font-medium">Advanced Settings</span>
+                                    <span className="font-medium">{t('campaignNew.advanced')}</span>
                                     {showAdvancedSettings ? (
                                         <ChevronDown className="h-4 w-4" />
                                     ) : (
@@ -557,7 +559,7 @@ export default function NewCampaignPage() {
                                     type="submit"
                                     disabled={isSubmitting || !campaignName || !selectedWorkflowId || !sourceId || !selectedTelephonyConfigId}
                                 >
-                                    {isSubmitting ? 'Creating...' : 'Create Campaign'}
+                                    {isSubmitting ? t('campaignNew.creating') : t('campaignNew.create')}
                                 </Button>
                                 <Button
                                     type="button"
@@ -565,7 +567,7 @@ export default function NewCampaignPage() {
                                     onClick={handleBack}
                                     disabled={isSubmitting}
                                 >
-                                    Cancel
+                                    {t('common.cancel')}
                                 </Button>
                             </div>
                         </form>

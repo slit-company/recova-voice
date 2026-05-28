@@ -19,6 +19,7 @@ import {
   type TranslationKey,
   type UiLanguage,
 } from '@/lib/i18n';
+import { applyKoreanDomOverrides } from '@/lib/ko-dom-overrides';
 
 type FormatDateOptions = Intl.DateTimeFormatOptions & {
   timeZone?: string;
@@ -75,6 +76,11 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.lang = language;
+  }, [language]);
+
+  useEffect(() => {
+    if (language !== 'ko') return undefined;
+    return applyKoreanDomOverrides();
   }, [language]);
 
   const locale = useMemo(() => getLocaleTag(language), [language]);

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useLocale } from "@/context/LocaleContext";
 import { useAuth } from "@/lib/auth";
 
 import RecordingsList from "./RecordingsList";
@@ -13,6 +14,7 @@ import { RecordingsUploadDialog } from "./RecordingsUploadDialog";
 
 export default function RecordingsPage() {
     const { user, redirectToLogin, loading } = useAuth();
+    const { t } = useLocale();
     const [isUploadOpen, setIsUploadOpen] = useState(false);
     const [refreshKey, setRefreshKey] = useState(0);
 
@@ -36,13 +38,12 @@ export default function RecordingsPage() {
     return (
         <div className="container mx-auto px-4 py-8">
             <div className="mb-8">
-                <h1 className="text-3xl font-bold mb-2">Recordings</h1>
+                <h1 className="text-3xl font-bold mb-2">{t("recordings.title")}</h1>
                 <p className="text-muted-foreground">
-                    Manage audio recordings for your organization. Use{" "}
-                    <code className="rounded bg-muted px-1 text-xs">@</code> in prompt fields to insert them,
-                    or as transition messages in tool calls.{" "}
+                    {t("recordings.descriptionStart")}{" "}
+                    <code className="rounded bg-muted px-1 text-xs">@</code> {t("recordings.descriptionEnd")}{" "}
                     <a href="https://docs.dograh.com/voice-agent/pre-recorded-audio" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 underline">
-                        Learn more <ExternalLink className="h-3 w-3" />
+                        {t("tools.learnMore")} <ExternalLink className="h-3 w-3" />
                     </a>
                 </p>
             </div>
@@ -51,14 +52,14 @@ export default function RecordingsPage() {
                 <CardHeader>
                     <div className="flex justify-between items-center">
                         <div>
-                            <CardTitle>All Recordings</CardTitle>
+                            <CardTitle>{t("recordings.allTitle")}</CardTitle>
                             <CardDescription>
-                                Audio recordings shared across all agents in your organization
+                                {t("recordings.allDescription")}
                             </CardDescription>
                         </div>
                         <Button onClick={() => setIsUploadOpen(true)}>
                             <Upload className="w-4 h-4 mr-2" />
-                            Upload Recording
+                            {t("recordings.upload")}
                         </Button>
                     </div>
                 </CardHeader>

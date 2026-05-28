@@ -9,8 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useLocale } from "@/context/LocaleContext";
 
 export default function LoginPage() {
+  const { t } = useLocale();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -26,7 +28,7 @@ export default function LoginPage() {
 
       if (res.error || !res.data) {
         const detail = (res.error as { detail?: string })?.detail;
-        toast.error(detail || "Login failed");
+        toast.error(detail || t("auth.login.failed"));
         return;
       }
 
@@ -39,7 +41,7 @@ export default function LoginPage() {
 
       window.location.href = "/after-sign-in";
     } catch {
-      toast.error("An error occurred. Please try again.");
+      toast.error(t("auth.genericError"));
     } finally {
       setLoading(false);
     }
@@ -49,13 +51,13 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">Sign in</CardTitle>
-          <CardDescription>Enter your email and password to continue</CardDescription>
+          <CardTitle className="text-2xl">{t("auth.login.title")}</CardTitle>
+          <CardDescription>{t("auth.login.description")}</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t("auth.email")}</Label>
               <Input
                 id="email"
                 type="email"
@@ -66,24 +68,24 @@ export default function LoginPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("auth.password")}</Label>
               <Input
                 id="password"
                 type="password"
-                placeholder="Enter your password"
+                placeholder={t("auth.login.passwordPlaceholder")}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Signing in..." : "Sign in"}
+              {loading ? t("auth.login.submitting") : t("auth.login.submit")}
             </Button>
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
-            Don&apos;t have an account?{" "}
+            {t("auth.login.noAccount")}{" "}
             <Link href="/auth/signup" className="text-primary underline-offset-4 hover:underline">
-              Sign up
+              {t("auth.login.signupLink")}
             </Link>
           </p>
         </CardContent>

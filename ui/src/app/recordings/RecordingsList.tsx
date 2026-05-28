@@ -13,10 +13,12 @@ import type { RecordingResponseSchema } from "@/client/types.gen";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useLocale } from "@/context/LocaleContext";
 import { useAudioPlayback } from "@/hooks/useAudioPlayback";
 import logger from "@/lib/logger";
 
 export default function RecordingsList({ refreshKey }: { refreshKey?: number }) {
+    const { t, formatDateTime } = useLocale();
     const [recordings, setRecordings] = useState<RecordingResponseSchema[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
@@ -39,24 +41,24 @@ export default function RecordingsList({ refreshKey }: { refreshKey?: number }) 
             });
 
             if (response.error || !response.data) {
-                throw new Error("Failed to fetch recordings");
+                throw new Error(t("recordings.fetchFailed"));
             }
 
             setRecordings(response.data.recordings);
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to fetch recordings");
+            setError(err instanceof Error ? err.message : t("recordings.fetchFailed"));
             logger.error("Error fetching recordings:", err);
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [t]);
 
     useEffect(() => {
         fetchRecordings();
     }, [fetchRecordings, refreshKey]);
 
     const handleDelete = async (recordingId: string) => {
-        if (!confirm("Are you sure you want to delete this recording?")) return;
+        if (!confirm(t("recordings.deleteConfirm"))) return;
 
         try {
             const response = await deleteRecordingApiV1WorkflowRecordingsRecordingIdDelete({
@@ -64,13 +66,13 @@ export default function RecordingsList({ refreshKey }: { refreshKey?: number }) 
             });
 
             if (response.error) {
-                throw new Error("Failed to delete recording");
+                throw new Error(t("recordings.deleteFailed"));
             }
 
-            toast.success("Recording deleted");
+            toast.success(t("recordings.deleted"));
             fetchRecordings();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Failed to delete recording");
+            toast.error(err instanceof Error ? err.message : t("recordings.deleteFailed"));
             logger.error("Error deleting recording:", err);
         }
     };
@@ -79,7 +81,7 @@ export default function RecordingsList({ refreshKey }: { refreshKey?: number }) 
         try {
             await togglePlayback(rec.recording_id, rec.storage_key, rec.storage_backend);
         } catch {
-            toast.error("Failed to play recording");
+            toast.error(t("recordings.playFailed"));
         }
     };
 
@@ -98,11 +100,11 @@ export default function RecordingsList({ refreshKey }: { refreshKey?: number }) 
     const saveRecordingId = async (rec: RecordingResponseSchema) => {
         const newId = editValue.trim();
         if (!newId) {
-            setEditError("ID cannot be empty");
+            setEditError(t("recordings.idEmpty"));
             return;
         }
         if (!/^[a-zA-Z0-9_-]+$/.test(newId)) {
-            setEditError("Only letters, numbers, hyphens, and underscores");
+            setEditError(t("recordings.idInvalid"));
             return;
         }
         if (newId === rec.recording_id) {
@@ -119,21 +121,18 @@ export default function RecordingsList({ refreshKey }: { refreshKey?: number }) 
 
             if (response.error) {
                 const errData = response.error as { detail?: string };
-                throw new Error(errData?.detail || "Failed to update recording ID");
+                throw new Error(errData?.detail || t("recordings.updateIdFailed"));
             }
 
-            toast.success(`Recording ID updated to "${newId}". All workflow references have been updated.`);
+            toast.success(t("recordings.idUpdated", { id: newId }));
             cancelEditing();
             fetchRecordings();
         } catch (err) {
-            setEditError(err instanceof Error ? err.message : "Failed to update recording ID");
+            setEditError(err instanceof Error ? err.message : t("recordings.updateIdFailed"));
         }
     };
 
-    const formatDate = (dateString: string): string => {
-        const date = new Date(dateString);
-        return date.toLocaleDateString() + " " + date.toLocaleTimeString();
-    };
+    const formatDate = (dateString: string): string => formatDateTime(dateString);
 
     const filteredRecordings = recordings.filter((rec) => {
         if (!searchQuery) return true;
@@ -177,7 +176,7 @@ export default function RecordingsList({ refreshKey }: { refreshKey?: number }) 
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                        placeholder="Search by filename, transcript, or ID..."
+                        placeholder={t("recordings.searchPlaceholder")}
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="pl-10"
@@ -195,8 +194,9 @@ export default function RecordingsList({ refreshKey }: { refreshKey?: number }) 
 
             {/* Results count */}
             <div className="text-sm text-muted-foreground">
-                {filteredRecordings.length} recording{filteredRecordings.length !== 1 ? "s" : ""}
-                {searchQuery && ` matching "${searchQuery}"`}
+                {searchQuery
+                    ? t("recordings.resultsMatching", { count: filteredRecordings.length, plural: filteredRecordings.length !== 1 ? "s" : "", query: searchQuery })
+                    : t("recordings.results", { count: filteredRecordings.length, plural: filteredRecordings.length !== 1 ? "s" : "" })}
             </div>
 
             {/* Recordings List */}
@@ -205,8 +205,8 @@ export default function RecordingsList({ refreshKey }: { refreshKey?: number }) 
                     <AudioLines className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
                     <p className="text-muted-foreground">
                         {searchQuery
-                            ? "No recordings match your search"
-                            : "No recordings yet"}
+                            ? t("recordings.noSearchResults")
+                            : t("recordings.empty")}
                     </p>
                 </div>
             ) : (
@@ -272,7 +272,7 @@ export default function RecordingsList({ refreshKey }: { refreshKey?: number }) 
                                                         onClick={() => startEditing(rec)}
                                                     >
                                                         <Pencil className="w-3 h-3" />
-                                                        Edit ID
+                                                        {t("recordings.editId")}
                                                     </Button>
                                                 </div>
                                             )}

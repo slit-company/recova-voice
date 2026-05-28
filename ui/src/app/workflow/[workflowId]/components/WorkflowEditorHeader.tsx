@@ -27,6 +27,7 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 import { useSidebar } from "@/components/ui/sidebar";
+import { useLocale } from "@/context/LocaleContext";
 
 interface WorkflowEditorHeaderProps {
     workflowName: string;
@@ -67,6 +68,7 @@ export const WorkflowEditorHeader = ({
     renameWorkflow,
 }: WorkflowEditorHeaderProps) => {
     const router = useRouter();
+    const { t } = useLocale();
     const { toggleSidebar } = useSidebar();
     const [savingWorkflow, setSavingWorkflow] = useState(false);
     const [duplicating, setDuplicating] = useState(false);
@@ -396,12 +398,12 @@ export const WorkflowEditorHeader = ({
                         {publishing ? (
                             <>
                                 <LoaderCircle className="w-4 h-4 mr-2 animate-spin" />
-                                Publishing...
+                                {t("workflowHeader.publishing")}
                             </>
                         ) : (
                             <>
                                 <Rocket className="w-4 h-4 mr-2" />
-                                Publish
+                                {t("workflowHeader.publish")}
                             </>
                         )}
                     </Button>
@@ -415,7 +417,7 @@ export const WorkflowEditorHeader = ({
                         onClick={onPhoneCallClick}
                     >
                         <Phone className="w-4 h-4" />
-                        Phone Call
+                        {t("workflowHeader.phoneCall")}
                     </Button>
                 )}
 
@@ -425,7 +427,7 @@ export const WorkflowEditorHeader = ({
                     onClick={onTestAgentClick}
                 >
                     <Bot className="w-4 h-4" />
-                    Test Agent
+                    {t("workflowHeader.testAgent")}
                 </Button>
 
                 {/* Save button (only shown when editing the draft) */}
@@ -438,10 +440,10 @@ export const WorkflowEditorHeader = ({
                         {savingWorkflow ? (
                             <>
                                 <LoaderCircle className="w-4 h-4 mr-2 animate-spin" />
-                                Saving...
+                                {t("common.saving")}
                             </>
                         ) : (
-                            "Save"
+                            t("common.save")
                         )}
                     </Button>
                 )}
@@ -463,7 +465,7 @@ export const WorkflowEditorHeader = ({
                             className="text-white hover:bg-[#2a2a2a] cursor-pointer"
                         >
                             <History className="w-4 h-4 mr-2" />
-                            View Runs
+                            {t("workflowHeader.viewRuns")}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                             onClick={handleDuplicate}
@@ -475,14 +477,14 @@ export const WorkflowEditorHeader = ({
                             ) : (
                                 <Copy className="w-4 h-4 mr-2" />
                             )}
-                            {duplicating ? "Duplicating..." : "Duplicate Workflow"}
+                            {duplicating ? t("workflowHeader.duplicating") : t("workflowHeader.duplicate")}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                             onClick={handleDownloadWorkflow}
                             className="text-white hover:bg-[#2a2a2a] cursor-pointer"
                         >
                             <Download className="w-4 h-4 mr-2" />
-                            Download Workflow
+                            {t("workflowHeader.download")}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                             onClick={handleCopyAgentUuid}
@@ -490,7 +492,7 @@ export const WorkflowEditorHeader = ({
                             className="text-white hover:bg-[#2a2a2a] cursor-pointer"
                         >
                             <Clipboard className="w-4 h-4 mr-2" />
-                            Copy Agent UUID
+                            {t("workflowHeader.copyAgentUuid")}
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>

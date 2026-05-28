@@ -136,6 +136,7 @@ def mask_user_config(config: UserConfiguration) -> Dict[str, Any]:
         "is_realtime": config.is_realtime,
         "test_phone_number": config.test_phone_number,
         "timezone": config.timezone,
+        "ui_language": config.ui_language,
     }
 
 
