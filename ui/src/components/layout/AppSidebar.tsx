@@ -216,7 +216,7 @@ export function AppSidebar() {
         <div className="flex items-center justify-between">
           <div className={cn("flex items-center gap-2", isCollapsed && "hidden")}>
             <Link href="/" className="notranslate flex items-center gap-2 px-2 text-xl font-bold" translate="no">
-              Dograh
+              Recova
               {versionInfo && (
                 <span className="notranslate text-xs font-normal text-muted-foreground" translate="no">
                   v{versionInfo.ui}

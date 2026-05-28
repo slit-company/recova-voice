@@ -177,7 +177,7 @@ export const KO_DOM_TEXT_OVERRIDES: Record<string, string> = {
 
   // API keys / developer
   "Developer Portal": "개발자 포털",
-  "Manage your API keys to access Dograh services programmatically": "Dograh 서비스를 프로그래밍 방식으로 사용하기 위한 API 키를 관리하세요",
+  "Manage your API keys to access Recova services programmatically": "Recova 서비스를 프로그래밍 방식으로 사용하기 위한 API 키를 관리하세요",
   "API Keys": "API 키",
   "Create New API Key": "새 API 키 생성",
   "No API keys found": "API 키가 없습니다",
@@ -185,13 +185,13 @@ export const KO_DOM_TEXT_OVERRIDES: Record<string, string> = {
   "Key Name": "키 이름",
   "API Key Created Successfully": "API 키가 생성되었습니다",
   "Your API Key:": "내 API 키:",
-  "Dograh Service Keys": "Dograh 서비스 키",
+  "Recova Service Keys": "Recova 서비스 키",
   "Create New Service Key": "새 서비스 키 생성",
   "Service Key Name": "서비스 키 이름",
   "Service Key Created Successfully": "서비스 키가 생성되었습니다",
   "Your Service Key:": "내 서비스 키:",
   "Important:": "중요:",
-  "Sign up on app.dograh.com": "app.dograh.com에서 가입",
+  "Sign up for Recova Cloud": "Recova Cloud에 가입",
 
   // Telephony
   "Telephony configurations": "전화 설정",
@@ -442,8 +442,8 @@ export const KO_DOM_TEXT_OVERRIDES: Record<string, string> = {
   'Add a div with id=&quot;dograh-inline-container&quot; where you want the widget': '위젯을 표시할 위치에 id=&quot;dograh-inline-container&quot; div를 추가하세요',
   'The widget will render inside this container': '위젯이 이 컨테이너 안에 렌더링됩니다',
   'You have full control over the container&apos;s styling': '컨테이너 스타일을 완전히 제어할 수 있습니다',
-  'Call window.DograhWidget.start() to begin the call': 'window.DograhWidget.start()를 호출해 통화를 시작하세요',
-  'Call window.DograhWidget.end() to end the call': 'window.DograhWidget.end()를 호출해 통화를 종료하세요',
+  'Call window.RecovaWidget.start() to begin the call': 'window.RecovaWidget.start()를 호출해 통화를 시작하세요',
+  'Call window.RecovaWidget.end() to end the call': 'window.RecovaWidget.end()를 호출해 통화를 종료하세요',
   'Filter Workflow Runs': '워크플로 실행 필터',
   'Filter Templates': '필터 템플릿',
   'Active Filters': '활성 필터',

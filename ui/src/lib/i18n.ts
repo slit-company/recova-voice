@@ -266,14 +266,14 @@ export const messages = {
       "Manage your platform configuration and integrations.",
     "settings.language.title": "Language",
     "settings.language.description":
-      "Choose the display language for the Dograh app. Your preference is saved to your account.",
+      "Choose the display language for the Recova app. Your preference is saved to your account.",
     "settings.language.label": "Display language",
     "settings.language.placeholder": "Select language",
     "settings.language.updated": "Language updated",
     "settings.language.failed": "Failed to update language",
     "settings.mcp.title": "MCP Server",
     "settings.mcp.description":
-      "Let AI agents access your Dograh workspace and documentation via the Model Context Protocol.",
+      "Let AI agents access your Recova workspace and documentation via the Model Context Protocol.",
     "settings.telemetry.title": "Telemetry",
     "settings.telemetry.description":
       "Configure Langfuse tracing for your voice agent calls.",
@@ -298,7 +298,7 @@ export const messages = {
     "telemetry.removed": "Telemetry credentials removed",
     "telemetry.removeFailed": "Failed to remove telemetry credentials",
 
-    "overview.welcomeOss": "Welcome to Dograh",
+    "overview.welcomeOss": "Welcome to Recova",
     "overview.welcomeUser": "Welcome{suffix}!",
     "overview.ossDescription":
       "Open source alternative to Vapi. Help us support the project by giving us a star on GitHub.",
@@ -313,7 +313,7 @@ export const messages = {
       "Set up your AI services like LLM, TTS, and STT providers",
     "overview.configureModels": "Configure Models",
     "overview.resourcesTitle": "Resources",
-    "overview.resourcesDescription": "Get help and learn more about Dograh",
+    "overview.resourcesDescription": "Get help and learn more about Recova",
     "overview.documentation": "Documentation",
     "overview.reportIssue": "Report an Issue",
 
@@ -321,13 +321,13 @@ export const messages = {
     "usage.description":
       "See all your Agent Runs across all Voice Agents. You can use filters to filter out required Agent Runs.",
     "usage.timezonePlaceholder": "Select timezone",
-    "usage.creditsTitle": "Dograh Model Credits",
+    "usage.creditsTitle": "Recova Model Credits",
     "usage.creditsDescription":
-      "These track usage of Dograh models using Dograh Service Keys.",
+      "These track usage of Recova models using Recova Service Keys.",
     "usage.creditsUsed": "Credits Used",
     "usage.remaining": "Remaining",
     "usage.noServiceKeys":
-      "No Dograh service keys configured. Set up a service key in your model configuration to see usage.",
+      "No Recova service keys configured. Set up a service key in your model configuration to see usage.",
     "usage.downloadFilteredResults": "Download Filtered Results",
     "usage.downloadFailed": "Failed to download report",
     "usage.preparing": "Preparing...",
@@ -343,7 +343,7 @@ export const messages = {
     "usage.tokens": "Tokens",
     "usage.noRuns": "No runs found",
     "usage.totalFilteredPeriod": "Total for filtered period:",
-    "usage.dograhTokens": "Dograh Tokens",
+    "usage.dograhTokens": "Recova Tokens",
     "usage.pageSummary":
       "Page {page} of {totalPages} ({totalCount} total runs)",
 
@@ -379,7 +379,7 @@ export const messages = {
 
     "apiKeys.title": "Developer Portal",
     "apiKeys.description":
-      "Manage your API keys to access Dograh services programmatically",
+      "Manage your API keys to access Recova services programmatically",
     "apiKeys.fetchFailed": "Failed to fetch API keys",
     "apiKeys.fetchServiceFailed": "Failed to fetch service keys",
     "apiKeys.nameRequired": "Please enter a name for the API key",
@@ -398,14 +398,14 @@ export const messages = {
     "apiKeys.createFirstKey": "Create Your First API Key",
     "apiKeys.fullKeyHidden": "(Full key hidden for security)",
     "apiKeys.reactivate": "Reactivate",
-    "apiKeys.serviceCardTitle": "Dograh Service Keys",
+    "apiKeys.serviceCardTitle": "Recova Service Keys",
     "apiKeys.serviceCardDescription":
-      "Manage service keys for accessing Dograh AI services (LLM, TTS, STT)",
+      "Manage service keys for accessing Recova AI services (LLM, TTS, STT)",
     "apiKeys.createServiceKey": "Create Service Key",
     "apiKeys.noServiceKeys": "No service keys found",
     "apiKeys.createFirstServiceKey": "Create Your First Service Key",
     "apiKeys.additionalServiceKeys": "To generate additional service keys,",
-    "apiKeys.signUpCloud": "Sign up on app.dograh.com",
+    "apiKeys.signUpCloud": "Sign up for Recova Cloud",
     "apiKeys.important": "Important:",
     "apiKeys.importantDescription":
       "Keep your API keys secure. Never share them publicly or commit them to version control. API keys provide full access to your organization's resources.",
@@ -424,7 +424,7 @@ export const messages = {
       "Store this key securely. It will only be shown once and cannot be retrieved later.",
     "apiKeys.serviceCreateDialogTitle": "Create New Service Key",
     "apiKeys.serviceCreateDialogDescription":
-      "Create a service key to access Dograh AI services (LLM, TTS, STT)",
+      "Create a service key to access Recova AI services (LLM, TTS, STT)",
     "apiKeys.serviceKeyName": "Service Key Name",
     "apiKeys.serviceKeyNamePlaceholder":
       "e.g., Production AI Services, Development LLM Access",
@@ -433,7 +433,7 @@ export const messages = {
       "Make sure to copy your service key now. You won't be able to see it again!",
     "apiKeys.yourServiceKey": "Your Service Key:",
     "apiKeys.serviceAccessDescription":
-      "This key provides access to Dograh AI services including LLM, Text-to-Speech, and Speech-to-Text.",
+      "This key provides access to Recova AI services including LLM, Text-to-Speech, and Speech-to-Text.",
     "apiKeys.expiresOn": "Expires on: {date}",
 
     "auth.email": "Email",
@@ -987,14 +987,14 @@ export const messages = {
     "settings.description": "플랫폼 구성과 연동을 관리하세요.",
     "settings.language.title": "언어",
     "settings.language.description":
-      "Dograh 앱의 표시 언어를 선택하세요. 선택한 언어는 계정에 저장됩니다.",
+      "Recova 앱의 표시 언어를 선택하세요. 선택한 언어는 계정에 저장됩니다.",
     "settings.language.label": "표시 언어",
     "settings.language.placeholder": "언어 선택",
     "settings.language.updated": "언어가 업데이트되었습니다",
     "settings.language.failed": "언어를 업데이트하지 못했습니다",
     "settings.mcp.title": "MCP 서버",
     "settings.mcp.description":
-      "AI 에이전트가 Model Context Protocol을 통해 Dograh 워크스페이스와 문서에 접근할 수 있게 합니다.",
+      "AI 에이전트가 Model Context Protocol을 통해 Recova 워크스페이스와 문서에 접근할 수 있게 합니다.",
     "settings.telemetry.title": "텔레메트리",
     "settings.telemetry.description":
       "음성 에이전트 통화를 위한 Langfuse 추적을 설정하세요.",
@@ -1019,7 +1019,7 @@ export const messages = {
     "telemetry.removed": "텔레메트리 자격 증명이 제거되었습니다",
     "telemetry.removeFailed": "텔레메트리 자격 증명을 제거하지 못했습니다",
 
-    "overview.welcomeOss": "Dograh에 오신 것을 환영합니다",
+    "overview.welcomeOss": "Recova에 오신 것을 환영합니다",
     "overview.welcomeUser": "{suffix}환영합니다!",
     "overview.ossDescription":
       "Vapi의 오픈소스 대안입니다. GitHub 스타로 프로젝트를 응원해 주세요.",
@@ -1034,7 +1034,7 @@ export const messages = {
     "overview.configureModels": "모델 설정",
     "overview.resourcesTitle": "리소스",
     "overview.resourcesDescription":
-      "Dograh에 대한 도움말과 추가 정보를 확인하세요",
+      "Recova에 대한 도움말과 추가 정보를 확인하세요",
     "overview.documentation": "문서",
     "overview.reportIssue": "이슈 제보",
 
@@ -1042,13 +1042,13 @@ export const messages = {
     "usage.description":
       "모든 음성 에이전트의 실행 기록을 확인하세요. 필터를 사용해 필요한 실행만 골라볼 수 있습니다.",
     "usage.timezonePlaceholder": "시간대 선택",
-    "usage.creditsTitle": "Dograh 모델 크레딧",
+    "usage.creditsTitle": "Recova 모델 크레딧",
     "usage.creditsDescription":
-      "Dograh 서비스 키를 사용한 Dograh 모델 사용량입니다.",
+      "Recova 서비스 키를 사용한 Recova 모델 사용량입니다.",
     "usage.creditsUsed": "사용한 크레딧",
     "usage.remaining": "남은 크레딧",
     "usage.noServiceKeys":
-      "구성된 Dograh 서비스 키가 없습니다. 사용량을 보려면 모델 설정에서 서비스 키를 설정하세요.",
+      "구성된 Recova 서비스 키가 없습니다. 사용량을 보려면 모델 설정에서 서비스 키를 설정하세요.",
     "usage.downloadFilteredResults": "필터 결과 다운로드",
     "usage.downloadFailed": "리포트를 다운로드하지 못했습니다",
     "usage.preparing": "준비 중...",
@@ -1064,7 +1064,7 @@ export const messages = {
     "usage.tokens": "토큰",
     "usage.noRuns": "실행 기록이 없습니다",
     "usage.totalFilteredPeriod": "필터 기간 합계:",
-    "usage.dograhTokens": "Dograh 토큰",
+    "usage.dograhTokens": "Recova 토큰",
     "usage.pageSummary":
       "{totalPages}페이지 중 {page}페이지 (총 {totalCount}건)",
 
@@ -1099,7 +1099,7 @@ export const messages = {
 
     "apiKeys.title": "개발자 포털",
     "apiKeys.description":
-      "Dograh 서비스를 프로그래밍 방식으로 사용하기 위한 API 키를 관리하세요",
+      "Recova 서비스를 프로그래밍 방식으로 사용하기 위한 API 키를 관리하세요",
     "apiKeys.fetchFailed": "API 키를 불러오지 못했습니다",
     "apiKeys.fetchServiceFailed": "서비스 키를 불러오지 못했습니다",
     "apiKeys.nameRequired": "API 키 이름을 입력하세요",
@@ -1117,14 +1117,14 @@ export const messages = {
     "apiKeys.createFirstKey": "첫 API 키 생성",
     "apiKeys.fullKeyHidden": "(보안을 위해 전체 키는 숨겨집니다)",
     "apiKeys.reactivate": "다시 활성화",
-    "apiKeys.serviceCardTitle": "Dograh 서비스 키",
+    "apiKeys.serviceCardTitle": "Recova 서비스 키",
     "apiKeys.serviceCardDescription":
-      "Dograh AI 서비스(LLM, TTS, STT)용 서비스 키를 관리하세요",
+      "Recova AI 서비스(LLM, TTS, STT)용 서비스 키를 관리하세요",
     "apiKeys.createServiceKey": "서비스 키 생성",
     "apiKeys.noServiceKeys": "서비스 키가 없습니다",
     "apiKeys.createFirstServiceKey": "첫 서비스 키 생성",
     "apiKeys.additionalServiceKeys": "추가 서비스 키를 생성하려면",
-    "apiKeys.signUpCloud": "app.dograh.com에 가입하세요",
+    "apiKeys.signUpCloud": "Recova Cloud에 가입하세요",
     "apiKeys.important": "중요:",
     "apiKeys.importantDescription":
       "API 키를 안전하게 보관하세요. 공개적으로 공유하거나 버전 관리에 커밋하지 마세요. API 키는 조직 리소스에 대한 전체 접근 권한을 제공합니다.",
@@ -1142,7 +1142,7 @@ export const messages = {
       "이 키는 한 번만 표시되며 나중에 다시 조회할 수 없습니다. 안전하게 저장하세요.",
     "apiKeys.serviceCreateDialogTitle": "새 서비스 키 생성",
     "apiKeys.serviceCreateDialogDescription":
-      "Dograh AI 서비스(LLM, TTS, STT)에 접근할 서비스 키를 생성하세요",
+      "Recova AI 서비스(LLM, TTS, STT)에 접근할 서비스 키를 생성하세요",
     "apiKeys.serviceKeyName": "서비스 키 이름",
     "apiKeys.serviceKeyNamePlaceholder":
       "예: 프로덕션 AI 서비스, 개발용 LLM 접근",
@@ -1151,7 +1151,7 @@ export const messages = {
       "지금 서비스 키를 복사하세요. 다시는 확인할 수 없습니다!",
     "apiKeys.yourServiceKey": "내 서비스 키:",
     "apiKeys.serviceAccessDescription":
-      "이 키로 LLM, Text-to-Speech, Speech-to-Text를 포함한 Dograh AI 서비스에 접근할 수 있습니다.",
+      "이 키로 LLM, Text-to-Speech, Speech-to-Text를 포함한 Recova AI 서비스에 접근할 수 있습니다.",
     "apiKeys.expiresOn": "만료일: {date}",
 
     "auth.email": "이메일",

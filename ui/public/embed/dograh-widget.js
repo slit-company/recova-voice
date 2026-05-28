@@ -1,6 +1,6 @@
 /**
- * Dograh Voice Widget
- * Embeddable voice call widget for Dograh workflows
+ * Recova Voice Widget
+ * Embeddable voice call widget for Recova workflows
  * Version: 1.0.0
  */
 
@@ -50,7 +50,7 @@
     // Get token from script URL
     const script = document.currentScript || document.querySelector('script[src*="dograh-widget.js"]');
     if (!script) {
-      console.error('Dograh Widget: Script not found');
+      console.error('Recova Widget: Script not found');
       return;
     }
 
@@ -61,7 +61,7 @@
     const environment = scriptUrl.searchParams.get('environment');
 
     if (!token) {
-      console.error('Dograh Widget: No token found in script URL');
+      console.error('Recova Widget: No token found in script URL');
       return;
     }
 
@@ -121,7 +121,7 @@
         autoStart: configData.auto_start || false
       };
     } catch (error) {
-      console.error('Dograh Widget: Failed to fetch configuration', error);
+      console.error('Recova Widget: Failed to fetch configuration', error);
       return;
     }
 
@@ -157,7 +157,7 @@
     try {
       return JSON.parse(contextStr);
     } catch (e) {
-      console.warn('Dograh Widget: Invalid context variables', e);
+      console.warn('Recova Widget: Invalid context variables', e);
       return {};
     }
   }
@@ -307,7 +307,7 @@
   }
 
   /**
-   * Create headless widget (no UI — host page drives everything via window.DograhWidget API)
+   * Create headless widget (no UI — host page drives everything via window.RecovaWidget API)
    */
   function createHeadlessWidget() {
     const audio = document.createElement('audio');
@@ -341,7 +341,7 @@
     // Find container element
     const container = document.getElementById(state.config.containerId);
     if (!container) {
-      console.error(`Dograh Widget: Container element with id "${state.config.containerId}" not found`);
+      console.error(`Recova Widget: Container element with id "${state.config.containerId}" not found`);
       if (state.callbacks.onError) {
         state.callbacks.onError(new Error('Container element not found'));
       }
@@ -656,7 +656,7 @@
       await negotiate();
 
     } catch (error) {
-      console.error('Dograh Widget: Failed to start call', error);
+      console.error('Recova Widget: Failed to start call', error);
       updateStatus('failed', 'Connection failed', error.message || 'Please check your microphone and try again');
 
       // Trigger error callback
@@ -701,7 +701,7 @@
    */
   async function fetchTurnCredentials() {
     if (!state.sessionToken) {
-      console.warn('Dograh Widget: No session token available for TURN credentials');
+      console.warn('Recova Widget: No session token available for TURN credentials');
       return;
     }
 
@@ -977,7 +977,7 @@
   }
 
   // Public API
-  window.DograhWidget = {
+  const publicApi = {
     // Core methods
     init: init,
     start: startCall,
@@ -1032,6 +1032,9 @@
       }
     }
   };
+
+  window.DograhWidget = publicApi;
+  window.RecovaWidget = publicApi;
 
   // Auto-initialize on DOM ready
   if (document.readyState === 'loading') {
