@@ -12,13 +12,20 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - name: Run Release Please
+        if: ${{ env.RELEASE_PLEASE_TOKEN != '' }}
+        uses: googleapis/release-please-action@v4
         with:
           # Config files location
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          # Prefer PAT to trigger deployment workflow; fall back to GITHUB_TOKEN
-          # so the release-planning check does not fail when the PAT secret is
-          # absent in a fork or newly configured repository.
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          # Use PAT to trigger deployment workflow.
+          token: ${{ env.RELEASE_PLEASE_TOKEN }}
+
+      - name: Skip Release Please
+        if: ${{ env.RELEASE_PLEASE_TOKEN == '' }}
+        run: |
+          echo "RELEASE_PLEASE_TOKEN is not configured; skipping release planning."
