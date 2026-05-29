@@ -86,6 +86,22 @@ class PhonePreviewClient(BaseDBClient):
             await session.refresh(row)
             return row
 
+    async def set_phone_preview_verification_status(
+        self,
+        verification_id: int,
+        *,
+        status: str,
+    ) -> Optional[PhonePreviewVerificationModel]:
+        async with self.async_session() as session:
+            row = await session.get(PhonePreviewVerificationModel, verification_id)
+            if not row:
+                return None
+            row.status = status
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+            await session.refresh(row)
+            return row
+
     async def mark_phone_preview_verification_verified(
         self,
         verification_id: int,

@@ -20,6 +20,85 @@ from api.services.campaign.campaign_event_publisher import (
 from api.services.campaign.circuit_breaker import circuit_breaker
 
 
+_PREVIEW_CALLBACK_SENSITIVE_EXACT_KEYS = {"from", "to"}
+_PREVIEW_CALLBACK_SENSITIVE_FRAGMENTS = (
+    "phone",
+    "number",
+    "destination",
+    "caller",
+    "called",
+)
+
+_TELEPHONY_LOG_SENSITIVE_EXACT_KEYS = {
+    *(_PREVIEW_CALLBACK_SENSITIVE_EXACT_KEYS),
+    "authorization",
+    "proxy-authorization",
+}
+_TELEPHONY_LOG_SENSITIVE_FRAGMENTS = (
+    *(_PREVIEW_CALLBACK_SENSITIVE_FRAGMENTS),
+    "account",
+    "auth",
+    "secret",
+    "signature",
+)
+
+
+def _is_preview_run(workflow_run) -> bool:
+    initial_context = getattr(workflow_run, "initial_context", None) or {}
+    if not isinstance(initial_context, dict):
+        return False
+    return bool(
+        initial_context.get("telephony_preview")
+        or initial_context.get("preview_session_id")
+    )
+
+
+def _callback_key_is_sensitive(key: object) -> bool:
+    key_text = str(key).lower()
+    return key_text in _PREVIEW_CALLBACK_SENSITIVE_EXACT_KEYS or any(
+        fragment in key_text for fragment in _PREVIEW_CALLBACK_SENSITIVE_FRAGMENTS
+    )
+
+
+def _redact_preview_callback_extra(value, *, key: object | None = None):
+    if key is not None and _callback_key_is_sensitive(key):
+        return "[redacted]"
+    if isinstance(value, dict):
+        return {
+            item_key: _redact_preview_callback_extra(item_value, key=item_key)
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_preview_callback_extra(item) for item in value]
+    return value
+
+
+def redact_telephony_payload_for_logs(value, *, key: object | None = None):
+    """Return a log-safe copy of provider webhook payload/header data.
+
+    Provider callback routes may log payloads before signature verification, so
+    logging redaction cannot depend on knowing whether the run is a Recova
+    preview. Keep durable DB audit behavior in ``_process_status_update``
+    unchanged, but never emit raw caller/called numbers or credentials to app
+    logs from webhook entrypoints.
+    """
+
+    if key is not None:
+        key_text = str(key).lower()
+        if key_text in _TELEPHONY_LOG_SENSITIVE_EXACT_KEYS or any(
+            fragment in key_text for fragment in _TELEPHONY_LOG_SENSITIVE_FRAGMENTS
+        ):
+            return "[redacted]"
+    if isinstance(value, dict):
+        return {
+            item_key: redact_telephony_payload_for_logs(item_value, key=item_key)
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_telephony_payload_for_logs(item) for item in value]
+    return value
+
+
 async def _update_preview_session_from_status(
     workflow_run_id: int, *, preview_status: str, failure_reason: str | None = None
 ) -> None:
@@ -159,7 +238,11 @@ async def _process_status_update(workflow_run_id: int, status: StatusCallbackReq
         "timestamp": datetime.now(UTC).isoformat(),
         "call_id": status.call_id,
         "duration": status.duration,
-        **status.extra,
+        **(
+            _redact_preview_callback_extra(status.extra)
+            if _is_preview_run(workflow_run)
+            else status.extra
+        ),
     }
     telephony_callback_logs.append(telephony_callback_log)
 

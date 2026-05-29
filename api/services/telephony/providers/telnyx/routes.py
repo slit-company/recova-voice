@@ -21,6 +21,7 @@ from api.services.telephony.providers.telnyx.strategies import TelnyxHangupStrat
 from api.services.telephony.status_processor import (
     StatusCallbackRequest,
     _process_status_update,
+    redact_telephony_payload_for_logs,
 )
 from api.services.telephony.transfer_event_protocol import (
     TransferContext,
@@ -75,7 +76,10 @@ async def handle_telnyx_events(
     logger.info(
         f"[run {workflow_run_id}] Received Telnyx event: event_type={event_type}"
     )
-    logger.debug(f"[run {workflow_run_id}] Telnyx event body: {json.dumps(event_data)}")
+    logger.debug(
+        f"[run {workflow_run_id}] Telnyx event body: "
+        f"{json.dumps(redact_telephony_payload_for_logs(event_data))}"
+    )
 
     # Get workflow run and provider
     workflow_run = await db_client.get_workflow_run_by_id(workflow_run_id)
@@ -159,7 +163,7 @@ async def handle_telnyx_transfer_result(transfer_id: str, request: Request):
     event_data = await request.json()
     logger.info(
         f"Telnyx transfer-result webhook (transfer_id={transfer_id}): "
-        f"{json.dumps(event_data)}"
+        f"{json.dumps(redact_telephony_payload_for_logs(event_data))}"
     )
 
     data = event_data.get("data", {})

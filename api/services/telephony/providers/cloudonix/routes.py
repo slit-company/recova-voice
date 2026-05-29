@@ -15,6 +15,7 @@ from api.services.telephony.factory import get_telephony_provider_for_run
 from api.services.telephony.status_processor import (
     StatusCallbackRequest,
     _process_status_update,
+    redact_telephony_payload_for_logs,
 )
 
 router = APIRouter()
@@ -41,7 +42,8 @@ async def handle_cloudonix_status_callback(
         callback_data = dict(form_data)
 
     logger.info(
-        f"[run {workflow_run_id}] Received Cloudonix status callback: {json.dumps(callback_data)}"
+        f"[run {workflow_run_id}] Received Cloudonix status callback: "
+        f"{json.dumps(redact_telephony_payload_for_logs(callback_data))}"
     )
 
     # Get workflow run to find organization
@@ -104,7 +106,10 @@ async def handle_cloudonix_cdr(request: Request):
 
     # Extract call_id to find workflow run
     call_id = cdr_data.get("session").get("token")
-    logger.info(f"Cloudonix CDR data for call id {call_id} - {cdr_data}")
+    logger.info(
+        f"Cloudonix CDR data for call id {call_id} - "
+        f"{redact_telephony_payload_for_logs(cdr_data)}"
+    )
     if not call_id:
         logger.warning("Cloudonix CDR missing call_id field")
         return {"status": "error", "message": "Missing call_id field"}

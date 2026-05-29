@@ -6,7 +6,13 @@ import { CheckCircle2, Loader2, PhoneCall, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PhoneInput } from "react-international-phone";
 
-import { client } from "@/client/client.gen";
+import {
+    callPhonePreviewApiV1PhonePreviewCallPost,
+    getPhonePreviewStatusByStatusPathApiV1PhonePreviewStatusSessionIdGet,
+    startPhonePreviewApiV1PhonePreviewStartPost,
+    verifyPhonePreviewApiV1PhonePreviewVerifyPost,
+} from "@/client/sdk.gen";
+import type { PhonePreviewResponse } from "@/client/types.gen";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -20,30 +26,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLocale } from "@/context/LocaleContext";
-import { useUserConfig } from "@/context/UserConfigContext";
 
 type PreviewStep = "entry" | "otp" | "calling" | "complete";
 type BusyState = "saving" | "starting" | "verifying" | "calling" | null;
-
-type PhonePreviewResponse = {
-    session_id?: number | string;
-    sessionId?: number | string;
-    id?: number | string;
-    status?: string;
-    otp_required?: boolean;
-    otpRequired?: boolean;
-    masked_phone?: string;
-    maskedPhone?: string;
-    expires_at?: string;
-    expiresAt?: string;
-    workflow_run_id?: number | string | null;
-    workflowRunId?: number | string | null;
-    provider_call_id?: string | null;
-    providerCallId?: string | null;
-    failure_reason?: string | null;
-    failureReason?: string | null;
-    message?: string;
-};
 
 interface PhoneCallDialogProps {
     open: boolean;
@@ -53,9 +38,6 @@ interface PhoneCallDialogProps {
     hasUnsavedChanges?: boolean;
     saveLatestDraft?: () => Promise<void>;
 }
-
-const previewEndpoint = (action: "start" | "verify" | "call") => `/api/v1/phone-preview/${action}`;
-const previewStatusEndpoint = (sessionId: number | string) => `/api/v1/phone-preview/status/${sessionId}`;
 
 const getDetailMessage = (error: unknown): string => {
     if (typeof error === "string") return error;
@@ -78,16 +60,16 @@ const getDetailMessage = (error: unknown): string => {
 };
 
 const sessionIdFrom = (data: PhonePreviewResponse) => {
-    const id = data.session_id ?? data.sessionId ?? data.id;
+    const id = data.session_id;
     return id === undefined || id === null ? "" : String(id);
 };
 const otpRequiredFrom = (data: PhonePreviewResponse) =>
-    data.otp_required ?? data.otpRequired ?? data.status === "pending_verification";
-const maskedPhoneFrom = (data: PhonePreviewResponse) => data.masked_phone ?? data.maskedPhone ?? "";
-const expiresAtFrom = (data: PhonePreviewResponse) => data.expires_at ?? data.expiresAt ?? "";
-const workflowRunIdFrom = (data: PhonePreviewResponse) => data.workflow_run_id ?? data.workflowRunId ?? null;
-const providerCallIdFrom = (data: PhonePreviewResponse) => data.provider_call_id ?? data.providerCallId ?? null;
-const failureReasonFrom = (data: PhonePreviewResponse) => data.failure_reason ?? data.failureReason ?? null;
+    data.otp_required ?? data.status === "pending_verification";
+const maskedPhoneFrom = (data: PhonePreviewResponse) => data.masked_phone ?? "";
+const expiresAtFrom = (data: PhonePreviewResponse) => data.expires_at ?? "";
+const workflowRunIdFrom = (data: PhonePreviewResponse) => data.workflow_run_id ?? null;
+const providerCallIdFrom = (data: PhonePreviewResponse) => data.provider_call_id ?? null;
+const failureReasonFrom = (data: PhonePreviewResponse) => data.failure_reason ?? null;
 
 export const PhoneCallDialog = ({
     open,
@@ -98,7 +80,6 @@ export const PhoneCallDialog = ({
     saveLatestDraft,
 }: PhoneCallDialogProps) => {
     const { t } = useLocale();
-    const { userConfig, saveUserConfig } = useUserConfig();
 
     const [displayName, setDisplayName] = useState("");
     const [phoneNumber, setPhoneNumber] = useState("");
@@ -113,16 +94,14 @@ export const PhoneCallDialog = ({
     const [busy, setBusy] = useState<BusyState>(null);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
-    const [phoneChanged, setPhoneChanged] = useState(false);
 
     const normalizedDisplayName = useMemo(() => displayName.trim(), [displayName]);
 
     useEffect(() => {
         if (!open) return;
 
-        const savedPhone = userConfig?.test_phone_number || "";
         setDisplayName(user.email?.split("@")[0] ?? "");
-        setPhoneNumber(savedPhone);
+        setPhoneNumber("");
         setOtpCode("");
         setSessionId("");
         setMaskedPhone("");
@@ -134,8 +113,7 @@ export const PhoneCallDialog = ({
         setBusy(null);
         setError(null);
         setSuccess(null);
-        setPhoneChanged(false);
-    }, [open, user.email, userConfig?.test_phone_number]);
+    }, [open, user.email]);
 
     const formatError = useCallback((raw: unknown) => {
         const message = getDetailMessage(raw);
@@ -170,34 +148,51 @@ export const PhoneCallDialog = ({
         }
     }, [formatError]);
 
-    const postPreview = useCallback(async (action: "start" | "verify" | "call", body: Record<string, unknown>) => {
-        const response = (await client.post({
-            url: previewEndpoint(action),
-            body,
-        })) as { data?: unknown; error?: unknown };
-
+    const unwrapPreviewResponse = useCallback((response: { data?: PhonePreviewResponse; error?: unknown }) => {
         if (response.error) {
             throw new Error(formatError(response.error));
         }
-        return (response.data ?? {}) as PhonePreviewResponse;
+        if (!response.data) {
+            throw new Error("Missing preview response");
+        }
+        return response.data;
     }, [formatError]);
+
+    const startPreview = useCallback(async (body: {
+        workflow_id: number;
+        display_name: string | null;
+        phone_number: string;
+    }) => {
+        const response = await startPhonePreviewApiV1PhonePreviewStartPost({
+            body,
+        });
+        return unwrapPreviewResponse(response);
+    }, [unwrapPreviewResponse]);
+
+    const verifyPreview = useCallback(async (body: {
+        session_id: number;
+        otp_code: string;
+    }) => {
+        const response = await verifyPhonePreviewApiV1PhonePreviewVerifyPost({
+            body,
+        });
+        return unwrapPreviewResponse(response);
+    }, [unwrapPreviewResponse]);
+
+    const callPreview = useCallback(async (body: { session_id: number }) => {
+        const response = await callPhonePreviewApiV1PhonePreviewCallPost({
+            body,
+        });
+        return unwrapPreviewResponse(response);
+    }, [unwrapPreviewResponse]);
 
     const getPreviewStatus = useCallback(async (targetSessionId: string) => {
-        const response = (await client.get({
-            url: previewStatusEndpoint(targetSessionId),
-        })) as { data?: unknown; error?: unknown };
-
-        if (response.error) {
-            throw new Error(formatError(response.error));
-        }
-        return (response.data ?? {}) as PhonePreviewResponse;
-    }, [formatError]);
-
-    const savePhoneIfNeeded = async () => {
-        if (!userConfig || !phoneChanged) return;
-        await saveUserConfig({ ...userConfig, test_phone_number: phoneNumber });
-        setPhoneChanged(false);
-    };
+        const numericSessionId = Number(targetSessionId);
+        const response = await getPhonePreviewStatusByStatusPathApiV1PhonePreviewStatusSessionIdGet({
+            path: { session_id: numericSessionId },
+        });
+        return unwrapPreviewResponse(response);
+    }, [unwrapPreviewResponse]);
 
     const saveDraftIfNeeded = async () => {
         if (!hasUnsavedChanges || !saveLatestDraft) return;
@@ -237,7 +232,7 @@ export const PhoneCallDialog = ({
         setError(null);
         setSuccess(null);
 
-        const data = await postPreview("call", { session_id: targetSessionId });
+        const data = await callPreview({ session_id: Number(targetSessionId) });
         const nextStatus = data.status ?? "calling";
         const nextWorkflowRunId = workflowRunIdFrom(data);
         const nextProviderCallId = providerCallIdFrom(data);
@@ -251,7 +246,7 @@ export const PhoneCallDialog = ({
             setError(formatError(failureReason));
             setSuccess(null);
         } else {
-            setSuccess(data.message ?? t("phoneCall.callStarted"));
+            setSuccess(t("phoneCall.callStarted"));
         }
     };
 
@@ -268,10 +263,9 @@ export const PhoneCallDialog = ({
 
         try {
             await saveDraftIfNeeded();
-            await savePhoneIfNeeded();
 
             setBusy("starting");
-            const data = await postPreview("start", {
+            const data = await startPreview({
                 workflow_id: workflowId,
                 display_name: normalizedDisplayName || null,
                 phone_number: trimmedPhone,
@@ -315,8 +309,8 @@ export const PhoneCallDialog = ({
         setBusy("verifying");
 
         try {
-            const verified = await postPreview("verify", {
-                session_id: sessionId,
+            const verified = await verifyPreview({
+                session_id: Number(sessionId),
                 otp_code: otpCode,
             });
             const nextSessionId = sessionIdFrom(verified) || sessionId;
@@ -346,7 +340,6 @@ export const PhoneCallDialog = ({
 
     const handlePhoneInputChange = (formattedValue: string) => {
         setPhoneNumber(formattedValue);
-        setPhoneChanged(formattedValue !== (userConfig?.test_phone_number || ""));
         setError(null);
         setSuccess(null);
     };

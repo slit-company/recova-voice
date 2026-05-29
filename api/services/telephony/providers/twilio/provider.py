@@ -18,6 +18,7 @@ from api.services.telephony.base import (
     ProviderSyncResult,
     TelephonyProvider,
 )
+from api.services.telephony.status_processor import redact_telephony_payload_for_logs
 from api.utils.common import get_backend_endpoints
 from api.utils.telephony_address import normalize_telephony_address
 
@@ -73,7 +74,7 @@ class TwilioProvider(TelephonyProvider):
         # Use provided from_number or select a random one
         if from_number is None:
             from_number = random.choice(self.from_numbers)
-        logger.info(f"Selected phone number {from_number} for outbound call")
+        logger.info("Selected phone number [redacted] for outbound call")
         logger.info(f"Webhook url received - {webhook_url}")
 
         # Prepare call data
@@ -585,7 +586,7 @@ class TwilioProvider(TelephonyProvider):
 
         # Select a random phone number for the transfer
         from_number = random.choice(self.from_numbers)
-        logger.info(f"Selected phone number {from_number} for transfer call")
+        logger.info("Selected phone number [redacted] for transfer call")
 
         backend_endpoint, _ = await get_backend_endpoints()
 
@@ -624,7 +625,9 @@ class TwilioProvider(TelephonyProvider):
         data.update(kwargs)
 
         try:
-            logger.debug(f"Transfer call data: {data}")
+            logger.debug(
+                f"Transfer call data: {redact_telephony_payload_for_logs(data)}"
+            )
 
             async with aiohttp.ClientSession() as session:
                 auth = aiohttp.BasicAuth(self.account_sid, self.auth_token)

@@ -690,6 +690,55 @@ class TestProcessStatusUpdateCircuitBreaker:
             # Circuit breaker should NOT be called for non-campaign calls
             mock_cb.record_and_evaluate.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_preview_status_callback_redacts_phone_numbers_from_logs(self):
+        """Preview callback audit logs should not persist raw From/To numbers."""
+
+        from api.services.telephony.status_processor import (
+            StatusCallbackRequest,
+            _process_status_update,
+        )
+
+        mock_workflow_run = MagicMock()
+        mock_workflow_run.id = 100
+        mock_workflow_run.campaign_id = None
+        mock_workflow_run.state = "running"
+        mock_workflow_run.initial_context = {
+            "telephony_preview": True,
+            "preview_session_id": 123,
+        }
+        mock_workflow_run.logs = {"telephony_status_callbacks": []}
+        mock_workflow_run.gathered_context = {}
+
+        status = StatusCallbackRequest(
+            call_id="call-789",
+            status="ringing",
+            extra={
+                "CallSid": "call-789",
+                "To": "+821012345678",
+                "From": "+82200000000",
+                "nested": {"phone_number": "+821012345678"},
+                "events": [{"Called": "+821012345678"}],
+            },
+        )
+
+        with patch("api.services.telephony.status_processor.db_client") as mock_db:
+            mock_db.get_workflow_run_by_id = AsyncMock(return_value=mock_workflow_run)
+            mock_db.update_workflow_run = AsyncMock()
+
+            await _process_status_update(100, status)
+
+        log_entry = mock_db.update_workflow_run.await_args.kwargs["logs"][
+            "telephony_status_callbacks"
+        ][0]
+        assert log_entry["CallSid"] == "call-789"
+        assert log_entry["To"] == "[redacted]"
+        assert log_entry["From"] == "[redacted]"
+        assert log_entry["nested"]["phone_number"] == "[redacted]"
+        assert log_entry["events"][0]["Called"] == "[redacted]"
+        assert "+821012345678" not in str(log_entry)
+        assert "+82200000000" not in str(log_entry)
+
 
 # =============================================================================
 # Integration test: resume_campaign resets circuit breaker

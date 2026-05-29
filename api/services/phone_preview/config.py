@@ -28,6 +28,9 @@ class PreviewTelephonySettings:
     max_otp_attempts: int
     daily_user_call_limit: int
     daily_phone_call_limit: int
+    otp_delivery_webhook_url: str | None
+    otp_delivery_webhook_bearer_token: str | None
+    otp_delivery_timeout_seconds: int
 
     @property
     def is_configured(self) -> bool:
@@ -53,6 +56,15 @@ def get_preview_telephony_settings() -> PreviewTelephonySettings:
         or 5,
         daily_phone_call_limit=_int_env("RECOVA_PREVIEW_DAILY_PHONE_CALL_LIMIT", 5)
         or 5,
+        otp_delivery_webhook_url=os.getenv("RECOVA_PREVIEW_OTP_WEBHOOK_URL") or None,
+        otp_delivery_webhook_bearer_token=os.getenv(
+            "RECOVA_PREVIEW_OTP_WEBHOOK_BEARER_TOKEN"
+        )
+        or None,
+        otp_delivery_timeout_seconds=_int_env(
+            "RECOVA_PREVIEW_OTP_DELIVERY_TIMEOUT_SECONDS", 5
+        )
+        or 5,
     )
 
 
@@ -74,6 +86,8 @@ def get_preview_secret() -> str:
 
 
 def should_expose_dev_otp() -> bool:
+    if os.getenv("ENVIRONMENT", Environment.LOCAL.value) == Environment.PRODUCTION.value:
+        return False
     if os.getenv("RECOVA_PREVIEW_EXPOSE_DEV_OTP", "").lower() in {"1", "true", "yes"}:
         return True
     return os.getenv("ENVIRONMENT", Environment.LOCAL.value) != Environment.PRODUCTION.value

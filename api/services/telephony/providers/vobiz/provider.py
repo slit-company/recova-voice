@@ -21,6 +21,7 @@ from api.services.telephony.base import (
     ProviderSyncResult,
     TelephonyProvider,
 )
+from api.services.telephony.status_processor import redact_telephony_payload_for_logs
 from api.utils.common import get_backend_endpoints
 from api.utils.telephony_address import normalize_telephony_address
 
@@ -85,7 +86,7 @@ class VobizProvider(TelephonyProvider):
         # Use provided from_number or select a random one
         if from_number is None:
             from_number = random.choice(self.from_numbers)
-        logger.info(f"Selected Vobiz phone number {from_number} for outbound call")
+        logger.info("Selected Vobiz phone number [redacted] for outbound call")
 
         # Remove + prefix if present (Vobiz expects E.164 without +)
         to_number_clean = to_number.lstrip("+")
@@ -126,15 +127,17 @@ class VobizProvider(TelephonyProvider):
         async with aiohttp.ClientSession() as session:
             async with session.post(endpoint, json=data, headers=headers) as response:
                 if response.status != 201:
-                    error_data = await response.text()
-                    logger.error(f"Vobiz API error: {error_data}")
+                    await response.text()
+                    logger.error(f"Vobiz API error: status={response.status}")
                     raise HTTPException(
                         status_code=response.status,
-                        detail=f"Failed to initiate Vobiz call: {error_data}",
+                        detail="Failed to initiate Vobiz call",
                     )
 
                 response_data = await response.json()
-                logger.info(f"Vobiz API response: {response_data}")
+                logger.info(
+                    f"Vobiz API response keys: {list(response_data.keys())}"
+                )
 
                 # Extract call_uuid with multiple fallback options
                 call_id = (
@@ -150,8 +153,7 @@ class VobizProvider(TelephonyProvider):
                     )
                     raise HTTPException(
                         status_code=response.status,
-                        detail=f"Vobiz API response missing call identifier. Response: {response_data}"
-                        f"Vobiz API response missing call identifier. Response: {response_data}",
+                        detail="Vobiz API response missing call identifier",
                     )
 
                 logger.info(f"Vobiz call initiated successfully. Call ID: {call_id}")
@@ -161,7 +163,7 @@ class VobizProvider(TelephonyProvider):
                     status="queued",  # Vobiz returns "message": "call fired"
                     caller_number=from_number,
                     provider_metadata={"call_id": call_id},
-                    raw_response=response_data,
+                    raw_response=redact_telephony_payload_for_logs(response_data),
                 )
 
     async def get_call_status(self, call_id: str) -> Dict[str, Any]:
@@ -182,11 +184,13 @@ class VobizProvider(TelephonyProvider):
         async with aiohttp.ClientSession() as session:
             async with session.get(endpoint, headers=headers) as response:
                 if response.status != 200:
-                    error_data = await response.text()
-                    logger.error(f"Failed to get Vobiz call status: {error_data}")
-                    raise Exception(f"Failed to get call status: {error_data}")
+                    await response.text()
+                    logger.error(
+                        f"Failed to get Vobiz call status: status={response.status}"
+                    )
+                    raise Exception("Failed to get call status")
 
-                return await response.json()
+                return redact_telephony_payload_for_logs(await response.json())
 
     async def get_available_phone_numbers(self) -> List[str]:
         """
@@ -296,13 +300,15 @@ class VobizProvider(TelephonyProvider):
             async with aiohttp.ClientSession() as session:
                 async with session.get(endpoint, headers=headers) as response:
                     if response.status != 200:
-                        error_data = await response.text()
-                        logger.error(f"Failed to get Vobiz call cost: {error_data}")
+                        await response.text()
+                        logger.error(
+                            f"Failed to get Vobiz call cost: status={response.status}"
+                        )
                         return {
                             "cost_usd": 0.0,
                             "duration": 0,
                             "status": "error",
-                            "error": str(error_data),
+                            "error": "Failed to get Vobiz call cost",
                         }
 
                     call_data = await response.json()
@@ -320,7 +326,7 @@ class VobizProvider(TelephonyProvider):
                         "status": call_data.get("status", "unknown"),
                         "price_unit": "USD",  # Vobiz always uses USD
                         "call_rate": call_data.get("call_rate", "0"),
-                        "raw_response": call_data,
+                        "raw_response": redact_telephony_payload_for_logs(call_data),
                     }
 
         except Exception as e:

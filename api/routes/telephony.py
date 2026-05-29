@@ -24,7 +24,7 @@ from api.db.models import UserModel
 from api.enums import CallType, WorkflowRunState
 from api.errors.telephony_errors import TelephonyError
 from api.sdk_expose import sdk_expose
-from api.services.auth.depends import get_user
+from api.services.feature_gates import require_self_serve_telephony
 from api.services.quota_service import check_dograh_quota_by_user_id
 from api.services.telephony.call_transfer_manager import get_call_transfer_manager
 from api.services.telephony.factory import (
@@ -33,6 +33,7 @@ from api.services.telephony.factory import (
     get_telephony_provider_by_id,
     get_telephony_provider_for_run,
 )
+from api.services.telephony.status_processor import redact_telephony_payload_for_logs
 from api.services.telephony.transfer_event_protocol import (
     TransferEvent,
     TransferEventType,
@@ -69,6 +70,23 @@ def _get_execution_user_id(workflow) -> int:
     return workflow.user_id
 
 
+def _normalized_inbound_data_for_logs(normalized_data) -> dict:
+    """Return a log-safe normalized inbound call summary."""
+
+    return {
+        "provider": normalized_data.provider,
+        "call_id": normalized_data.call_id,
+        "from_number": "[redacted]",
+        "to_number": "[redacted]",
+        "direction": normalized_data.direction,
+        "call_status": normalized_data.call_status,
+        "account_id": "[redacted]" if normalized_data.account_id else None,
+        "from_country": normalized_data.from_country,
+        "to_country": normalized_data.to_country,
+        "raw_data": redact_telephony_payload_for_logs(normalized_data.raw_data),
+    }
+
+
 @router.post(
     "/initiate-call",
     **sdk_expose(
@@ -77,7 +95,8 @@ def _get_execution_user_id(workflow) -> int:
     ),
 )
 async def initiate_call(
-    request: InitiateCallRequest, user: UserModel = Depends(get_user)
+    request: InitiateCallRequest,
+    user: UserModel = Depends(require_self_serve_telephony),
 ):
     """Initiate a call using the configured telephony provider from web browser. This is
     supposed to be a test call method for the draft version of the agent."""
@@ -266,7 +285,7 @@ async def _verify_organization_phone_number(
         )
         if match and match.telephony_configuration_id == telephony_configuration_id:
             logger.info(
-                f"Phone number {phone_number} matched row {match.id} for org "
+                f"Phone number [redacted] matched row {match.id} for org "
                 f"{organization_id} / config {telephony_configuration_id}"
             )
             return match.id
@@ -279,13 +298,13 @@ async def _verify_organization_phone_number(
                 continue
             if numbers_match(phone_number, row.address, to_country, from_country):
                 logger.info(
-                    f"Phone number {phone_number} matched (fuzzy) row {row.id} "
+                    f"Phone number [redacted] matched (fuzzy) row {row.id} "
                     f"for config {telephony_configuration_id}"
                 )
                 return row.id
 
         logger.warning(
-            f"Phone number {phone_number} not registered to config "
+            "Phone number [redacted] not registered to config "
             f"{telephony_configuration_id} (org={organization_id}, "
             f"to_country={to_country}, from_country={from_country})"
         )
@@ -293,7 +312,7 @@ async def _verify_organization_phone_number(
 
     except Exception as e:
         logger.error(
-            f"Error verifying phone number {phone_number} for organization "
+            "Error verifying phone number [redacted] for organization "
             f"{organization_id} / config {telephony_configuration_id}: {e}"
         )
         return None
@@ -485,7 +504,7 @@ async def _resolve_inbound_telephony_config(
         if not match:
             logger.warning(
                 f"Account validation failed for {provider_class.PROVIDER_NAME}: "
-                f"webhook account_id={account_id} (org {organization_id})"
+                f"webhook account_id=[redacted] (org {organization_id})"
             )
             return TelephonyError.ACCOUNT_VALIDATION_FAILED, None
 
@@ -657,7 +676,7 @@ async def handle_inbound_run(request: Request):
         normalized_data = normalize_webhook_data(provider_class, webhook_data)
         logger.info(
             f"/inbound/run normalized data — provider={normalized_data.provider} "
-            f"to={normalized_data.to_number} from={normalized_data.from_number}"
+            "to=[redacted] from=[redacted]"
         )
 
         if normalized_data.direction != "inbound":
@@ -687,8 +706,8 @@ async def handle_inbound_run(request: Request):
             logger.warning(
                 f"/inbound/run: no inbound route matched "
                 f"provider={provider_class.PROVIDER_NAME} "
-                f"account_id={normalized_data.account_id} "
-                f"to={normalized_data.to_number}"
+                "account_id=[redacted] "
+                "to=[redacted]"
             )
             return provider_class.generate_validation_error_response(
                 TelephonyError.PHONE_NUMBER_NOT_CONFIGURED
@@ -699,8 +718,8 @@ async def handle_inbound_run(request: Request):
 
         if not phone_row.inbound_workflow_id:
             logger.warning(
-                f"/inbound/run: number {normalized_data.to_number} has no "
-                f"inbound_workflow_id assigned"
+                "/inbound/run: called number [redacted] has no "
+                "inbound_workflow_id assigned"
             )
             return provider_class.generate_validation_error_response(
                 TelephonyError.WORKFLOW_NOT_FOUND
@@ -796,7 +815,8 @@ async def handle_inbound_fallback(request: Request):
             or webhook_data.get("call_uuid")
         )
         logger.info(
-            f"[fallback] Received {provider_class.PROVIDER_NAME} callback for call {call_id}: {json.dumps(webhook_data)}"
+            f"[fallback] Received {provider_class.PROVIDER_NAME} callback for call "
+            f"{call_id}: {json.dumps(redact_telephony_payload_for_logs(webhook_data))}"
         )
 
         return provider_class.generate_error_response(
@@ -806,7 +826,9 @@ async def handle_inbound_fallback(request: Request):
     else:
         # Unknown provider - return generic XML
         logger.info(
-            f"[fallback] Received unknown provider callback: {json.dumps(webhook_data)} and request headers: {json.dumps(headers)}"
+            f"[fallback] Received unknown provider callback: "
+            f"{json.dumps(redact_telephony_payload_for_logs(webhook_data))} and "
+            f"request headers: {json.dumps(redact_telephony_payload_for_logs(headers))}"
         )
 
         return generic_hangup_response()
@@ -832,7 +854,9 @@ async def handle_inbound_telephony(
 
     try:
         webhook_data, raw_body = await parse_webhook_request(request)
-        logger.info(f"Inbound call data: {dict(webhook_data)}")
+        logger.info(
+            f"Inbound call data: {redact_telephony_payload_for_logs(dict(webhook_data))}"
+        )
         headers = dict(request.headers)
 
         # Detect provider and normalize data
@@ -844,7 +868,9 @@ async def handle_inbound_telephony(
         normalized_data = normalize_webhook_data(provider_class, webhook_data)
 
         logger.info(f"Inbound call - Provider: {normalized_data.provider}")
-        logger.info(f"Normalized data: {normalized_data}")
+        logger.info(
+            f"Normalized data: {_normalized_inbound_data_for_logs(normalized_data)}"
+        )
 
         # Validate inbound direction
         if normalized_data.direction != "inbound":

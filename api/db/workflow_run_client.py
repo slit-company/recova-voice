@@ -58,9 +58,15 @@ class WorkflowRunClient(BaseDBClient):
             if use_draft:
                 # For test calls: prefer draft if it exists, fall back to published
                 draft_result = await session.execute(
-                    select(WorkflowDefinitionModel).where(
+                    select(WorkflowDefinitionModel)
+                    .where(
                         WorkflowDefinitionModel.workflow_id == workflow.id,
                         WorkflowDefinitionModel.status == "draft",
+                    )
+                    .order_by(
+                        WorkflowDefinitionModel.version_number.desc().nulls_last(),
+                        WorkflowDefinitionModel.created_at.desc(),
+                        WorkflowDefinitionModel.id.desc(),
                     )
                 )
                 target_def = draft_result.scalars().first()

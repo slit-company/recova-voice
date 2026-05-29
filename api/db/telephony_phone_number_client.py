@@ -186,6 +186,8 @@ class TelephonyPhoneNumberClient(BaseDBClient):
         account_id: str,
         address: str,
         country_hint: Optional[str] = None,
+        exclude_telephony_configuration_id: Optional[int] = None,
+        exclude_phone_number_id: Optional[int] = None,
     ) -> Optional[Tuple[TelephonyConfigurationModel, TelephonyPhoneNumberModel]]:
         """Inbound dispatch keys on (provider, credentials[account_id_field],
         address_normalized) — see ``find_inbound_route_by_account``. That tuple
@@ -218,6 +220,15 @@ class TelephonyPhoneNumberClient(BaseDBClient):
                     == normalized.canonical,
                 )
             )
+            if exclude_telephony_configuration_id is not None:
+                stmt = stmt.where(
+                    TelephonyConfigurationModel.id
+                    != exclude_telephony_configuration_id
+                )
+            if exclude_phone_number_id is not None:
+                stmt = stmt.where(
+                    TelephonyPhoneNumberModel.id != exclude_phone_number_id
+                )
             result = await session.execute(stmt)
             row = result.first()
             return (row[0], row[1]) if row else None

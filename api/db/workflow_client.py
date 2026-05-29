@@ -290,9 +290,15 @@ class WorkflowClient(BaseDBClient):
         """Get the draft version for a workflow, or None if no draft exists."""
         async with self.async_session() as session:
             result = await session.execute(
-                select(WorkflowDefinitionModel).where(
+                select(WorkflowDefinitionModel)
+                .where(
                     WorkflowDefinitionModel.workflow_id == workflow_id,
                     WorkflowDefinitionModel.status == "draft",
+                )
+                .order_by(
+                    WorkflowDefinitionModel.version_number.desc().nulls_last(),
+                    WorkflowDefinitionModel.created_at.desc(),
+                    WorkflowDefinitionModel.id.desc(),
                 )
             )
             return result.scalars().first()

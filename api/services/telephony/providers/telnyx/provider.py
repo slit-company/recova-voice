@@ -32,6 +32,7 @@ from api.services.telephony.base import (
     ProviderSyncResult,
     TelephonyProvider,
 )
+from api.services.telephony.status_processor import redact_telephony_payload_for_logs
 from api.utils.common import get_backend_endpoints
 from api.utils.telephony_address import normalize_telephony_address
 
@@ -95,7 +96,7 @@ class TelnyxProvider(TelephonyProvider):
 
         if from_number is None:
             from_number = random.choice(self.from_numbers)
-        logger.info(f"Selected phone number {from_number} for outbound call")
+        logger.info("Selected phone number [redacted] for outbound call")
 
         backend_endpoint, wss_backend_endpoint = await get_backend_endpoints()
 
@@ -127,8 +128,10 @@ class TelnyxProvider(TelephonyProvider):
             "webhook_url_method": "POST",
         }
 
+        log_payload = {k: v for k, v in payload.items() if k != "connection_id"}
         logger.info(
-            f"Telnyx dial payload: {json.dumps({k: v for k, v in payload.items() if k != 'connection_id'})}"
+            "Telnyx dial payload: "
+            f"{json.dumps(redact_telephony_payload_for_logs(log_payload))}"
         )
 
         endpoint = f"{self.TELNYX_API_BASE}/calls"
@@ -724,7 +727,7 @@ class TelnyxProvider(TelephonyProvider):
             raise ValueError("Telnyx provider not properly configured")
 
         from_number = random.choice(self.from_numbers)
-        logger.info(f"Selected phone number {from_number} for Telnyx transfer call")
+        logger.info("Selected phone number [redacted] for Telnyx transfer call")
 
         backend_endpoint, _ = await get_backend_endpoints()
         webhook_url = (
@@ -743,9 +746,10 @@ class TelnyxProvider(TelephonyProvider):
 
         endpoint = f"{self.TELNYX_API_BASE}/calls"
 
+        log_payload = {k: v for k, v in payload.items() if k != "connection_id"}
         logger.debug(
-            f"Telnyx transfer dial payload: "
-            f"{json.dumps({k: v for k, v in payload.items() if k != 'connection_id'})}"
+            "Telnyx transfer dial payload: "
+            f"{json.dumps(redact_telephony_payload_for_logs(log_payload))}"
         )
 
         try:
@@ -771,7 +775,7 @@ class TelnyxProvider(TelephonyProvider):
                     logger.info(
                         f"Telnyx transfer dial initiated: "
                         f"call_control_id={call_control_id}, "
-                        f"to={destination}, conference_name={conference_name}"
+                        f"to=[redacted], conference_name={conference_name}"
                     )
 
                     return {

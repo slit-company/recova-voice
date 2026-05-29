@@ -13,7 +13,9 @@ def _make_test_app() -> FastAPI:
     app.include_router(router)
     app.dependency_overrides[get_user] = lambda: SimpleNamespace(
         id=7,
+        provider_id="stack-user-7",
         selected_organization_id=11,
+        is_superuser=True,
     )
     return app
 

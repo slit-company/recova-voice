@@ -16,6 +16,7 @@ from api.services.telephony.factory import get_telephony_provider_for_run
 from api.services.telephony.status_processor import (
     StatusCallbackRequest,
     _process_status_update,
+    redact_telephony_payload_for_logs,
 )
 
 router = APIRouter()
@@ -30,7 +31,8 @@ async def _handle_plivo_status_callback(
     form_data = await request.form()
     callback_data = dict(form_data)
     logger.info(
-        f"[run {workflow_run_id}] Received Plivo callback: {json.dumps(callback_data)}"
+        f"[run {workflow_run_id}] Received Plivo callback: "
+        f"{json.dumps(redact_telephony_payload_for_logs(callback_data))}"
     )
 
     workflow_run = await db_client.get_workflow_run_by_id(workflow_run_id)

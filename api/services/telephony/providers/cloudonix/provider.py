@@ -18,6 +18,7 @@ from api.services.telephony.base import (
     ProviderSyncResult,
     TelephonyProvider,
 )
+from api.services.telephony.status_processor import redact_telephony_payload_for_logs
 from api.utils.common import get_backend_endpoints
 
 if TYPE_CHECKING:
@@ -111,9 +112,7 @@ class CloudonixProvider(TelephonyProvider):
                     "Please configure phone numbers in the telephony settings."
                 )
             from_number = random.choice(self.from_numbers)
-        logger.info(
-            f"Selected phone number {from_number} for outbound call to {to_number}"
-        )
+        logger.info("Selected phone number [redacted] for outbound call")
         workflow_id, user_id = kwargs["workflow_id"], kwargs["user_id"]
 
         # Prepare call data using Cloudonix callObject schema
@@ -152,14 +151,15 @@ class CloudonixProvider(TelephonyProvider):
         logger.info(
             f"[Cloudonix] Initiating outbound call:\n"
             f"  Endpoint: {endpoint}\n"
-            f"  To: {to_number}\n"
-            f"  From: {from_number}\n"
+            f"  To: [redacted]\n"
+            f"  From: [redacted]\n"
             f"  Workflow Run ID: {workflow_run_id}"
         )
         logger.debug(
             f"[Cloudonix] Request details:\n"
             f"  Headers: {masked_headers}\n"
-            f"  Payload: {json.dumps(data, indent=2)}"
+            "  Payload: "
+            f"{json.dumps(redact_telephony_payload_for_logs(data), indent=2)}"
         )
 
         async with aiohttp.ClientSession() as session:
@@ -171,20 +171,21 @@ class CloudonixProvider(TelephonyProvider):
                 logger.info(
                     f"[Cloudonix] API Response:\n"
                     f"  HTTP Status: {response_status}\n"
-                    f"  Response Body: {response_text}"
+                    f"  Response Body Length: {len(response_text)}"
                 )
 
                 if response_status != 200:
                     logger.error(
                         f"[Cloudonix] Call initiation FAILED:\n"
                         f"  HTTP Status: {response_status}\n"
-                        f"  Error Details: {response_text}\n"
+                        f"  Error Body Length: {len(response_text)}\n"
                         f"  Request: POST {endpoint}\n"
-                        f"  Payload: {json.dumps(data, indent=2)}"
+                        "  Payload: "
+                        f"{json.dumps(redact_telephony_payload_for_logs(data), indent=2)}"
                     )
                     raise HTTPException(
                         status_code=response_status,
-                        detail=f"Failed to initiate call via Cloudonix (HTTP {response_status}): {response_text}",
+                        detail=f"Failed to initiate call via Cloudonix (HTTP {response_status})",
                     )
 
                 response_data = await response.json()
@@ -206,8 +207,8 @@ class CloudonixProvider(TelephonyProvider):
                     f"  Session Token: {session_token}\n"
                     f"  Domain ID: {domain_id}\n"
                     f"  Subscriber ID: {subscriber_id}\n"
-                    f"  To: {to_number}\n"
-                    f"  From: {from_number}\n"
+                    f"  To: [redacted]\n"
+                    f"  From: [redacted]\n"
                     f"  Workflow Run ID: {workflow_run_id}"
                 )
 

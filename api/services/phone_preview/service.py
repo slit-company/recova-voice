@@ -27,14 +27,48 @@ from api.services.phone_preview.privacy import (
     normalize_preview_phone,
     phone_hash,
 )
+from api.services.phone_preview.otp_delivery import (
+    PhonePreviewOtpDeliveryError,
+    deliver_otp_code,
+)
 from api.services.quota_service import check_dograh_quota_by_user_id
 from api.utils.common import get_backend_endpoints
+
+
+_PREVIEW_METADATA_SENSITIVE_EXACT_KEYS = {"from", "to"}
+_PREVIEW_METADATA_SENSITIVE_FRAGMENTS = (
+    "phone",
+    "number",
+    "destination",
+    "caller",
+    "called",
+)
 
 
 async def _get_preview_telephony_provider_by_id(config_id: int, organization_id: int):
     from api.services.telephony.factory import get_telephony_provider_by_id
 
     return await get_telephony_provider_by_id(config_id, organization_id)
+
+
+def _preview_metadata_key_is_sensitive(key: object) -> bool:
+    key_text = str(key).lower()
+    return key_text in _PREVIEW_METADATA_SENSITIVE_EXACT_KEYS or any(
+        fragment in key_text for fragment in _PREVIEW_METADATA_SENSITIVE_FRAGMENTS
+    )
+
+
+def _redact_preview_metadata(value: Any, *, key: object | None = None) -> Any:
+    if key is not None and _preview_metadata_key_is_sensitive(key):
+        return "[redacted]"
+    if isinstance(value, dict):
+        return {
+            item_key: _redact_preview_metadata(item_value, key=item_key)
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_preview_metadata(item) for item in value]
+    return value
 
 
 @dataclass
@@ -140,6 +174,25 @@ class PhonePreviewService:
             expires_at=now + timedelta(seconds=settings.session_ttl_seconds),
             max_duration_seconds=settings.max_duration_seconds,
         )
+
+        if not should_expose_dev_otp():
+            try:
+                await deliver_otp_code(
+                    phone_number=normalized,
+                    code=code,
+                    masked_phone=masked,
+                    settings=settings,
+                )
+            except PhonePreviewOtpDeliveryError as exc:
+                await db_client.set_phone_preview_verification_status(
+                    verification.id, status="delivery_failed"
+                )
+                await db_client.update_phone_preview_session_status(
+                    session.id, status="failed", failure_reason=str(exc)
+                )
+                raise HTTPException(
+                    status_code=503, detail="otp_delivery_failed"
+                ) from exc
 
         result = self._session_result(session, otp_required=True)
         if should_expose_dev_otp():
@@ -322,8 +375,9 @@ class PhonePreviewService:
         workflow_run_name = f"WR-PREVIEW-{numeric_suffix:08d}"
         initial_context = {
             **(draft.template_context_variables or {}),
-            "phone_number": destination,
-            "called_number": destination,
+            "phone_number": session.phone_number_masked,
+            "called_number": session.phone_number_masked,
+            "phone_number_masked": session.phone_number_masked,
             "called_number_masked": session.phone_number_masked,
             "provider": provider.PROVIDER_NAME,
             "telephony_preview": True,
@@ -347,6 +401,16 @@ class PhonePreviewService:
             organization_id=session.organization_id,
         )
 
+        session = await db_client.attach_phone_preview_call(
+            session.id,
+            workflow_run_id=workflow_run.id,
+            provider=provider.PROVIDER_NAME,
+            provider_call_id=None,
+            clear_destination_phone=True,
+        )
+        if not session:
+            raise HTTPException(status_code=404, detail="preview_session_not_found")
+
         backend_endpoint, _ = await get_backend_endpoints()
         webhook_url = (
             f"{backend_endpoint}/api/v1/telephony/{provider.WEBHOOK_ENDPOINT}"
@@ -368,17 +432,32 @@ class PhonePreviewService:
         provider_call_id = getattr(call_result, "call_id", None) or (
             getattr(call_result, "provider_metadata", {}) or {}
         ).get("call_id")
+        provider_metadata = _redact_preview_metadata(
+            getattr(call_result, "provider_metadata", {}) or {}
+        )
         gathered_context = {
             "provider": provider.PROVIDER_NAME,
             "preview_session_id": session.id,
-            **(getattr(call_result, "provider_metadata", {}) or {}),
+            **provider_metadata,
         }
         if provider_call_id:
             gathered_context["call_id"] = provider_call_id
 
+        session = await db_client.attach_phone_preview_call(
+            session.id,
+            workflow_run_id=workflow_run.id,
+            provider=provider.PROVIDER_NAME,
+            provider_call_id=provider_call_id,
+            clear_destination_phone=True,
+        )
+        if not session:
+            raise HTTPException(status_code=404, detail="preview_session_not_found")
+
         updated_initial_context = {
             **(workflow_run.initial_context or initial_context),
-            "called_number": destination,
+            "phone_number": session.phone_number_masked,
+            "called_number": session.phone_number_masked,
+            "phone_number_masked": session.phone_number_masked,
             "called_number_masked": session.phone_number_masked,
             "telephony_configuration_id": settings.configuration_id,
             "telephony_configuration_organization_id": settings.organization_id,
@@ -387,19 +466,12 @@ class PhonePreviewService:
         }
         caller_number = getattr(call_result, "caller_number", None)
         if caller_number:
-            updated_initial_context["caller_number"] = caller_number
+            updated_initial_context["caller_number_masked"] = mask_phone(caller_number)
 
         await db_client.update_workflow_run(
             run_id=workflow_run.id,
             gathered_context=gathered_context,
             initial_context=updated_initial_context,
-        )
-        session = await db_client.attach_phone_preview_call(
-            session.id,
-            workflow_run_id=workflow_run.id,
-            provider=provider.PROVIDER_NAME,
-            provider_call_id=provider_call_id,
-            clear_destination_phone=True,
         )
         return self._session_result(session, otp_required=False)
 

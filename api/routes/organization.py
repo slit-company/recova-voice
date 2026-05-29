@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -187,6 +188,110 @@ async def _run_preprocess_hook(provider: str, credentials: dict) -> dict:
     return credentials
 
 
+async def _ensure_config_update_preserves_inbound_uniqueness(
+    existing,
+    credentials: dict | None,
+    organization_id: int,
+) -> None:
+    """Reject credential edits that would make active inbound numbers ambiguous."""
+
+    if credentials is None:
+        return
+
+    spec = telephony_registry.get_optional(existing.provider)
+    account_field = spec.account_id_credential_field if spec else ""
+    account_id = (credentials or {}).get(account_field) if account_field else None
+    if not account_id:
+        return
+
+    phone_numbers = await db_client.list_phone_numbers_for_config(existing.id)
+    for phone_number in phone_numbers:
+        if not phone_number.is_active:
+            continue
+        try:
+            conflict = await db_client.find_inbound_routing_conflict(
+                provider=existing.provider,
+                account_id_field=account_field,
+                account_id=account_id,
+                address=phone_number.address,
+                country_hint=phone_number.country_code,
+                exclude_telephony_configuration_id=existing.id,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if conflict:
+            _raise_inbound_routing_conflict(
+                conflict,
+                organization_id=organization_id,
+                action=(
+                    "Updating these credentials would make inbound calls ambiguous "
+                    "for the same provider account."
+                ),
+            )
+
+
+def _raise_inbound_routing_conflict(
+    conflict,
+    *,
+    organization_id: int,
+    action: str,
+) -> None:
+    conflict_config, conflict_phone = conflict
+    same_org = conflict_config.organization_id == organization_id
+    scope = (
+        f"telephony configuration '{conflict_config.name}'"
+        if same_org
+        else "another organization using the same provider account"
+    )
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"Phone number {conflict_phone.address} is already registered under "
+            f"{scope}. {action}"
+        ),
+    )
+
+
+async def _ensure_phone_number_preserves_inbound_uniqueness(
+    cfg,
+    *,
+    address: str,
+    country_hint: str | None,
+    organization_id: int,
+    exclude_telephony_configuration_id: int | None = None,
+    exclude_phone_number_id: int | None = None,
+) -> None:
+    """Reject phone-number inserts that would make inbound dispatch ambiguous."""
+
+    spec = telephony_registry.get_optional(cfg.provider)
+    account_field = spec.account_id_credential_field if spec else ""
+    account_id = (cfg.credentials or {}).get(account_field) if account_field else None
+    if not account_id:
+        return
+
+    try:
+        conflict = await db_client.find_inbound_routing_conflict(
+            provider=cfg.provider,
+            account_id_field=account_field,
+            account_id=account_id,
+            address=address,
+            country_hint=country_hint,
+            exclude_telephony_configuration_id=exclude_telephony_configuration_id,
+            exclude_phone_number_id=exclude_phone_number_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if conflict:
+        _raise_inbound_routing_conflict(
+            conflict,
+            organization_id=organization_id,
+            action=(
+                "Inbound calls cannot be uniquely routed when the same number is "
+                "configured against the same provider account in more than one place."
+            ),
+        )
+
+
 def _phone_number_to_response(
     row, inbound_workflow_name: Optional[str] = None
 ) -> PhoneNumberResponse:
@@ -350,6 +455,11 @@ async def update_telephony_configuration(
             existing.provider, credentials, existing.credentials or {}
         )
         credentials = await _run_preprocess_hook(existing.provider, credentials)
+        await _ensure_config_update_preserves_inbound_uniqueness(
+            existing,
+            credentials,
+            user.selected_organization_id,
+        )
 
     row = await db_client.update_telephony_configuration(
         config_id=config_id,
@@ -439,7 +549,7 @@ async def _ensure_workflow_belongs_to_org(workflow_id: int, organization_id: int
 async def list_phone_numbers(config_id: int, user: UserModel = Depends(require_self_serve_telephony)):
     if not user.selected_organization_id:
         raise HTTPException(status_code=400, detail="No organization selected")
-    await _ensure_config_belongs_to_org(config_id, user.selected_organization_id)
+    cfg = await _ensure_config_belongs_to_org(config_id, user.selected_organization_id)
 
     rows = await db_client.list_phone_numbers_with_workflow_name_for_config(config_id)
     return PhoneNumberListResponse(
@@ -469,37 +579,12 @@ async def create_phone_number(
     # credentials[account_id_field], address_normalized) without the org, so
     # that tuple has to be globally unique. Reject up front if another config —
     # in this org or any other — already owns the same combination.
-    spec = telephony_registry.get_optional(cfg.provider)
-    account_field = spec.account_id_credential_field if spec else ""
-    account_id = (cfg.credentials or {}).get(account_field) if account_field else None
-    if account_id:
-        try:
-            conflict = await db_client.find_inbound_routing_conflict(
-                provider=cfg.provider,
-                account_id_field=account_field,
-                account_id=account_id,
-                address=request.address,
-                country_hint=request.country_code,
-            )
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        if conflict:
-            existing_cfg, existing_phone = conflict
-            same_org = existing_cfg.organization_id == user.selected_organization_id
-            scope = (
-                f"telephony configuration '{existing_cfg.name}'"
-                if same_org
-                else "another organization using the same provider account"
-            )
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Phone number {existing_phone.address} is already registered "
-                    f"under {scope}. Inbound calls cannot be uniquely routed when "
-                    f"the same number is configured against the same provider "
-                    f"account in more than one place."
-                ),
-            )
+    await _ensure_phone_number_preserves_inbound_uniqueness(
+        cfg,
+        address=request.address,
+        country_hint=request.country_code,
+        organization_id=user.selected_organization_id,
+    )
 
     try:
         row = await db_client.create_phone_number(
@@ -560,7 +645,7 @@ async def update_phone_number(
 ):
     if not user.selected_organization_id:
         raise HTTPException(status_code=400, detail="No organization selected")
-    await _ensure_config_belongs_to_org(config_id, user.selected_organization_id)
+    cfg = await _ensure_config_belongs_to_org(config_id, user.selected_organization_id)
 
     existing = await db_client.get_phone_number_for_config(phone_number_id, config_id)
     if not existing:
@@ -569,6 +654,22 @@ async def update_phone_number(
     if request.inbound_workflow_id is not None:
         await _ensure_workflow_belongs_to_org(
             request.inbound_workflow_id, user.selected_organization_id
+        )
+
+    next_is_active = (
+        request.is_active if request.is_active is not None else existing.is_active
+    )
+    if next_is_active:
+        await _ensure_phone_number_preserves_inbound_uniqueness(
+            cfg,
+            address=existing.address,
+            country_hint=(
+                request.country_code
+                if request.country_code is not None
+                else existing.country_code
+            ),
+            organization_id=user.selected_organization_id,
+            exclude_phone_number_id=phone_number_id,
         )
 
     row = await db_client.update_phone_number(
@@ -687,12 +788,36 @@ async def save_telephony_configuration(
 
     if default and default.provider == request.provider:
         preserve_masked_fields(request.provider, payload, default.credentials or {})
+        payload = await _run_preprocess_hook(request.provider, payload)
+        await _ensure_config_update_preserves_inbound_uniqueness(
+            default,
+            payload,
+            user.selected_organization_id,
+        )
+        proposed_cfg = SimpleNamespace(provider=request.provider, credentials=payload)
+        for addr in new_addresses:
+            await _ensure_phone_number_preserves_inbound_uniqueness(
+                proposed_cfg,
+                address=addr,
+                country_hint=None,
+                organization_id=user.selected_organization_id,
+                exclude_telephony_configuration_id=default.id,
+            )
         row = await db_client.update_telephony_configuration(
             config_id=default.id,
             organization_id=user.selected_organization_id,
             credentials=payload,
         )
     else:
+        payload = await _run_preprocess_hook(request.provider, payload)
+        proposed_cfg = SimpleNamespace(provider=request.provider, credentials=payload)
+        for addr in new_addresses:
+            await _ensure_phone_number_preserves_inbound_uniqueness(
+                proposed_cfg,
+                address=addr,
+                country_hint=None,
+                organization_id=user.selected_organization_id,
+            )
         row = await db_client.create_telephony_configuration(
             organization_id=user.selected_organization_id,
             name=f"{request.provider.title()} Default",
@@ -708,6 +833,13 @@ async def save_telephony_configuration(
     for addr in new_addresses:
         if addr in existing_by_address:
             continue
+        await _ensure_phone_number_preserves_inbound_uniqueness(
+            row,
+            address=addr,
+            country_hint=None,
+            organization_id=user.selected_organization_id,
+            exclude_telephony_configuration_id=row.id,
+        )
         try:
             await db_client.create_phone_number(
                 organization_id=user.selected_organization_id,

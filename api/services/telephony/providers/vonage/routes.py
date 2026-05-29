@@ -16,6 +16,7 @@ from api.services.telephony.factory import get_telephony_provider_for_run
 from api.services.telephony.status_processor import (
     StatusCallbackRequest,
     _process_status_update,
+    redact_telephony_payload_for_logs,
 )
 
 router = APIRouter()
@@ -58,7 +59,10 @@ async def handle_vonage_events(
     set_current_run_id(workflow_run_id)
     # Parse the event data
     event_data = await request.json()
-    logger.info(f"[run {workflow_run_id}] Received Vonage event: {event_data}")
+    logger.info(
+        f"[run {workflow_run_id}] Received Vonage event: "
+        f"{redact_telephony_payload_for_logs(event_data)}"
+    )
 
     # Get workflow run for processing
     workflow_run = await db_client.get_workflow_run_by_id(workflow_run_id)

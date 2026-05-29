@@ -394,7 +394,7 @@ class ARIProvider(TelephonyProvider):
             raise ValueError("ARI provider not properly configured")
 
         logger.info(
-            f"[ARI Transfer] Initiating transfer {transfer_id} to {destination} "
+            f"[ARI Transfer] Initiating transfer {transfer_id} to [redacted] "
             f"(timeout: {timeout}s)"
         )
 

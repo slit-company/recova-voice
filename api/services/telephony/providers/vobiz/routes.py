@@ -20,6 +20,7 @@ from api.services.telephony.factory import (
 from api.services.telephony.status_processor import (
     StatusCallbackRequest,
     _process_status_update,
+    redact_telephony_payload_for_logs,
 )
 from api.utils.common import get_backend_endpoints
 from api.utils.telephony_helper import (
@@ -78,19 +79,22 @@ async def handle_vobiz_hangup_callback(
     # Logging all headers and body to understand what Vobiz actually sends
     all_headers = dict(request.headers)
     logger.info(
-        f"[run {workflow_run_id}] Vobiz hangup callback - Headers: {json.dumps(all_headers)}"
+        f"[run {workflow_run_id}] Vobiz hangup callback - Headers: "
+        f"{json.dumps(redact_telephony_payload_for_logs(all_headers))}"
     )
 
     # Parse the callback data from the raw body so signed webhooks can verify
     # the exact bytes Vobiz sent without draining the request stream first.
     callback_data, raw_body = await parse_webhook_request(request)
 
-    # TODO: Remove this debug logging after Vobiz team clarifies webhook authentication
+    # Log only redacted callback fields for Vobiz diagnostics.
     logger.info(
-        f"[run {workflow_run_id}] Vobiz hangup callback - Body: {json.dumps(callback_data)}"
+        f"[run {workflow_run_id}] Vobiz hangup callback - Body: "
+        f"{json.dumps(redact_telephony_payload_for_logs(callback_data))}"
     )
     logger.info(
-        f"[run {workflow_run_id}] Received Vobiz hangup callback {json.dumps(callback_data)}"
+        f"[run {workflow_run_id}] Received Vobiz hangup callback "
+        f"{json.dumps(redact_telephony_payload_for_logs(callback_data))}"
     )
 
     # Verify signature if Vobiz provided any supported signature header.
@@ -168,7 +172,8 @@ async def handle_vobiz_hangup_callback(
     parsed_data = provider.parse_status_callback(callback_data)
 
     logger.debug(
-        f"[run {workflow_run_id}] Parsed Vobiz callback data: {json.dumps(parsed_data)}"
+        f"[run {workflow_run_id}] Parsed Vobiz callback data: "
+        f"{json.dumps(redact_telephony_payload_for_logs(parsed_data))}"
     )
 
     # Create StatusCallbackRequest from parsed data
@@ -207,20 +212,23 @@ async def handle_vobiz_ring_callback(
     # Logging all headers and body to understand what Vobiz actually sends
     all_headers = dict(request.headers)
     logger.info(
-        f"[run {workflow_run_id}] Vobiz ring callback - Headers: {json.dumps(all_headers)}"
+        f"[run {workflow_run_id}] Vobiz ring callback - Headers: "
+        f"{json.dumps(redact_telephony_payload_for_logs(all_headers))}"
     )
 
     # Parse the callback data from the raw body so signed webhooks can verify
     # the exact bytes Vobiz sent without draining the request stream first.
     callback_data, raw_body = await parse_webhook_request(request)
 
-    # TODO: Remove this debug logging after Vobiz team clarifies webhook authentication
+    # Log only redacted callback fields for Vobiz diagnostics.
     logger.info(
-        f"[run {workflow_run_id}] Vobiz ring callback - Body: {json.dumps(callback_data)}"
+        f"[run {workflow_run_id}] Vobiz ring callback - Body: "
+        f"{json.dumps(redact_telephony_payload_for_logs(callback_data))}"
     )
 
     logger.info(
-        f"[run {workflow_run_id}] Received Vobiz ring callback {json.dumps(callback_data)}"
+        f"[run {workflow_run_id}] Received Vobiz ring callback "
+        f"{json.dumps(redact_telephony_payload_for_logs(callback_data))}"
     )
 
     # Verify signature if Vobiz provided any supported signature header.
@@ -289,7 +297,7 @@ async def handle_vobiz_ring_callback(
         "timestamp": datetime.now(UTC).isoformat(),
         "call_id": callback_data.get("call_uuid", callback_data.get("CallUUID", "")),
         "event_type": "ring",
-        "raw_data": callback_data,
+        "raw_data": redact_telephony_payload_for_logs(callback_data),
     }
     telephony_callback_logs.append(ring_log)
 
@@ -315,7 +323,8 @@ async def handle_vobiz_hangup_callback_by_workflow(
 
     all_headers = dict(request.headers)
     logger.info(
-        f"[workflow {workflow_id}] Vobiz hangup callback - Headers: {json.dumps(all_headers)}"
+        f"[workflow {workflow_id}] Vobiz hangup callback - Headers: "
+        f"{json.dumps(redact_telephony_payload_for_logs(all_headers))}"
     )
 
     try:
@@ -326,7 +335,8 @@ async def handle_vobiz_hangup_callback_by_workflow(
 
     call_uuid = callback_data.get("CallUUID") or callback_data.get("call_uuid")
     logger.info(
-        f"[workflow {workflow_id}] Received Vobiz hangup callback for call {call_uuid}: {json.dumps(callback_data)}"
+        f"[workflow {workflow_id}] Received Vobiz hangup callback for call "
+        f"{call_uuid}: {json.dumps(redact_telephony_payload_for_logs(callback_data))}"
     )
 
     if not call_uuid:

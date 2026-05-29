@@ -2447,6 +2447,90 @@ export type PhoneNumberUpdateRequest = {
 };
 
 /**
+ * PhonePreviewCallRequest
+ */
+export type PhonePreviewCallRequest = {
+    /**
+     * Session Id
+     */
+    session_id: number;
+};
+
+/**
+ * PhonePreviewResponse
+ */
+export type PhonePreviewResponse = {
+    /**
+     * Session Id
+     */
+    session_id: number;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Otp Required
+     */
+    otp_required?: boolean;
+    /**
+     * Masked Phone
+     */
+    masked_phone: string;
+    /**
+     * Expires At
+     */
+    expires_at: string;
+    /**
+     * Workflow Run Id
+     */
+    workflow_run_id?: number | null;
+    /**
+     * Provider Call Id
+     */
+    provider_call_id?: string | null;
+    /**
+     * Failure Reason
+     */
+    failure_reason?: string | null;
+    /**
+     * Dev Otp Code
+     */
+    dev_otp_code?: string | null;
+};
+
+/**
+ * PhonePreviewStartRequest
+ */
+export type PhonePreviewStartRequest = {
+    /**
+     * Workflow Id
+     */
+    workflow_id: number;
+    /**
+     * Phone Number
+     */
+    phone_number: string;
+    /**
+     * Display Name
+     */
+    display_name?: string | null;
+};
+
+/**
+ * PhonePreviewVerifyRequest
+ */
+export type PhonePreviewVerifyRequest = {
+    /**
+     * Session Id
+     */
+    session_id: number;
+    /**
+     * Otp Code
+     */
+    otp_code: string;
+};
+
+/**
  * PlivoConfigurationRequest
  *
  * Request schema for Plivo configuration.
@@ -4078,12 +4162,18 @@ export type UserConfigurationRequestResponseSchema = {
     /**
      * Ui Language
      */
-    ui_language?: "en" | "ko" | null;
+    ui_language?: 'en' | 'ko' | null;
     /**
      * Organization Pricing
      */
     organization_pricing?: {
         [key: string]: number | string | boolean;
+    } | null;
+    /**
+     * Feature Gates
+     */
+    feature_gates?: {
+        [key: string]: boolean;
     } | null;
 };
 
@@ -5418,6 +5508,211 @@ export type HandleVonageEventsApiV1TelephonyVonageEventsWorkflowRunIdPostRespons
      */
     200: unknown;
 };
+
+export type StartPhonePreviewApiV1PhonePreviewStartPostData = {
+    body: PhonePreviewStartRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/phone-preview/start';
+};
+
+export type StartPhonePreviewApiV1PhonePreviewStartPostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type StartPhonePreviewApiV1PhonePreviewStartPostError = StartPhonePreviewApiV1PhonePreviewStartPostErrors[keyof StartPhonePreviewApiV1PhonePreviewStartPostErrors];
+
+export type StartPhonePreviewApiV1PhonePreviewStartPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: PhonePreviewResponse;
+};
+
+export type StartPhonePreviewApiV1PhonePreviewStartPostResponse = StartPhonePreviewApiV1PhonePreviewStartPostResponses[keyof StartPhonePreviewApiV1PhonePreviewStartPostResponses];
+
+export type VerifyPhonePreviewApiV1PhonePreviewVerifyPostData = {
+    body: PhonePreviewVerifyRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/phone-preview/verify';
+};
+
+export type VerifyPhonePreviewApiV1PhonePreviewVerifyPostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type VerifyPhonePreviewApiV1PhonePreviewVerifyPostError = VerifyPhonePreviewApiV1PhonePreviewVerifyPostErrors[keyof VerifyPhonePreviewApiV1PhonePreviewVerifyPostErrors];
+
+export type VerifyPhonePreviewApiV1PhonePreviewVerifyPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: PhonePreviewResponse;
+};
+
+export type VerifyPhonePreviewApiV1PhonePreviewVerifyPostResponse = VerifyPhonePreviewApiV1PhonePreviewVerifyPostResponses[keyof VerifyPhonePreviewApiV1PhonePreviewVerifyPostResponses];
+
+export type CallPhonePreviewApiV1PhonePreviewCallPostData = {
+    body: PhonePreviewCallRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/phone-preview/call';
+};
+
+export type CallPhonePreviewApiV1PhonePreviewCallPostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type CallPhonePreviewApiV1PhonePreviewCallPostError = CallPhonePreviewApiV1PhonePreviewCallPostErrors[keyof CallPhonePreviewApiV1PhonePreviewCallPostErrors];
+
+export type CallPhonePreviewApiV1PhonePreviewCallPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: PhonePreviewResponse;
+};
+
+export type CallPhonePreviewApiV1PhonePreviewCallPostResponse = CallPhonePreviewApiV1PhonePreviewCallPostResponses[keyof CallPhonePreviewApiV1PhonePreviewCallPostResponses];
+
+export type GetPhonePreviewStatusByStatusPathApiV1PhonePreviewStatusSessionIdGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path: {
+        /**
+         * Session Id
+         */
+        session_id: number;
+    };
+    query?: never;
+    url: '/api/v1/phone-preview/status/{session_id}';
+};
+
+export type GetPhonePreviewStatusByStatusPathApiV1PhonePreviewStatusSessionIdGetErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type GetPhonePreviewStatusByStatusPathApiV1PhonePreviewStatusSessionIdGetError = GetPhonePreviewStatusByStatusPathApiV1PhonePreviewStatusSessionIdGetErrors[keyof GetPhonePreviewStatusByStatusPathApiV1PhonePreviewStatusSessionIdGetErrors];
+
+export type GetPhonePreviewStatusByStatusPathApiV1PhonePreviewStatusSessionIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: PhonePreviewResponse;
+};
+
+export type GetPhonePreviewStatusByStatusPathApiV1PhonePreviewStatusSessionIdGetResponse = GetPhonePreviewStatusByStatusPathApiV1PhonePreviewStatusSessionIdGetResponses[keyof GetPhonePreviewStatusByStatusPathApiV1PhonePreviewStatusSessionIdGetResponses];
+
+export type GetPhonePreviewStatusApiV1PhonePreviewSessionIdGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path: {
+        /**
+         * Session Id
+         */
+        session_id: number;
+    };
+    query?: never;
+    url: '/api/v1/phone-preview/{session_id}';
+};
+
+export type GetPhonePreviewStatusApiV1PhonePreviewSessionIdGetErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type GetPhonePreviewStatusApiV1PhonePreviewSessionIdGetError = GetPhonePreviewStatusApiV1PhonePreviewSessionIdGetErrors[keyof GetPhonePreviewStatusApiV1PhonePreviewSessionIdGetErrors];
+
+export type GetPhonePreviewStatusApiV1PhonePreviewSessionIdGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: PhonePreviewResponse;
+};
+
+export type GetPhonePreviewStatusApiV1PhonePreviewSessionIdGetResponse = GetPhonePreviewStatusApiV1PhonePreviewSessionIdGetResponses[keyof GetPhonePreviewStatusApiV1PhonePreviewSessionIdGetResponses];
 
 export type ImpersonateApiV1SuperuserImpersonatePostData = {
     body: ImpersonateRequest;

@@ -97,7 +97,7 @@ class VonageProvider(TelephonyProvider):
         from_number = from_number.replace("+", "")
         to_number = to_number.replace("+", "")
 
-        logger.info(f"Selected phone number {from_number} for outbound call")
+        logger.info("Selected phone number [redacted] for outbound call")
 
         # Prepare call data
         data = {
