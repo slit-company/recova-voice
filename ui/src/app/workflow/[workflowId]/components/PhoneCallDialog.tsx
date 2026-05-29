@@ -68,7 +68,6 @@ const otpRequiredFrom = (data: PhonePreviewResponse) =>
 const maskedPhoneFrom = (data: PhonePreviewResponse) => data.masked_phone ?? "";
 const expiresAtFrom = (data: PhonePreviewResponse) => data.expires_at ?? "";
 const workflowRunIdFrom = (data: PhonePreviewResponse) => data.workflow_run_id ?? null;
-const providerCallIdFrom = (data: PhonePreviewResponse) => data.provider_call_id ?? null;
 const failureReasonFrom = (data: PhonePreviewResponse) => data.failure_reason ?? null;
 
 export const PhoneCallDialog = ({
@@ -88,7 +87,6 @@ export const PhoneCallDialog = ({
     const [maskedPhone, setMaskedPhone] = useState("");
     const [expiresAt, setExpiresAt] = useState("");
     const [workflowRunId, setWorkflowRunId] = useState<number | string | null>(null);
-    const [providerCallId, setProviderCallId] = useState<string | null>(null);
     const [status, setStatus] = useState<string>("idle");
     const [step, setStep] = useState<PreviewStep>("entry");
     const [busy, setBusy] = useState<BusyState>(null);
@@ -107,7 +105,6 @@ export const PhoneCallDialog = ({
         setMaskedPhone("");
         setExpiresAt("");
         setWorkflowRunId(null);
-        setProviderCallId(null);
         setStatus("idle");
         setStep("entry");
         setBusy(null);
@@ -130,7 +127,6 @@ export const PhoneCallDialog = ({
         const nextMaskedPhone = maskedPhoneFrom(data);
         const nextExpiresAt = expiresAtFrom(data);
         const nextWorkflowRunId = workflowRunIdFrom(data);
-        const nextProviderCallId = providerCallIdFrom(data);
         const failureReason = failureReasonFrom(data);
 
         if (nextSessionId) setSessionId(nextSessionId);
@@ -138,7 +134,6 @@ export const PhoneCallDialog = ({
         if (nextExpiresAt) setExpiresAt(nextExpiresAt);
         setStatus((current) => data.status ?? current);
         setWorkflowRunId(nextWorkflowRunId);
-        setProviderCallId(nextProviderCallId);
         if (failureReason) {
             setError(formatError(failureReason));
             setSuccess(null);
@@ -235,12 +230,10 @@ export const PhoneCallDialog = ({
         const data = await callPreview({ session_id: Number(targetSessionId) });
         const nextStatus = data.status ?? "calling";
         const nextWorkflowRunId = workflowRunIdFrom(data);
-        const nextProviderCallId = providerCallIdFrom(data);
         const failureReason = failureReasonFrom(data);
 
         setStatus(nextStatus);
         setWorkflowRunId(nextWorkflowRunId);
-        setProviderCallId(nextProviderCallId);
         setStep(nextStatus === "failed" ? "complete" : "calling");
         if (failureReason) {
             setError(formatError(failureReason));
@@ -330,7 +323,6 @@ export const PhoneCallDialog = ({
         setMaskedPhone("");
         setExpiresAt("");
         setWorkflowRunId(null);
-        setProviderCallId(null);
         setStatus("idle");
         setStep("entry");
         setError(null);
@@ -461,11 +453,6 @@ export const PhoneCallDialog = ({
                                     {workflowRunId && (
                                         <p className="mt-1 text-xs text-muted-foreground">
                                             {t("phoneCall.workflowRun")} {workflowRunId}
-                                        </p>
-                                    )}
-                                    {providerCallId && (
-                                        <p className="text-xs text-muted-foreground">
-                                            {t("phoneCall.providerCall")} {providerCallId}
                                         </p>
                                     )}
                                 </div>

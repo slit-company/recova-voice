@@ -688,7 +688,6 @@ export const messages = {
     "phoneCall.callStarted": "Recova is calling now. Keep your phone nearby.",
     "phoneCall.callStatusTitle": "Preview call requested",
     "phoneCall.workflowRun": "Workflow run:",
-    "phoneCall.providerCall": "Provider call:",
     "phoneCall.again": "Preview another number",
     "phoneCall.close": "Close",
     "phoneCall.errorTelephonyNotConfigured":
@@ -1431,7 +1430,6 @@ export const messages = {
     "phoneCall.callStarted": "Recova가 지금 전화를 걸고 있습니다. 휴대폰을 확인해 주세요.",
     "phoneCall.callStatusTitle": "프리뷰 전화 요청됨",
     "phoneCall.workflowRun": "워크플로 실행:",
-    "phoneCall.providerCall": "제공자 통화:",
     "phoneCall.again": "다른 번호로 프리뷰",
     "phoneCall.close": "닫기",
     "phoneCall.errorTelephonyNotConfigured":
