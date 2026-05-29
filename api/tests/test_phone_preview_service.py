@@ -424,6 +424,101 @@ async def test_call_after_verification_uses_system_provider_and_preview_markers(
 
 
 @pytest.mark.asyncio
+async def test_call_provider_error_returns_generic_preview_failure(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_CONFIGURATION_ID", "901")
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+    raw_to = "+821012345678"
+    raw_provider_detail = (
+        '{"message":"failed","to":"+821012345678","account_sid":"ACSECRET"}'
+    )
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    session = SimpleNamespace(
+        id=123,
+        organization_id=11,
+        user_id=7,
+        workflow_id=33,
+        workflow_run_id=None,
+        status="verified",
+        phone_number_hash="hash",
+        phone_number_masked="+82****5678",
+        destination_phone_encrypted=encrypt_phone(raw_to),
+        display_name=None,
+        max_duration_seconds=300,
+        expires_at=expires_at,
+        provider_call_id=None,
+        failure_reason=None,
+    )
+    attached_session = SimpleNamespace(
+        **{
+            **session.__dict__,
+            "status": "calling",
+            "workflow_run_id": 501,
+            "provider": "twilio",
+        }
+    )
+    provider = SimpleNamespace(
+        PROVIDER_NAME="twilio",
+        WEBHOOK_ENDPOINT="twilio/voice",
+        validate_config=Mock(return_value=True),
+        initiate_call=AsyncMock(
+            side_effect=HTTPException(status_code=400, detail=raw_provider_detail)
+        ),
+    )
+
+    async def create_run(*args, **kwargs):
+        return SimpleNamespace(id=501, name=args[0], initial_context=kwargs["initial_context"])
+
+    with (
+        patch("api.services.phone_preview.service.db_client") as mock_db,
+        patch(
+            "api.services.phone_preview.service._get_preview_telephony_provider_by_id",
+            new=AsyncMock(return_value=provider),
+        ),
+        patch(
+            "api.services.phone_preview.service.check_dograh_quota_by_user_id",
+            new=AsyncMock(
+                return_value=SimpleNamespace(has_quota=True, error_message="")
+            ),
+        ),
+        patch(
+            "api.services.phone_preview.service.get_backend_endpoints",
+            new=AsyncMock(return_value=("https://api.example.com", "wss://ignored")),
+        ),
+    ):
+        mock_db.begin_phone_preview_call = AsyncMock(return_value=(session, True))
+        mock_db.get_workflow = AsyncMock(
+            return_value=SimpleNamespace(id=33, user_id=99, organization_id=11)
+        )
+        mock_db.get_draft_version = AsyncMock(
+            return_value=SimpleNamespace(id=44, template_context_variables={})
+        )
+        mock_db.count_phone_preview_sessions_since = AsyncMock(return_value=1)
+        mock_db.create_workflow_run = AsyncMock(side_effect=create_run)
+        mock_db.attach_phone_preview_call = AsyncMock(return_value=attached_session)
+        mock_db.update_phone_preview_session_status = AsyncMock()
+        mock_db.update_workflow_run = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await service.call(user=user, session_id=123)
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "preview_call_failed"
+    mock_db.update_phone_preview_session_status.assert_awaited_once_with(
+        123, status="failed", failure_reason="preview_call_failed"
+    )
+    assert raw_to not in str(mock_db.update_phone_preview_session_status.await_args)
+    assert "ACSECRET" not in str(mock_db.update_phone_preview_session_status.await_args)
+    mock_db.update_workflow_run.assert_not_awaited()
+    assert (
+        mock_db.attach_phone_preview_call.await_args.kwargs["clear_destination_phone"]
+        is True
+    )
+
+
+@pytest.mark.asyncio
 async def test_call_is_idempotent_after_session_is_already_calling(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")

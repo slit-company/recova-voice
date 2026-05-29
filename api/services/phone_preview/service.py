@@ -420,14 +420,20 @@ class PhonePreviewService:
             f"&organization_id={session.organization_id}"
         )
 
-        call_result = await provider.initiate_call(
-            to_number=destination,
-            webhook_url=webhook_url,
-            workflow_run_id=workflow_run.id,
-            from_number=from_number,
-            workflow_id=workflow.id,
-            user_id=workflow.user_id,
-        )
+        try:
+            call_result = await provider.initiate_call(
+                to_number=destination,
+                webhook_url=webhook_url,
+                workflow_run_id=workflow_run.id,
+                from_number=from_number,
+                workflow_id=workflow.id,
+                user_id=workflow.user_id,
+            )
+        except HTTPException as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="preview_call_failed",
+            ) from exc
 
         provider_call_id = getattr(call_result, "call_id", None) or (
             getattr(call_result, "provider_metadata", {}) or {}
