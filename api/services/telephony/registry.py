@@ -120,6 +120,15 @@ class ProviderSpec:
     # create/update. Called with the post-mask, post-merge credentials dict
     # and must return the dict to write. Raise HTTPException to abort save.
     preprocess_credentials_on_save: Optional[CredentialsPreprocessor] = None
+    # Providers that are infrastructure-only should not appear in the normal
+    # self-serve telephony configuration UI.
+    visible_in_self_serve: bool = True
+    # False means the provider can perform outbound control only and must not be
+    # treated as a live Recova media transport by generic call/campaign paths.
+    supports_media_transport: bool = True
+    # True marks a constrained provider that is allowed only for server-owned
+    # preview smoke paths.
+    supports_preview_smoke: bool = False
 
 
 _REGISTRY: Dict[str, ProviderSpec] = {}

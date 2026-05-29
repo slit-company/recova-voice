@@ -227,6 +227,11 @@ async def _execute_resolved_target(
             status_code=400,
             detail="Telephony provider not configured for this organization",
         )
+    if not getattr(provider, "SUPPORTS_MEDIA_TRANSPORT", True):
+        raise HTTPException(
+            status_code=400,
+            detail="telephony_provider_not_supported_for_public_agent_calls",
+        )
 
     # 7. Determine the workflow run mode based on provider type
     workflow_run_mode = provider.PROVIDER_NAME

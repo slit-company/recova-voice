@@ -6,10 +6,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
+from loguru import logger
 
 from api.db import db_client
 from api.db.models import UserModel
-from api.enums import CallType
+from api.enums import CallType, WorkflowRunMode
 from api.services.phone_preview.config import (
     get_preview_telephony_settings,
     should_expose_dev_otp,
@@ -328,7 +329,15 @@ class PhonePreviewService:
     async def status(self, *, user: UserModel, session_id: int) -> PhonePreviewResult:
         organization_id = self._selected_org(user)
         session = await self._get_user_session(session_id, organization_id, user.id)
-        session = await self._expire_session_if_stale(session)
+        session = await self._expire_session_if_stale(
+            session,
+            expirable_statuses={
+                "pending_verification",
+                "verified",
+                "calling",
+                "active",
+            },
+        )
         if session.workflow_run_id and session.status in {"calling", "active"}:
             workflow_run = await db_client.get_workflow_run(
                 session.workflow_run_id, organization_id=organization_id
@@ -338,8 +347,89 @@ class PhonePreviewService:
                     session.id, status="completed", completed=True
                 )
                 session = updated_session or session
+            elif workflow_run and session.provider == WorkflowRunMode.AWS_CONNECT.value:
+                session = await self._refresh_aws_connect_preview_status(
+                    session=session,
+                    workflow_run=workflow_run,
+                    organization_id=organization_id,
+                )
         return self._session_result(
             session, otp_required=session.status == "pending_verification"
+        )
+
+    async def _refresh_aws_connect_preview_status(
+        self,
+        *,
+        session,
+        workflow_run,
+        organization_id: int,
+    ):
+        """Poll Amazon Connect smoke-call status for preview sessions.
+
+        Amazon Connect contact flows do not connect back to Recova's WebSocket
+        transport, so no Pipecat runtime marks the workflow run complete. Poll
+        DescribeContact and close the preview session when the Connect contact
+        has disconnected.
+        """
+        if not session.provider_call_id:
+            return session
+
+        try:
+            from api.services.telephony.factory import get_telephony_provider_for_run
+
+            provider = await get_telephony_provider_for_run(
+                workflow_run, organization_id
+            )
+            status_payload = await provider.get_call_status(session.provider_call_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to refresh Amazon Connect preview status: "
+                f"{exc.__class__.__name__}"
+            )
+            await db_client.update_workflow_run(
+                run_id=workflow_run.id,
+                is_completed=True,
+                gathered_context={
+                    "provider_status": "failed",
+                    "provider_error": "aws_connect_status_unavailable",
+                },
+            )
+            return (
+                await db_client.update_phone_preview_session_status(
+                    session.id,
+                    status="failed",
+                    failure_reason="aws_connect_status_unavailable",
+                )
+                or session
+            )
+
+        provider_status = str(status_payload.get("status") or "").lower()
+        if provider_status not in {
+            "completed",
+            "failed",
+            "busy",
+            "no-answer",
+            "canceled",
+        }:
+            return session
+
+        await db_client.update_workflow_run(
+            run_id=workflow_run.id,
+            is_completed=True,
+            gathered_context={
+                "provider_status": provider_status,
+                "provider_disconnect_reason": status_payload.get("disconnect_reason"),
+            },
+        )
+        status = "completed" if provider_status == "completed" else "failed"
+        return (
+            await db_client.update_phone_preview_session_status(
+                session.id,
+                status=status,
+                failure_reason=None if status == "completed" else provider_status,
+                completed=status == "completed",
+            )
+            or session
         )
 
     async def _expire_session_if_stale(
@@ -420,6 +510,16 @@ class PhonePreviewService:
                     status_code=400, detail="preview_from_phone_number_not_found"
                 )
             from_number = phone_row.address_normalized
+        if provider.PROVIDER_NAME == WorkflowRunMode.AWS_CONNECT.value:
+            if not from_number:
+                raise HTTPException(
+                    status_code=400, detail="preview_from_phone_number_required"
+                )
+            available_numbers = await provider.get_available_phone_numbers()
+            if from_number not in available_numbers:
+                raise HTTPException(
+                    status_code=400, detail="preview_from_phone_number_not_configured"
+                )
 
         numeric_suffix = int(str(uuid.uuid4()).replace("-", "")[:8], 16) % 100000000
         workflow_run_name = f"WR-PREVIEW-{numeric_suffix:08d}"
@@ -458,13 +558,16 @@ class PhonePreviewService:
             raise HTTPException(status_code=404, detail="preview_session_not_found")
 
         backend_endpoint, _ = await get_backend_endpoints()
-        webhook_url = (
-            f"{backend_endpoint}/api/v1/telephony/{provider.WEBHOOK_ENDPOINT}"
-            f"?workflow_id={workflow.id}"
-            f"&user_id={workflow.user_id}"
-            f"&workflow_run_id={workflow_run.id}"
-            f"&organization_id={session.organization_id}"
-        )
+        if provider.WEBHOOK_ENDPOINT:
+            webhook_url = (
+                f"{backend_endpoint}/api/v1/telephony/{provider.WEBHOOK_ENDPOINT}"
+                f"?workflow_id={workflow.id}"
+                f"&user_id={workflow.user_id}"
+                f"&workflow_run_id={workflow_run.id}"
+                f"&organization_id={session.organization_id}"
+            )
+        else:
+            webhook_url = backend_endpoint
 
         try:
             call_result = await provider.initiate_call(

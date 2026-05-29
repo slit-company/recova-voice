@@ -321,6 +321,49 @@ class TestDispatcherThreadsTelephonyConfig:
             )
 
     @pytest.mark.asyncio
+    async def test_dispatch_call_rejects_outbound_control_only_provider(self):
+        org_id = 7
+        config_id = 4242
+        campaign = _make_campaign(
+            organization_id=org_id, telephony_configuration_id=config_id
+        )
+        queued_run = _make_queued_run()
+
+        provider = MagicMock()
+        provider.PROVIDER_NAME = "aws_connect"
+        provider.SUPPORTS_MEDIA_TRANSPORT = False
+        provider.from_numbers = ["+827040223234"]
+        provider.initiate_call = AsyncMock()
+
+        dispatcher = CampaignCallDispatcher()
+
+        with (
+            patch.object(
+                dispatcher,
+                "get_provider_for_campaign",
+                AsyncMock(return_value=provider),
+            ),
+            patch(
+                "api.services.campaign.campaign_call_dispatcher.db_client"
+            ) as mock_db,
+            patch(
+                "api.services.campaign.campaign_call_dispatcher.rate_limiter"
+            ) as mock_rl,
+        ):
+            mock_db.get_workflow_by_id = AsyncMock(return_value=SimpleNamespace(id=1))
+            mock_db.create_workflow_run = AsyncMock()
+            mock_rl.release_concurrent_slot = AsyncMock()
+            mock_rl.acquire_from_number = AsyncMock()
+
+            with pytest.raises(ValueError, match="does not support campaign calls"):
+                await dispatcher.dispatch_call(queued_run, campaign, slot_id="slot-1")
+
+            mock_rl.release_concurrent_slot.assert_awaited_once_with(org_id, "slot-1")
+            mock_rl.acquire_from_number.assert_not_awaited()
+            mock_db.create_workflow_run.assert_not_awaited()
+            provider.initiate_call.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_release_call_slot_uses_stored_telephony_config(self):
         """When a call completes, release_call_slot must release the from_number
         to the same telephony config it was acquired from."""

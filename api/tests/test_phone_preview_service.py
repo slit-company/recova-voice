@@ -619,6 +619,79 @@ async def test_call_after_verification_uses_system_provider_and_preview_markers(
 
 
 @pytest.mark.asyncio
+async def test_aws_connect_preview_requires_configured_source_number(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_CONFIGURATION_ID", "901")
+    monkeypatch.delenv("RECOVA_PREVIEW_FROM_PHONE_NUMBER_ID", raising=False)
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    session = SimpleNamespace(
+        id=123,
+        organization_id=11,
+        user_id=7,
+        workflow_id=33,
+        workflow_run_id=None,
+        status="verified",
+        phone_number_hash="hash",
+        phone_number_global_hash="global-hash",
+        phone_number_masked="+82****5678",
+        destination_phone_encrypted=encrypt_phone("+821012345678"),
+        display_name=None,
+        max_duration_seconds=300,
+        expires_at=expires_at,
+        provider_call_id=None,
+        failure_reason=None,
+    )
+    provider = SimpleNamespace(
+        PROVIDER_NAME="aws_connect",
+        WEBHOOK_ENDPOINT=None,
+        validate_config=Mock(return_value=True),
+        get_available_phone_numbers=AsyncMock(return_value=["+827040223234"]),
+        initiate_call=AsyncMock(),
+    )
+
+    with (
+        patch("api.services.phone_preview.service.db_client") as mock_db,
+        patch(
+            "api.services.phone_preview.service._get_preview_telephony_provider_by_id",
+            new=AsyncMock(return_value=provider),
+        ),
+        patch(
+            "api.services.phone_preview.service.check_dograh_quota_by_user_id",
+            new=AsyncMock(
+                return_value=SimpleNamespace(has_quota=True, error_message="")
+            ),
+        ),
+    ):
+        mock_db.begin_phone_preview_call = AsyncMock(return_value=(session, True))
+        mock_db.get_workflow = AsyncMock(
+            return_value=SimpleNamespace(id=33, user_id=99, organization_id=11)
+        )
+        mock_db.get_draft_version = AsyncMock(
+            return_value=SimpleNamespace(id=44, template_context_variables={})
+        )
+        mock_db.count_phone_preview_sessions_since = AsyncMock(return_value=1)
+        mock_db.create_workflow_run = AsyncMock()
+        mock_db.update_phone_preview_session_status = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await service.call(user=user, session_id=123)
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "preview_from_phone_number_required"
+    provider.get_available_phone_numbers.assert_not_awaited()
+    provider.initiate_call.assert_not_awaited()
+    mock_db.create_workflow_run.assert_not_awaited()
+    mock_db.update_phone_preview_session_status.assert_awaited_once_with(
+        123,
+        status="failed",
+        failure_reason="preview_from_phone_number_required",
+    )
+
+
+@pytest.mark.asyncio
 async def test_call_provider_error_returns_generic_preview_failure(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")
@@ -1025,4 +1098,127 @@ async def test_status_marks_completed_run_and_clears_preview_destination():
     mock_db.get_workflow_run.assert_awaited_once_with(501, organization_id=11)
     mock_db.update_phone_preview_session_status.assert_awaited_once_with(
         123, status="completed", completed=True
+    )
+
+
+@pytest.mark.asyncio
+async def test_status_polls_aws_connect_preview_call_until_terminal():
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    session = SimpleNamespace(
+        id=123,
+        status="calling",
+        provider="aws_connect",
+        phone_number_masked="+82****5678",
+        expires_at=expires_at,
+        workflow_run_id=501,
+        provider_call_id="contact-123",
+        failure_reason=None,
+    )
+    completed_session = SimpleNamespace(**{**session.__dict__, "status": "completed"})
+    workflow_run = SimpleNamespace(
+        id=501,
+        is_completed=False,
+        initial_context={"telephony_preview": True, "preview_session_id": 123},
+    )
+    provider = SimpleNamespace(
+        get_call_status=AsyncMock(
+            return_value={
+                "status": "completed",
+                "disconnect_reason": "CONTACT_FLOW_DISCONNECT",
+            }
+        )
+    )
+
+    with (
+        patch("api.services.phone_preview.service.db_client") as mock_db,
+        patch(
+            "api.services.telephony.factory.get_telephony_provider_for_run",
+            new=AsyncMock(return_value=provider),
+        ) as get_provider,
+    ):
+        mock_db.get_phone_preview_session = AsyncMock(return_value=session)
+        mock_db.get_workflow_run = AsyncMock(return_value=workflow_run)
+        mock_db.update_workflow_run = AsyncMock(return_value=workflow_run)
+        mock_db.update_phone_preview_session_status = AsyncMock(
+            return_value=completed_session
+        )
+
+        result = await service.status(user=user, session_id=123)
+
+    assert result.status == "completed"
+    get_provider.assert_awaited_once_with(workflow_run, 11)
+    provider.get_call_status.assert_awaited_once_with("contact-123")
+    mock_db.update_workflow_run.assert_awaited_once_with(
+        run_id=501,
+        is_completed=True,
+        gathered_context={
+            "provider_status": "completed",
+            "provider_disconnect_reason": "CONTACT_FLOW_DISCONNECT",
+        },
+    )
+    mock_db.update_phone_preview_session_status.assert_awaited_once_with(
+        123, status="completed", failure_reason=None, completed=True
+    )
+
+
+@pytest.mark.asyncio
+async def test_status_marks_aws_connect_poll_failure_failed():
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    session = SimpleNamespace(
+        id=123,
+        status="calling",
+        provider="aws_connect",
+        phone_number_masked="+82****5678",
+        expires_at=expires_at,
+        workflow_run_id=501,
+        provider_call_id="contact-123",
+        failure_reason=None,
+    )
+    failed_session = SimpleNamespace(
+        **{
+            **session.__dict__,
+            "status": "failed",
+            "failure_reason": "aws_connect_status_unavailable",
+        }
+    )
+    workflow_run = SimpleNamespace(
+        id=501,
+        is_completed=False,
+        initial_context={"telephony_preview": True, "preview_session_id": 123},
+    )
+
+    with (
+        patch("api.services.phone_preview.service.db_client") as mock_db,
+        patch(
+            "api.services.telephony.factory.get_telephony_provider_for_run",
+            new=AsyncMock(side_effect=ValueError("missing provider")),
+        ),
+    ):
+        mock_db.get_phone_preview_session = AsyncMock(return_value=session)
+        mock_db.get_workflow_run = AsyncMock(return_value=workflow_run)
+        mock_db.update_workflow_run = AsyncMock(return_value=workflow_run)
+        mock_db.update_phone_preview_session_status = AsyncMock(
+            return_value=failed_session
+        )
+
+        result = await service.status(user=user, session_id=123)
+
+    assert result.status == "failed"
+    assert result.failure_reason == "aws_connect_status_unavailable"
+    mock_db.update_workflow_run.assert_awaited_once_with(
+        run_id=501,
+        is_completed=True,
+        gathered_context={
+            "provider_status": "failed",
+            "provider_error": "aws_connect_status_unavailable",
+        },
+    )
+    mock_db.update_phone_preview_session_status.assert_awaited_once_with(
+        123,
+        status="failed",
+        failure_reason="aws_connect_status_unavailable",
     )

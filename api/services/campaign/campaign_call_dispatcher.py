@@ -257,6 +257,13 @@ class CampaignCallDispatcher:
 
         # Get provider for this campaign's pinned telephony config.
         provider = await self.get_provider_for_campaign(campaign)
+        if not getattr(provider, "SUPPORTS_MEDIA_TRANSPORT", True):
+            await rate_limiter.release_concurrent_slot(
+                campaign.organization_id, slot_id
+            )
+            raise ValueError(
+                f"Provider {provider.PROVIDER_NAME} does not support campaign calls"
+            )
         workflow_run_mode = provider.PROVIDER_NAME
 
         # Acquire a unique from_number from the pool scoped to this campaign's
@@ -316,7 +323,7 @@ class CampaignCallDispatcher:
                 from_number,
                 telephony_configuration_id=campaign.telephony_configuration_id,
             )
-        except Exception as e:
+        except Exception:
             # Release slot and from_number on error
             await rate_limiter.release_concurrent_slot(
                 campaign.organization_id, slot_id

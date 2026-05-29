@@ -158,3 +158,40 @@ def test_initiate_call_rejects_existing_run_for_different_workflow():
     mock_db.get_workflow_run.assert_awaited_once_with(501, organization_id=11)
     assert not mock_db.create_workflow_run.called
     assert provider.initiate_call.await_count == 0
+
+
+def test_initiate_call_rejects_outbound_control_only_provider_before_dispatch():
+    app = _make_test_app()
+    client = TestClient(app)
+
+    provider = _provider()
+    provider.PROVIDER_NAME = "aws_connect"
+    provider.WEBHOOK_ENDPOINT = None
+    provider.SUPPORTS_MEDIA_TRANSPORT = False
+
+    with (
+        patch("api.routes.telephony.db_client") as mock_db,
+        patch(
+            "api.routes.telephony.get_default_telephony_provider",
+            new=AsyncMock(return_value=provider),
+        ),
+    ):
+        mock_db.get_user_configurations = AsyncMock(
+            return_value=SimpleNamespace(test_phone_number=None)
+        )
+        mock_db.get_default_telephony_configuration = AsyncMock(
+            return_value=SimpleNamespace(id=55)
+        )
+        mock_db.get_workflow = AsyncMock()
+
+        response = client.post(
+            "/telephony/initiate-call",
+            json={"workflow_id": 33, "phone_number": "+15551234567"},
+        )
+
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"] == "telephony_provider_not_supported_for_direct_calls"
+    )
+    mock_db.get_workflow.assert_not_awaited()
+    provider.initiate_call.assert_not_awaited()

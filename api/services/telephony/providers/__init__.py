@@ -8,6 +8,7 @@ or run_pipeline.
 
 from api.services.telephony.providers import (  # noqa: F401  -- import for side effects (registration)
     ari,
+    aws_connect,
     cloudonix,
     plivo,
     telnyx,

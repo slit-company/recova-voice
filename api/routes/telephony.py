@@ -134,6 +134,11 @@ async def initiate_call(
             status_code=400,
             detail="telephony_not_configured",
         )
+    if not getattr(provider, "SUPPORTS_MEDIA_TRANSPORT", True):
+        raise HTTPException(
+            status_code=400,
+            detail="telephony_provider_not_supported_for_direct_calls",
+        )
 
     phone_number = request.phone_number or user_configuration.test_phone_number
 

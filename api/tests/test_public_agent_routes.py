@@ -167,6 +167,106 @@ def test_workflow_uuid_route_uses_scoped_lookup_and_shared_execution():
     assert "agent_uuid" not in create_kwargs["initial_context"]
 
 
+def test_workflow_uuid_route_rejects_default_outbound_control_only_provider():
+    app = _make_test_app()
+    client = TestClient(app)
+
+    workflow = _active_workflow()
+    provider = _provider()
+    provider.PROVIDER_NAME = "aws_connect"
+    provider.WEBHOOK_ENDPOINT = None
+    provider.SUPPORTS_MEDIA_TRANSPORT = False
+    quota_mock = AsyncMock(
+        return_value=SimpleNamespace(has_quota=True, error_message="")
+    )
+
+    with (
+        patch("api.routes.public_agent.db_client") as mock_db,
+        patch(
+            "api.routes.public_agent.check_dograh_quota_by_user_id",
+            new=quota_mock,
+        ),
+        patch(
+            "api.routes.public_agent.get_default_telephony_provider",
+            new=AsyncMock(return_value=provider),
+        ),
+    ):
+        mock_db.validate_api_key = AsyncMock(
+            return_value=SimpleNamespace(id=8, organization_id=11, created_by=22)
+        )
+        mock_db.get_workflow_by_uuid = AsyncMock(return_value=workflow)
+        mock_db.get_default_telephony_configuration = AsyncMock(
+            return_value=SimpleNamespace(id=55)
+        )
+        mock_db.create_workflow_run = AsyncMock()
+
+        response = client.post(
+            f"/public/agent/workflow/{workflow.workflow_uuid}",
+            headers={"X-API-Key": "test-api-key"},
+            json={"phone_number": "+15551234567"},
+        )
+
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]
+        == "telephony_provider_not_supported_for_public_agent_calls"
+    )
+    mock_db.create_workflow_run.assert_not_awaited()
+    provider.initiate_call.assert_not_awaited()
+
+
+def test_workflow_uuid_route_rejects_explicit_outbound_control_only_provider():
+    app = _make_test_app()
+    client = TestClient(app)
+
+    workflow = _active_workflow()
+    provider = _provider()
+    provider.PROVIDER_NAME = "aws_connect"
+    provider.WEBHOOK_ENDPOINT = None
+    provider.SUPPORTS_MEDIA_TRANSPORT = False
+    quota_mock = AsyncMock(
+        return_value=SimpleNamespace(has_quota=True, error_message="")
+    )
+
+    with (
+        patch("api.routes.public_agent.db_client") as mock_db,
+        patch(
+            "api.routes.public_agent.check_dograh_quota_by_user_id",
+            new=quota_mock,
+        ),
+        patch(
+            "api.routes.public_agent.get_telephony_provider_by_id",
+            new=AsyncMock(return_value=provider),
+        ) as get_provider,
+    ):
+        mock_db.validate_api_key = AsyncMock(
+            return_value=SimpleNamespace(id=8, organization_id=11, created_by=22)
+        )
+        mock_db.get_workflow_by_uuid = AsyncMock(return_value=workflow)
+        mock_db.get_telephony_configuration_for_org = AsyncMock(
+            return_value=SimpleNamespace(id=66)
+        )
+        mock_db.create_workflow_run = AsyncMock()
+
+        response = client.post(
+            f"/public/agent/workflow/{workflow.workflow_uuid}",
+            headers={"X-API-Key": "test-api-key"},
+            json={
+                "phone_number": "+15551234567",
+                "telephony_configuration_id": 66,
+            },
+        )
+
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]
+        == "telephony_provider_not_supported_for_public_agent_calls"
+    )
+    get_provider.assert_awaited_once_with(66, 11)
+    mock_db.create_workflow_run.assert_not_awaited()
+    provider.initiate_call.assert_not_awaited()
+
+
 def test_workflow_uuid_route_rejects_archived_workflows():
     app = _make_test_app()
     client = TestClient(app)
