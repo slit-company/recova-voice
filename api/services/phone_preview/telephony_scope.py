@@ -35,28 +35,6 @@ async def resolve_preview_system_telephony_scope(
         raise ValueError("preview_telephony_not_configured")
 
     session_id = _int_value(context.get("preview_session_id"), "preview_session_id")
-    context_config_id = _int_value(
-        context.get("telephony_configuration_id"), "telephony_configuration_id"
-    )
-    context_config_org_id = _int_value(
-        context.get("telephony_configuration_organization_id"),
-        "telephony_configuration_organization_id",
-    )
-
-    if (
-        context_config_id != settings.configuration_id
-        or context_config_org_id != settings.organization_id
-    ):
-        logger.warning(
-            "Preview telephony allowlist mismatch for run {}: context org/config "
-            "{}/{} != allowlist {}/{}",
-            workflow_run.id,
-            context_config_org_id,
-            context_config_id,
-            settings.organization_id,
-            settings.configuration_id,
-        )
-        raise ValueError("preview_telephony_allowlist_mismatch")
 
     session = await db_client.get_phone_preview_session_for_run(workflow_run.id)
     if not session:
@@ -67,14 +45,12 @@ async def resolve_preview_system_telephony_scope(
         "workflow_run_id": workflow_run.id,
         "workflow_id": workflow_run.workflow_id,
         "organization_id": workflow_organization_id,
-        "user_id": context.get("preview_user_id"),
     }
     actual = {
         "session_id": session.id,
         "workflow_run_id": session.workflow_run_id,
         "workflow_id": session.workflow_id,
         "organization_id": session.organization_id,
-        "user_id": session.user_id,
     }
     if actual != expected:
         logger.warning(

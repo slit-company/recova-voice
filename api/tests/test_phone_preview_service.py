@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from api.services.phone_preview.otp import generate_otp_salt, hash_otp_code
 from api.services.phone_preview.otp_delivery import PhonePreviewOtpDeliveryError
-from api.services.phone_preview.privacy import encrypt_phone
+from api.services.phone_preview.privacy import encrypt_phone, global_phone_hash
 from api.services.phone_preview.service import PhonePreviewService
 
 
@@ -34,6 +34,7 @@ async def test_start_creates_pending_verification_with_kr_normalization(monkeypa
         mock_db.get_recent_verified_phone_preview_verification = AsyncMock(
             return_value=None
         )
+        mock_db.count_phone_preview_sessions_since = AsyncMock(return_value=0)
         mock_db.create_phone_preview_verification = AsyncMock(
             return_value=SimpleNamespace(id=55)
         )
@@ -49,6 +50,12 @@ async def test_start_creates_pending_verification_with_kr_normalization(monkeypa
     assert result.dev_otp_code and result.dev_otp_code.isdigit()
     create_session_kwargs = mock_db.create_phone_preview_session.await_args.kwargs
     assert create_session_kwargs["phone_number_masked"] == "+82****5678"
+    assert len(create_session_kwargs["phone_number_hash"]) == 64
+    assert len(create_session_kwargs["phone_number_global_hash"]) == 64
+    assert (
+        create_session_kwargs["phone_number_hash"]
+        != create_session_kwargs["phone_number_global_hash"]
+    )
     assert create_session_kwargs["status"] == "pending_verification"
 
 
@@ -76,6 +83,7 @@ async def test_start_reuses_recent_verified_phone_without_new_otp(monkeypatch):
         mock_db.get_recent_verified_phone_preview_verification = AsyncMock(
             return_value=verified
         )
+        mock_db.count_phone_preview_sessions_since = AsyncMock(return_value=0)
         mock_db.create_phone_preview_verification = AsyncMock()
         mock_db.create_phone_preview_session = AsyncMock(return_value=created_session)
 
@@ -87,7 +95,100 @@ async def test_start_reuses_recent_verified_phone_without_new_otp(monkeypatch):
     assert result.otp_required is False
     assert result.dev_otp_code is None
     mock_db.create_phone_preview_verification.assert_not_awaited()
-    assert mock_db.create_phone_preview_session.await_args.kwargs["verification_id"] == 55
+    assert (
+        mock_db.create_phone_preview_session.await_args.kwargs["verification_id"] == 55
+    )
+
+
+@pytest.mark.asyncio
+async def test_start_rejects_non_pstn_phone_without_persisting(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+
+    with patch("api.services.phone_preview.service.db_client") as mock_db:
+        mock_db.get_workflow = AsyncMock(
+            return_value=SimpleNamespace(id=33, user_id=99, organization_id=11)
+        )
+        mock_db.create_phone_preview_verification = AsyncMock()
+        mock_db.create_phone_preview_session = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await service.start(
+                user=user, workflow_id=33, phone_number="sip:attacker@example.com"
+            )
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail == "invalid_phone_number"
+    mock_db.create_phone_preview_verification.assert_not_awaited()
+    mock_db.create_phone_preview_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_start_rate_limits_before_otp_creation_or_delivery(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RECOVA_PREVIEW_SECRET_KEY", "production-preview-secret")
+    monkeypatch.setenv("RECOVA_PREVIEW_OTP_WEBHOOK_URL", "https://sms.example/send")
+    monkeypatch.setenv("RECOVA_PREVIEW_DAILY_USER_CALL_LIMIT", "5")
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+
+    with (
+        patch("api.services.phone_preview.service.db_client") as mock_db,
+        patch(
+            "api.services.phone_preview.service.deliver_otp_code",
+            new=AsyncMock(),
+        ) as deliver_otp,
+    ):
+        mock_db.get_workflow = AsyncMock(
+            return_value=SimpleNamespace(id=33, user_id=99, organization_id=11)
+        )
+        mock_db.count_phone_preview_sessions_since = AsyncMock(side_effect=[5])
+        mock_db.get_recent_verified_phone_preview_verification = AsyncMock()
+        mock_db.create_phone_preview_verification = AsyncMock()
+        mock_db.create_phone_preview_session = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await service.start(user=user, workflow_id=33, phone_number="010-1234-5678")
+
+    assert exc.value.status_code == 429
+    assert exc.value.detail == "preview_rate_limited"
+    mock_db.get_recent_verified_phone_preview_verification.assert_not_awaited()
+    mock_db.create_phone_preview_verification.assert_not_awaited()
+    mock_db.create_phone_preview_session.assert_not_awaited()
+    deliver_otp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_start_phone_limit_uses_global_hash_before_otp_creation(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RECOVA_PREVIEW_SECRET_KEY", "production-preview-secret")
+    monkeypatch.setenv("RECOVA_PREVIEW_OTP_WEBHOOK_URL", "https://sms.example/send")
+    monkeypatch.setenv("RECOVA_PREVIEW_DAILY_PHONE_CALL_LIMIT", "5")
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+
+    with patch("api.services.phone_preview.service.db_client") as mock_db:
+        mock_db.get_workflow = AsyncMock(
+            return_value=SimpleNamespace(id=33, user_id=99, organization_id=11)
+        )
+        mock_db.count_phone_preview_sessions_since = AsyncMock(side_effect=[0, 0, 5])
+        mock_db.get_recent_verified_phone_preview_verification = AsyncMock()
+        mock_db.create_phone_preview_verification = AsyncMock()
+        mock_db.create_phone_preview_session = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await service.start(user=user, workflow_id=33, phone_number="010-1234-5678")
+
+    assert exc.value.status_code == 429
+    assert exc.value.detail == "preview_phone_rate_limited"
+    phone_limit_call = mock_db.count_phone_preview_sessions_since.await_args_list[2]
+    assert phone_limit_call.kwargs["phone_number_global_hash"] == global_phone_hash(
+        "+821012345678"
+    )
+    assert "phone_number_hash" not in phone_limit_call.kwargs
+    mock_db.create_phone_preview_verification.assert_not_awaited()
+    mock_db.create_phone_preview_session.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -121,6 +222,7 @@ async def test_start_delivers_otp_in_production_without_exposing_code(monkeypatc
         mock_db.get_recent_verified_phone_preview_verification = AsyncMock(
             return_value=None
         )
+        mock_db.count_phone_preview_sessions_since = AsyncMock(return_value=0)
         mock_db.create_phone_preview_verification = AsyncMock(
             return_value=SimpleNamespace(id=55)
         )
@@ -170,6 +272,7 @@ async def test_start_ignores_dev_otp_override_in_production(monkeypatch):
         mock_db.get_recent_verified_phone_preview_verification = AsyncMock(
             return_value=None
         )
+        mock_db.count_phone_preview_sessions_since = AsyncMock(return_value=0)
         mock_db.create_phone_preview_verification = AsyncMock(
             return_value=SimpleNamespace(id=55)
         )
@@ -206,9 +309,7 @@ async def test_start_fails_closed_when_production_otp_delivery_fails(monkeypatch
         patch(
             "api.services.phone_preview.service.deliver_otp_code",
             new=AsyncMock(
-                side_effect=PhonePreviewOtpDeliveryError(
-                    "otp_delivery_not_configured"
-                )
+                side_effect=PhonePreviewOtpDeliveryError("otp_delivery_not_configured")
             ),
         ),
     ):
@@ -218,6 +319,7 @@ async def test_start_fails_closed_when_production_otp_delivery_fails(monkeypatch
         mock_db.get_recent_verified_phone_preview_verification = AsyncMock(
             return_value=None
         )
+        mock_db.count_phone_preview_sessions_since = AsyncMock(return_value=0)
         mock_db.create_phone_preview_verification = AsyncMock(
             return_value=SimpleNamespace(id=55)
         )
@@ -226,9 +328,7 @@ async def test_start_fails_closed_when_production_otp_delivery_fails(monkeypatch
         mock_db.update_phone_preview_session_status = AsyncMock()
 
         with pytest.raises(HTTPException) as exc:
-            await service.start(
-                user=user, workflow_id=33, phone_number="010-1234-5678"
-            )
+            await service.start(user=user, workflow_id=33, phone_number="010-1234-5678")
 
     assert exc.value.status_code == 503
     assert exc.value.detail == "otp_delivery_failed"
@@ -291,6 +391,92 @@ async def test_verify_locks_after_max_otp_attempts(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_verify_expires_stale_verified_session(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+    expired_at = datetime.now(UTC) - timedelta(seconds=1)
+    session = SimpleNamespace(
+        id=123,
+        status="verified",
+        verification_id=55,
+        phone_number_hash="hash",
+        phone_number_masked="+82****5678",
+        expires_at=expired_at,
+        workflow_run_id=None,
+        provider_call_id=None,
+        failure_reason=None,
+    )
+    expired_session = SimpleNamespace(
+        **{
+            **session.__dict__,
+            "status": "expired",
+            "failure_reason": "expired",
+        }
+    )
+
+    with patch("api.services.phone_preview.service.db_client") as mock_db:
+        mock_db.get_phone_preview_session = AsyncMock(return_value=session)
+        mock_db.update_phone_preview_session_status = AsyncMock(
+            return_value=expired_session
+        )
+        mock_db.get_phone_preview_verification = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await service.verify(user=user, session_id=123, otp_code="123456")
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "expired"
+    mock_db.update_phone_preview_session_status.assert_awaited_once_with(
+        123, status="expired", failure_reason="expired"
+    )
+    mock_db.get_phone_preview_verification.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_status_expires_stale_pending_session(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+    expired_at = datetime.now(UTC) - timedelta(seconds=1)
+    session = SimpleNamespace(
+        id=123,
+        status="pending_verification",
+        verification_id=55,
+        phone_number_hash="hash",
+        phone_number_masked="+82****5678",
+        expires_at=expired_at,
+        workflow_run_id=None,
+        provider_call_id=None,
+        failure_reason=None,
+    )
+    expired_session = SimpleNamespace(
+        **{
+            **session.__dict__,
+            "status": "expired",
+            "failure_reason": "expired",
+        }
+    )
+
+    with patch("api.services.phone_preview.service.db_client") as mock_db:
+        mock_db.get_phone_preview_session = AsyncMock(return_value=session)
+        mock_db.update_phone_preview_session_status = AsyncMock(
+            return_value=expired_session
+        )
+        mock_db.get_workflow_run = AsyncMock()
+
+        result = await service.status(user=user, session_id=123)
+
+    assert result.status == "expired"
+    assert result.otp_required is False
+    assert result.failure_reason == "expired"
+    mock_db.update_phone_preview_session_status.assert_awaited_once_with(
+        123, status="expired", failure_reason="expired"
+    )
+    mock_db.get_workflow_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_call_after_verification_uses_system_provider_and_preview_markers(
     monkeypatch,
 ):
@@ -309,6 +495,7 @@ async def test_call_after_verification_uses_system_provider_and_preview_markers(
         workflow_run_id=None,
         status="verified",
         phone_number_hash="hash",
+        phone_number_global_hash="global-hash",
         phone_number_masked="+82****5678",
         destination_phone_encrypted=encrypted_phone,
         display_name="Tester",
@@ -340,7 +527,9 @@ async def test_call_after_verification_uses_system_provider_and_preview_markers(
     )
 
     async def create_run(*args, **kwargs):
-        return SimpleNamespace(id=501, name=args[0], initial_context=kwargs["initial_context"])
+        return SimpleNamespace(
+            id=501, name=args[0], initial_context=kwargs["initial_context"]
+        )
 
     attached_session = SimpleNamespace(
         **{
@@ -397,12 +586,13 @@ async def test_call_after_verification_uses_system_provider_and_preview_markers(
     context = create_kwargs["initial_context"]
     assert context["telephony_preview"] is True
     assert context["preview_session_id"] == 123
-    assert context["preview_user_id"] == 7
     assert context["phone_number"] == "+82****5678"
     assert context["called_number"] == "+82****5678"
     assert context["phone_number_masked"] == "+82****5678"
-    assert context["telephony_configuration_id"] == 901
-    assert context["telephony_configuration_organization_id"] == 900
+    assert "provider" not in context
+    assert "preview_user_id" not in context
+    assert "telephony_configuration_id" not in context
+    assert "telephony_configuration_organization_id" not in context
     assert "+821012345678" not in str(context)
     update_kwargs = mock_db.update_workflow_run.await_args.kwargs
     assert "+821012345678" not in str(update_kwargs)
@@ -411,6 +601,11 @@ async def test_call_after_verification_uses_system_provider_and_preview_markers(
     assert update_kwargs["gathered_context"]["nested"]["phone_number"] == "[redacted]"
     assert update_kwargs["initial_context"]["caller_number_masked"] == "+82****0000"
     assert "caller_number" not in update_kwargs["initial_context"]
+    assert "telephony_configuration_id" not in update_kwargs["initial_context"]
+    assert (
+        "telephony_configuration_organization_id"
+        not in update_kwargs["initial_context"]
+    )
     provider.initiate_call.assert_awaited_once()
     assert provider.initiate_call.await_args.kwargs["to_number"] == "+821012345678"
     assert events == ["attach", "provider_dispatch", "attach"]
@@ -443,6 +638,7 @@ async def test_call_provider_error_returns_generic_preview_failure(monkeypatch):
         workflow_run_id=None,
         status="verified",
         phone_number_hash="hash",
+        phone_number_global_hash="global-hash",
         phone_number_masked="+82****5678",
         destination_phone_encrypted=encrypt_phone(raw_to),
         display_name=None,
@@ -469,7 +665,9 @@ async def test_call_provider_error_returns_generic_preview_failure(monkeypatch):
     )
 
     async def create_run(*args, **kwargs):
-        return SimpleNamespace(id=501, name=args[0], initial_context=kwargs["initial_context"])
+        return SimpleNamespace(
+            id=501, name=args[0], initial_context=kwargs["initial_context"]
+        )
 
     with (
         patch("api.services.phone_preview.service.db_client") as mock_db,
@@ -516,6 +714,128 @@ async def test_call_provider_error_returns_generic_preview_failure(monkeypatch):
         mock_db.attach_phone_preview_call.await_args.kwargs["clear_destination_phone"]
         is True
     )
+
+
+@pytest.mark.asyncio
+async def test_call_generic_provider_exception_returns_generic_failure(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_CONFIGURATION_ID", "901")
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+    raw_to = "+821012345678"
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    session = SimpleNamespace(
+        id=123,
+        organization_id=11,
+        user_id=7,
+        workflow_id=33,
+        workflow_run_id=None,
+        status="verified",
+        phone_number_hash="hash",
+        phone_number_global_hash="global-hash",
+        phone_number_masked="+82****5678",
+        destination_phone_encrypted=encrypt_phone(raw_to),
+        display_name=None,
+        max_duration_seconds=300,
+        expires_at=expires_at,
+        provider_call_id=None,
+        failure_reason=None,
+    )
+    attached_session = SimpleNamespace(
+        **{
+            **session.__dict__,
+            "status": "calling",
+            "workflow_run_id": 501,
+            "provider": "twilio",
+        }
+    )
+    provider = SimpleNamespace(
+        PROVIDER_NAME="twilio",
+        WEBHOOK_ENDPOINT="twilio/voice",
+        validate_config=Mock(return_value=True),
+        initiate_call=AsyncMock(side_effect=RuntimeError("raw +821012345678 ACSECRET")),
+    )
+
+    async def create_run(*args, **kwargs):
+        return SimpleNamespace(
+            id=501, name=args[0], initial_context=kwargs["initial_context"]
+        )
+
+    with (
+        patch("api.services.phone_preview.service.db_client") as mock_db,
+        patch(
+            "api.services.phone_preview.service._get_preview_telephony_provider_by_id",
+            new=AsyncMock(return_value=provider),
+        ),
+        patch(
+            "api.services.phone_preview.service.check_dograh_quota_by_user_id",
+            new=AsyncMock(
+                return_value=SimpleNamespace(has_quota=True, error_message="")
+            ),
+        ),
+        patch(
+            "api.services.phone_preview.service.get_backend_endpoints",
+            new=AsyncMock(return_value=("https://api.example.com", "wss://ignored")),
+        ),
+    ):
+        mock_db.begin_phone_preview_call = AsyncMock(return_value=(session, True))
+        mock_db.get_workflow = AsyncMock(
+            return_value=SimpleNamespace(id=33, user_id=99, organization_id=11)
+        )
+        mock_db.get_draft_version = AsyncMock(
+            return_value=SimpleNamespace(id=44, template_context_variables={})
+        )
+        mock_db.count_phone_preview_sessions_since = AsyncMock(return_value=1)
+        mock_db.create_workflow_run = AsyncMock(side_effect=create_run)
+        mock_db.attach_phone_preview_call = AsyncMock(return_value=attached_session)
+        mock_db.update_phone_preview_session_status = AsyncMock()
+        mock_db.update_workflow_run = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await service.call(user=user, session_id=123)
+
+    assert exc.value.status_code == 500
+    assert exc.value.detail == "call_failed"
+    mock_db.update_phone_preview_session_status.assert_awaited_once_with(
+        123, status="failed", failure_reason="call_failed"
+    )
+    assert raw_to not in str(mock_db.update_phone_preview_session_status.await_args)
+    assert "ACSECRET" not in str(mock_db.update_phone_preview_session_status.await_args)
+
+
+@pytest.mark.asyncio
+async def test_call_expired_reserved_session_does_not_dispatch_provider(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_CONFIGURATION_ID", "901")
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+    session = SimpleNamespace(
+        id=123,
+        status="expired",
+        phone_number_masked="+82****5678",
+        expires_at=datetime.now(UTC) - timedelta(seconds=1),
+        workflow_run_id=None,
+        provider_call_id=None,
+        failure_reason="expired",
+    )
+
+    with (
+        patch("api.services.phone_preview.service.db_client") as mock_db,
+        patch(
+            "api.services.phone_preview.service._get_preview_telephony_provider_by_id",
+            new=AsyncMock(),
+        ) as get_provider,
+    ):
+        mock_db.begin_phone_preview_call = AsyncMock(return_value=(session, False))
+
+        with pytest.raises(HTTPException) as exc:
+            await service.call(user=user, session_id=123)
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "expired"
+    get_provider.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -566,6 +886,7 @@ async def test_call_rate_limits_user_before_provider_dispatch(monkeypatch):
         workflow_run_id=None,
         status="verified",
         phone_number_hash="hash",
+        phone_number_global_hash="global-hash",
         phone_number_masked="+82****5678",
         destination_phone_encrypted=encrypted_phone,
         display_name=None,
@@ -610,6 +931,70 @@ async def test_call_rate_limits_user_before_provider_dispatch(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_call_rate_limits_destination_with_global_hash(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_CONFIGURATION_ID", "901")
+    monkeypatch.setenv("RECOVA_PREVIEW_DAILY_PHONE_CALL_LIMIT", "5")
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    session = SimpleNamespace(
+        id=123,
+        organization_id=11,
+        user_id=7,
+        workflow_id=33,
+        workflow_run_id=None,
+        status="verified",
+        phone_number_hash="scoped-hash",
+        phone_number_global_hash="global-hash",
+        phone_number_masked="+82****5678",
+        destination_phone_encrypted=encrypt_phone("+821012345678"),
+        display_name=None,
+        max_duration_seconds=300,
+        expires_at=expires_at,
+        provider_call_id=None,
+        failure_reason=None,
+    )
+
+    with (
+        patch("api.services.phone_preview.service.db_client") as mock_db,
+        patch(
+            "api.services.phone_preview.service._get_preview_telephony_provider_by_id",
+            new=AsyncMock(),
+        ) as get_provider,
+        patch(
+            "api.services.phone_preview.service.check_dograh_quota_by_user_id",
+            new=AsyncMock(
+                return_value=SimpleNamespace(has_quota=True, error_message="")
+            ),
+        ),
+    ):
+        mock_db.begin_phone_preview_call = AsyncMock(return_value=(session, True))
+        mock_db.get_workflow = AsyncMock(
+            return_value=SimpleNamespace(id=33, user_id=99, organization_id=11)
+        )
+        mock_db.get_draft_version = AsyncMock(
+            return_value=SimpleNamespace(id=44, template_context_variables={})
+        )
+        mock_db.count_phone_preview_sessions_since = AsyncMock(side_effect=[1, 1, 6])
+        mock_db.update_phone_preview_session_status = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await service.call(user=user, session_id=123)
+
+    assert exc.value.status_code == 429
+    assert exc.value.detail == "preview_phone_rate_limited"
+    phone_limit_call = mock_db.count_phone_preview_sessions_since.await_args_list[2]
+    assert phone_limit_call.kwargs["phone_number_global_hash"] == "global-hash"
+    assert "phone_number_hash" not in phone_limit_call.kwargs
+    get_provider.assert_not_awaited()
+    mock_db.update_phone_preview_session_status.assert_awaited_once_with(
+        123, status="failed", failure_reason="preview_phone_rate_limited"
+    )
+
+
+@pytest.mark.asyncio
 async def test_status_marks_completed_run_and_clears_preview_destination():
     service = PhonePreviewService()
     user = SimpleNamespace(id=7, selected_organization_id=11)
@@ -627,7 +1012,9 @@ async def test_status_marks_completed_run_and_clears_preview_destination():
 
     with patch("api.services.phone_preview.service.db_client") as mock_db:
         mock_db.get_phone_preview_session = AsyncMock(return_value=session)
-        mock_db.get_workflow_run = AsyncMock(return_value=SimpleNamespace(is_completed=True))
+        mock_db.get_workflow_run = AsyncMock(
+            return_value=SimpleNamespace(is_completed=True)
+        )
         mock_db.update_phone_preview_session_status = AsyncMock(
             return_value=completed_session
         )

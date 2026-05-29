@@ -19,14 +19,30 @@ from api.services.campaign.campaign_event_publisher import (
 )
 from api.services.campaign.circuit_breaker import circuit_breaker
 
-
-_PREVIEW_CALLBACK_SENSITIVE_EXACT_KEYS = {"from", "to"}
+_PREVIEW_CALLBACK_SENSITIVE_EXACT_KEYS = {
+    "account_sid",
+    "accountsid",
+    "authorization",
+    "call_id",
+    "call_sid",
+    "callsid",
+    "from",
+    "provider_call_id",
+    "proxy-authorization",
+    "to",
+}
 _PREVIEW_CALLBACK_SENSITIVE_FRAGMENTS = (
+    "account",
+    "auth",
+    "credential",
     "phone",
     "number",
     "destination",
     "caller",
     "called",
+    "secret",
+    "signature",
+    "token",
 )
 
 _TELEPHONY_LOG_SENSITIVE_EXACT_KEYS = {
@@ -236,7 +252,7 @@ async def _process_status_update(workflow_run_id: int, status: StatusCallbackReq
     telephony_callback_log = {
         "status": status.status,
         "timestamp": datetime.now(UTC).isoformat(),
-        "call_id": status.call_id,
+        "call_id": "[redacted]" if _is_preview_run(workflow_run) else status.call_id,
         "duration": status.duration,
         **(
             _redact_preview_callback_extra(status.extra)

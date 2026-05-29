@@ -127,6 +127,7 @@ class PhonePreviewClient(BaseDBClient):
         user_id: int,
         workflow_id: int,
         phone_number_hash: str,
+        phone_number_global_hash: str | None,
         phone_number_masked: str,
         destination_phone_encrypted: str,
         status: str,
@@ -142,6 +143,7 @@ class PhonePreviewClient(BaseDBClient):
                 workflow_id=workflow_id,
                 verification_id=verification_id,
                 phone_number_hash=phone_number_hash,
+                phone_number_global_hash=phone_number_global_hash,
                 phone_number_masked=phone_number_masked,
                 destination_phone_encrypted=destination_phone_encrypted,
                 display_name=display_name,
@@ -233,10 +235,19 @@ class PhonePreviewClient(BaseDBClient):
                 "completed",
             }:
                 return row, False
+            now = datetime.now(UTC)
+            if row.expires_at <= now:
+                row.status = "expired"
+                row.failure_reason = "expired"
+                row.destination_phone_encrypted = None
+                row.updated_at = now
+                await session.commit()
+                await session.refresh(row)
+                return row, False
             if row.status != "verified":
                 return row, False
             row.status = "calling"
-            row.updated_at = datetime.now(UTC)
+            row.updated_at = now
             await session.commit()
             await session.refresh(row)
             return row, True
@@ -294,6 +305,7 @@ class PhonePreviewClient(BaseDBClient):
         organization_id: int | None = None,
         user_id: int | None = None,
         phone_number_hash: str | None = None,
+        phone_number_global_hash: str | None = None,
         since: datetime,
     ) -> int:
         async with self.async_session() as session:
@@ -309,6 +321,11 @@ class PhonePreviewClient(BaseDBClient):
             if phone_number_hash is not None:
                 query = query.where(
                     PhonePreviewSessionModel.phone_number_hash == phone_number_hash
+                )
+            if phone_number_global_hash is not None:
+                query = query.where(
+                    PhonePreviewSessionModel.phone_number_global_hash
+                    == phone_number_global_hash
                 )
             result = await session.execute(query)
             return int(result.scalar() or 0)

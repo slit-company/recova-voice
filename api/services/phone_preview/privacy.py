@@ -32,6 +32,147 @@ def phone_hash(e164: str, *, organization_id: int, user_id: int) -> str:
     return hmac.new(get_preview_secret().encode(), msg, hashlib.sha256).hexdigest()
 
 
+def global_phone_hash(e164: str) -> str:
+    """Hash a destination phone number for cross-account abuse throttling."""
+
+    msg = f"global:{e164}".encode()
+    return hmac.new(get_preview_secret().encode(), msg, hashlib.sha256).hexdigest()
+
+
+_PREVIEW_CONTEXT_PRIVATE_KEYS = {
+    "account_sid",
+    "accountsid",
+    "authorization",
+    "call_sid",
+    "callsid",
+    "provider",
+    "provider_call_id",
+    "call_id",
+    "proxy-authorization",
+    "telephony_configuration_id",
+    "telephony_configuration_organization_id",
+    "preview_user_id",
+}
+
+_PREVIEW_CONTEXT_PRIVATE_KEY_FRAGMENTS = (
+    "account",
+    "auth",
+    "credential",
+    "secret",
+    "signature",
+    "token",
+)
+
+_PREVIEW_LOG_PRIVATE_EXACT_KEYS = {
+    *(_PREVIEW_CONTEXT_PRIVATE_KEYS),
+    "callsid",
+    "call_sid",
+    "accountsid",
+    "account_sid",
+    "authorization",
+    "from",
+    "proxy-authorization",
+    "to",
+}
+
+_PREVIEW_LOG_PRIVATE_KEY_FRAGMENTS = (
+    "account",
+    "auth",
+    "credential",
+    "destination",
+    "caller",
+    "called",
+    "number",
+    "phone",
+    "secret",
+    "signature",
+    "token",
+)
+
+
+def _has_preview_marker(context: dict | None) -> bool:
+    if not isinstance(context, dict):
+        return False
+    return bool(context.get("telephony_preview") or context.get("preview_session_id"))
+
+
+def _preview_context_key_is_private(key: object) -> bool:
+    key_text = str(key).lower()
+    return key_text in _PREVIEW_CONTEXT_PRIVATE_KEYS or any(
+        fragment in key_text for fragment in _PREVIEW_CONTEXT_PRIVATE_KEY_FRAGMENTS
+    )
+
+
+def _sanitize_preview_context(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: _sanitize_preview_context(item)
+            for key, item in value.items()
+            if not _preview_context_key_is_private(key)
+        }
+    if isinstance(value, list):
+        return [_sanitize_preview_context(item) for item in value]
+    return value
+
+
+def sanitize_preview_workflow_run_contexts(
+    initial_context: dict | None,
+    gathered_context: dict | None,
+) -> tuple[dict | None, dict | None]:
+    """Remove Recova/provider internals from user-visible preview run contexts."""
+
+    if not (
+        _has_preview_marker(initial_context) or _has_preview_marker(gathered_context)
+    ):
+        return initial_context, gathered_context
+    return (
+        (
+            _sanitize_preview_context(initial_context)
+            if initial_context is not None
+            else None
+        ),
+        (
+            _sanitize_preview_context(gathered_context)
+            if gathered_context is not None
+            else None
+        ),
+    )
+
+
+def _preview_log_key_is_private(key: object) -> bool:
+    key_text = str(key).lower()
+    return key_text in _PREVIEW_LOG_PRIVATE_EXACT_KEYS or any(
+        fragment in key_text for fragment in _PREVIEW_LOG_PRIVATE_KEY_FRAGMENTS
+    )
+
+
+def _sanitize_preview_log(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: _sanitize_preview_log(item)
+            for key, item in value.items()
+            if not _preview_log_key_is_private(key)
+        }
+    if isinstance(value, list):
+        return [_sanitize_preview_log(item) for item in value]
+    return value
+
+
+def sanitize_preview_workflow_run_logs(
+    initial_context: dict | None,
+    gathered_context: dict | None,
+    logs: dict | None,
+) -> dict | None:
+    """Remove provider/callback internals from user-visible preview run logs."""
+
+    if not logs or not (
+        _has_preview_marker(initial_context) or _has_preview_marker(gathered_context)
+    ):
+        return logs
+    sanitized = _sanitize_preview_log(logs)
+    return sanitized if isinstance(sanitized, dict) else None
+
+
 def _keystream(key: bytes, nonce: bytes, length: int) -> bytes:
     chunks: list[bytes] = []
     for idx in count():

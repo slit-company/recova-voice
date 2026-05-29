@@ -12,6 +12,7 @@ from api.db import db_client
 from api.db.models import UserModel
 from api.services.auth.depends import get_user
 from api.services.mps_service_key_client import mps_service_key_client
+from api.services.phone_preview.privacy import sanitize_preview_workflow_run_contexts
 from api.services.reports import generate_usage_runs_report_csv
 from api.utils.artifacts import artifact_url
 
@@ -233,6 +234,14 @@ async def get_usage_history(
                 public_access_token, "transcript"
             )
             run["recording_public_url"] = artifact_url(public_access_token, "recording")
+            public_initial_context, public_gathered_context = (
+                sanitize_preview_workflow_run_contexts(
+                    run.get("initial_context"),
+                    run.get("gathered_context"),
+                )
+            )
+            run["initial_context"] = public_initial_context
+            run["gathered_context"] = public_gathered_context
 
         return {
             "runs": runs,

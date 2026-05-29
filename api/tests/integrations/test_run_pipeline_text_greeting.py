@@ -113,22 +113,28 @@ def _greeting_in_assistant_context(context) -> bool:
     return False
 
 
-def _find_processor_by_class_name(pipeline_task, class_name: str):
+def _find_processors_by_class_name(pipeline_task, class_name: str):
     """Walk every processor reachable from the task's pipeline (including nested
-    sub-pipelines) and return the first one whose class name matches."""
+    sub-pipelines) and return every processor whose class name matches."""
     visited: set[int] = set()
     stack = [pipeline_task._pipeline]
+    matches = []
     while stack:
         processor = stack.pop()
         if id(processor) in visited:
             continue
         visited.add(id(processor))
         if processor.__class__.__name__ == class_name:
-            return processor
+            matches.append(processor)
         sub = getattr(processor, "_processors", None)
         if sub:
             stack.extend(sub)
-    return None
+    return matches
+
+
+def _find_processor_by_class_name(pipeline_task, class_name: str):
+    matches = _find_processors_by_class_name(pipeline_task, class_name)
+    return matches[0] if matches else None
 
 
 async def _wait_for(predicate, *, timeout: float, interval: float = 0.05) -> bool:
@@ -186,20 +192,20 @@ async def _run_test_body(workflow_run_setup, db_session) -> None:
             assert captured_task, "create_pipeline_task was never invoked"
             pipeline_task = captured_task[0]
 
-            await asyncio.wait_for(
-                pipeline_task._pipeline_start_event.wait(), timeout=3.0
-            )
-
             # Locate the assistant aggregator's LLM context (downstream of TTS).
             # The PipelineTask wraps the user's pipeline inside another Pipeline,
             # so we walk the tree recursively.
             assistant_aggregator = _find_processor_by_class_name(
                 pipeline_task, "LLMAssistantAggregator"
             )
-            assert assistant_aggregator is not None, (
-                "LLMAssistantAggregator not found in pipeline"
-            )
+            assert (
+                assistant_aggregator is not None
+            ), "LLMAssistantAggregator not found in pipeline"
             context = assistant_aggregator.context
+            user_aggregators = _find_processors_by_class_name(
+                pipeline_task, "LLMUserAggregator"
+            )
+            assert user_aggregators, "LLMUserAggregator not found in pipeline"
 
             # Wait for the greeting to be appended to the assistant context. The
             # TTSSpeakFrame -> audio frames -> BotStoppedSpeaking -> assistant
@@ -211,12 +217,24 @@ async def _run_test_body(workflow_run_setup, db_session) -> None:
                 "Greeting was not appended to the assistant context. "
                 f"Messages: {context.get_messages()}"
             )
+            unmuted = await _wait_for(
+                lambda: any(
+                    not getattr(aggregator, "_user_is_muted", True)
+                    for aggregator in user_aggregators
+                ),
+                timeout=3.0,
+            )
+            assert unmuted, (
+                "User aggregator stayed muted after the greeting; pushing the "
+                "transcript now would be suppressed. "
+                f"States: {[getattr(aggregator, '_user_is_muted', None) for aggregator in user_aggregators]}"
+            )
 
             # The LLM must not have been invoked yet — the greeting bypasses
             # the LLM entirely (goes straight to TTS via TTSSpeakFrame).
-            assert llm.get_current_step() == 0, (
-                f"LLM should not have run yet; current_step={llm.get_current_step()}"
-            )
+            assert (
+                llm.get_current_step() == 0
+            ), f"LLM should not have run yet; current_step={llm.get_current_step()}"
 
             # Now simulate the user replying. SpeechTimeoutUserTurnStopStrategy
             # (default 0.6s) ends the user turn, which triggers an LLM run;
@@ -238,9 +256,9 @@ async def _run_test_body(workflow_run_setup, db_session) -> None:
         # to the End node and triggers a second generation (which is empty —
         # mock_steps[1] is unset). What matters is that at least one run
         # happened, i.e. the user transcript actually drove the LLM.
-        assert llm.get_current_step() >= 1, (
-            f"Expected at least one LLM generation; got step={llm.get_current_step()}"
-        )
+        assert (
+            llm.get_current_step() >= 1
+        ), f"Expected at least one LLM generation; got step={llm.get_current_step()}"
 
         refreshed = await db_session.get_workflow_run_by_id(workflow_run.id)
         assert refreshed.is_completed is True

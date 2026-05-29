@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from api.db.models import UserModel
@@ -8,6 +9,19 @@ from api.services.auth.depends import get_user
 from api.services.phone_preview.service import phone_preview_service
 
 router = APIRouter(prefix="/phone-preview")
+
+
+async def get_phone_preview_user(
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+) -> UserModel:
+    """Phone preview is an interactive canvas flow, not an API-key surface."""
+
+    if request.headers.get("X-API-Key"):
+        raise HTTPException(
+            status_code=403, detail="phone_preview_requires_user_session"
+        )
+    return await get_user(authorization=authorization)
 
 
 class PhonePreviewStartRequest(BaseModel):
@@ -32,7 +46,6 @@ class PhonePreviewResponse(BaseModel):
     masked_phone: str
     expires_at: datetime
     workflow_run_id: int | None = None
-    provider_call_id: str | None = None
     failure_reason: str | None = None
     dev_otp_code: str | None = None
 
@@ -40,7 +53,7 @@ class PhonePreviewResponse(BaseModel):
 @router.post("/start", response_model=PhonePreviewResponse)
 async def start_phone_preview(
     request: PhonePreviewStartRequest,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(get_phone_preview_user),
 ):
     result = await phone_preview_service.start(
         user=user,
@@ -54,7 +67,7 @@ async def start_phone_preview(
 @router.post("/verify", response_model=PhonePreviewResponse)
 async def verify_phone_preview(
     request: PhonePreviewVerifyRequest,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(get_phone_preview_user),
 ):
     result = await phone_preview_service.verify(
         user=user,
@@ -67,7 +80,7 @@ async def verify_phone_preview(
 @router.post("/call", response_model=PhonePreviewResponse)
 async def call_phone_preview(
     request: PhonePreviewCallRequest,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(get_phone_preview_user),
 ):
     result = await phone_preview_service.call(user=user, session_id=request.session_id)
     return result.as_dict()
@@ -76,7 +89,7 @@ async def call_phone_preview(
 @router.get("/status/{session_id}", response_model=PhonePreviewResponse)
 async def get_phone_preview_status_by_status_path(
     session_id: int,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(get_phone_preview_user),
 ):
     result = await phone_preview_service.status(user=user, session_id=session_id)
     return result.as_dict()
@@ -85,7 +98,7 @@ async def get_phone_preview_status_by_status_path(
 @router.get("/{session_id}", response_model=PhonePreviewResponse)
 async def get_phone_preview_status(
     session_id: int,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(get_phone_preview_user),
 ):
     result = await phone_preview_service.status(user=user, session_id=session_id)
     return result.as_dict()

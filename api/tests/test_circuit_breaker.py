@@ -715,6 +715,7 @@ class TestProcessStatusUpdateCircuitBreaker:
             status="ringing",
             extra={
                 "CallSid": "call-789",
+                "account_sid": "ACSECRET",
                 "To": "+821012345678",
                 "From": "+82200000000",
                 "nested": {"phone_number": "+821012345678"},
@@ -731,13 +732,74 @@ class TestProcessStatusUpdateCircuitBreaker:
         log_entry = mock_db.update_workflow_run.await_args.kwargs["logs"][
             "telephony_status_callbacks"
         ][0]
-        assert log_entry["CallSid"] == "call-789"
+        assert log_entry["call_id"] == "[redacted]"
+        assert log_entry["CallSid"] == "[redacted]"
+        assert log_entry["account_sid"] == "[redacted]"
         assert log_entry["To"] == "[redacted]"
         assert log_entry["From"] == "[redacted]"
         assert log_entry["nested"]["phone_number"] == "[redacted]"
         assert log_entry["events"][0]["Called"] == "[redacted]"
+        assert "call-789" not in str(log_entry)
+        assert "ACSECRET" not in str(log_entry)
         assert "+821012345678" not in str(log_entry)
         assert "+82200000000" not in str(log_entry)
+
+    @pytest.mark.asyncio
+    async def test_preview_failed_callback_updates_preview_session_with_safe_reason(
+        self,
+    ):
+        """Failed provider callbacks should close preview sessions without raw details."""
+
+        from api.services.telephony.status_processor import (
+            StatusCallbackRequest,
+            _process_status_update,
+        )
+
+        mock_workflow_run = MagicMock()
+        mock_workflow_run.id = 100
+        mock_workflow_run.campaign_id = None
+        mock_workflow_run.state = "running"
+        mock_workflow_run.initial_context = {
+            "telephony_preview": True,
+            "preview_session_id": 123,
+        }
+        mock_workflow_run.logs = {"telephony_status_callbacks": []}
+        mock_workflow_run.gathered_context = {}
+        preview_session = MagicMock()
+        preview_session.id = 123
+
+        status = StatusCallbackRequest(
+            call_id="call-789",
+            status="failed",
+            extra={"To": "+821012345678", "account_sid": "ACSECRET"},
+        )
+
+        with (
+            patch("api.services.telephony.status_processor.db_client") as mock_db,
+            patch("api.services.telephony.status_processor.circuit_breaker") as mock_cb,
+        ):
+            mock_db.get_workflow_run_by_id = AsyncMock(return_value=mock_workflow_run)
+            mock_db.update_workflow_run = AsyncMock()
+            mock_db.get_phone_preview_session_for_run = AsyncMock(
+                return_value=preview_session
+            )
+            mock_db.update_phone_preview_session_status = AsyncMock()
+
+            await _process_status_update(100, status)
+
+        mock_cb.record_and_evaluate.assert_not_called()
+        mock_db.update_phone_preview_session_status.assert_awaited_once_with(
+            123,
+            status="failed",
+            failure_reason="telephony_failed",
+            completed=False,
+        )
+        assert "+821012345678" not in str(
+            mock_db.update_phone_preview_session_status.await_args
+        )
+        assert "ACSECRET" not in str(
+            mock_db.update_phone_preview_session_status.await_args
+        )
 
 
 # =============================================================================

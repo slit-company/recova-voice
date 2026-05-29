@@ -11,14 +11,23 @@ from datetime import UTC, datetime
 from typing import Any, List, Optional
 
 from api.db import db_client
+from api.services.phone_preview.privacy import sanitize_preview_workflow_run_contexts
 from api.utils.artifacts import artifact_url
+
+
+def _public_run_contexts(run: Any) -> tuple[dict, dict]:
+    initial_context, gathered_context = sanitize_preview_workflow_run_contexts(
+        run.initial_context or {},
+        run.gathered_context or {},
+    )
+    return initial_context or {}, gathered_context or {}
 
 
 def _collect_extracted_variable_keys(runs: List[Any]) -> list[str]:
     """Collect all unique extracted variable keys across runs, preserving insertion order."""
     keys: dict[str, None] = {}
     for run in runs:
-        gathered = run.gathered_context or {}
+        _, gathered = _public_run_contexts(run)
         extracted = gathered.get("extracted_variables", {})
         if isinstance(extracted, dict):
             for key in extracted:
@@ -51,8 +60,7 @@ def build_run_report_csv(runs: List[Any]) -> io.StringIO:
     writer.writerow(pre_headers + extracted_var_keys + post_headers)
 
     for run in runs:
-        initial = run.initial_context or {}
-        gathered = run.gathered_context or {}
+        initial, gathered = _public_run_contexts(run)
         cost = run.cost_info or {}
 
         call_tags = gathered.get("call_tags", [])

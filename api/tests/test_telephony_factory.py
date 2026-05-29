@@ -108,9 +108,6 @@ async def test_get_telephony_provider_for_preview_run_uses_allowlisted_scope(
         initial_context={
             "telephony_preview": True,
             "preview_session_id": 123,
-            "preview_user_id": 7,
-            "telephony_configuration_id": 901,
-            "telephony_configuration_organization_id": 900,
         },
     )
     session = SimpleNamespace(
@@ -146,7 +143,7 @@ async def test_get_telephony_provider_for_preview_run_uses_allowlisted_scope(
 
 
 @pytest.mark.asyncio
-async def test_get_telephony_provider_for_preview_run_fails_closed_on_allowlist_mismatch(
+async def test_get_telephony_provider_for_preview_run_fails_closed_on_session_mismatch(
     monkeypatch,
 ):
     monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")
@@ -157,17 +154,29 @@ async def test_get_telephony_provider_for_preview_run_fails_closed_on_allowlist_
         initial_context={
             "telephony_preview": True,
             "preview_session_id": 123,
-            "preview_user_id": 7,
-            "telephony_configuration_id": 902,
-            "telephony_configuration_organization_id": 900,
         },
     )
+    session = SimpleNamespace(
+        id=124,
+        workflow_run_id=501,
+        workflow_id=33,
+        organization_id=11,
+        user_id=7,
+        status="calling",
+    )
 
-    with patch(
-        "api.services.telephony.factory.get_default_telephony_provider",
-        new_callable=AsyncMock,
-    ) as get_default:
-        with pytest.raises(ValueError, match="preview_telephony_allowlist_mismatch"):
+    with (
+        patch(
+            "api.services.phone_preview.telephony_scope.db_client.get_phone_preview_session_for_run",
+            new_callable=AsyncMock,
+            return_value=session,
+        ),
+        patch(
+            "api.services.telephony.factory.get_default_telephony_provider",
+            new_callable=AsyncMock,
+        ) as get_default,
+    ):
+        with pytest.raises(ValueError, match="preview_session_mismatch"):
             await get_telephony_provider_for_run(workflow_run, 11)
 
     get_default.assert_not_awaited()

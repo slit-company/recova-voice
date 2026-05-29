@@ -576,6 +576,20 @@ async def _handle_telephony_websocket(
             await websocket.close(code=4404, reason="Workflow not found")
             return
 
+        if workflow_run.workflow_id != workflow.id or workflow.id != workflow_id:
+            logger.warning(
+                f"Workflow run {workflow_run_id} does not belong to workflow {workflow_id}"
+            )
+            await websocket.close(code=4403, reason="Workflow run mismatch")
+            return
+
+        if workflow.user_id != user_id:
+            logger.warning(
+                f"Workflow run {workflow_run_id} owner mismatch for workflow {workflow_id}"
+            )
+            await websocket.close(code=4403, reason="Workflow owner mismatch")
+            return
+
         # Check workflow run state - only allow 'initialized' state
         if workflow_run.state != WorkflowRunState.INITIALIZED.value:
             logger.warning(
@@ -593,7 +607,18 @@ async def _handle_telephony_websocket(
         )
         logger.info(f"Workflow run {workflow_run_id} mode: {workflow_run.mode}")
 
-        if workflow_run.initial_context:
+        provider = None
+        is_preview_run = bool(
+            workflow_run.initial_context
+            and workflow_run.initial_context.get("telephony_preview")
+        )
+        if is_preview_run:
+            provider = await get_telephony_provider_for_run(
+                workflow_run, workflow.organization_id
+            )
+            provider_type = provider.PROVIDER_NAME
+            logger.info(f"Resolved preview provider_type: {provider_type}")
+        elif workflow_run.initial_context:
             provider_type = workflow_run.initial_context.get("provider")
             logger.info(f"Extracted provider_type: {provider_type}")
 
@@ -609,9 +634,10 @@ async def _handle_telephony_websocket(
             f"WebSocket connected for {provider_type} provider, workflow_run {workflow_run_id}"
         )
 
-        provider = await get_telephony_provider_for_run(
-            workflow_run, workflow.organization_id
-        )
+        if provider is None:
+            provider = await get_telephony_provider_for_run(
+                workflow_run, workflow.organization_id
+            )
 
         # Verify the provider matches what was stored
         if provider.PROVIDER_NAME != provider_type:

@@ -20,6 +20,7 @@ def _settings(**overrides):
         verified_ttl_seconds=86400,
         max_otp_attempts=5,
         daily_user_call_limit=5,
+        daily_org_call_limit=50,
         daily_phone_call_limit=5,
         otp_delivery_webhook_url="https://sms.example/send",
         otp_delivery_webhook_bearer_token="token-123",

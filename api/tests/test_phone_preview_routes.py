@@ -2,21 +2,65 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.routes.phone_preview import router
-from api.services.auth.depends import get_user
+from api.routes.phone_preview import get_phone_preview_user, router
 
 
 def _make_test_app() -> FastAPI:
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[get_user] = lambda: SimpleNamespace(
+    app.dependency_overrides[get_phone_preview_user] = lambda: SimpleNamespace(
         id=7,
         selected_organization_id=11,
     )
     return app
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "json_body", "service_method"),
+    [
+        (
+            "post",
+            "/phone-preview/start",
+            {"workflow_id": 33, "phone_number": "01012345678"},
+            "start",
+        ),
+        (
+            "post",
+            "/phone-preview/verify",
+            {"session_id": 123, "otp_code": "123456"},
+            "verify",
+        ),
+        ("post", "/phone-preview/call", {"session_id": 123}, "call"),
+        ("get", "/phone-preview/status/123", None, "status"),
+        ("get", "/phone-preview/123", None, "status"),
+    ],
+)
+def test_phone_preview_rejects_api_key_auth_before_service_call(
+    method, path, json_body, service_method
+):
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    with patch(
+        f"api.routes.phone_preview.phone_preview_service.{service_method}",
+        new=AsyncMock(),
+    ) as service_call:
+        request = getattr(client, method)
+        if json_body is None:
+            response = request(path, headers={"X-API-Key": "dgr_test_key"})
+        else:
+            response = request(
+                path, json=json_body, headers={"X-API-Key": "dgr_test_key"}
+            )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "phone_preview_requires_user_session"
+    service_call.assert_not_awaited()
 
 
 def test_start_route_returns_preview_session():
@@ -54,6 +98,27 @@ def test_start_route_returns_preview_session():
     start.assert_awaited_once()
 
 
+def test_start_route_rejects_oversized_payload_before_service_call():
+    app = _make_test_app()
+    client = TestClient(app)
+
+    with patch(
+        "api.routes.phone_preview.phone_preview_service.start",
+        new=AsyncMock(),
+    ) as start:
+        response = client.post(
+            "/phone-preview/start",
+            json={
+                "workflow_id": 33,
+                "phone_number": "0" * 41,
+                "display_name": "x" * 121,
+            },
+        )
+
+    assert response.status_code == 422
+    start.assert_not_awaited()
+
+
 def test_call_route_delegates_to_preview_service():
     app = _make_test_app()
     client = TestClient(app)
@@ -80,7 +145,7 @@ def test_call_route_delegates_to_preview_service():
 
     assert response.status_code == 200
     assert response.json()["workflow_run_id"] == 501
-    assert response.json()["provider_call_id"] == "call-123"
+    assert "provider_call_id" not in response.json()
     call.assert_awaited_once()
 
 
@@ -110,4 +175,5 @@ def test_status_route_delegates_to_preview_service():
 
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
+    assert "provider_call_id" not in response.json()
     status.assert_awaited_once()

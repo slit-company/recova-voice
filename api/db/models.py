@@ -303,7 +303,9 @@ class PhonePreviewVerificationModel(Base):
     organization_id = Column(
         Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     phone_number_hash = Column(String(64), nullable=False)
     phone_number_masked = Column(String(32), nullable=False)
     code_hash = Column(String(128), nullable=False)
@@ -342,7 +344,9 @@ class PhonePreviewSessionModel(Base):
     organization_id = Column(
         Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     workflow_id = Column(
         Integer, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
     )
@@ -355,6 +359,7 @@ class PhonePreviewSessionModel(Base):
         nullable=True,
     )
     phone_number_hash = Column(String(64), nullable=False)
+    phone_number_global_hash = Column(String(64), nullable=True)
     phone_number_masked = Column(String(32), nullable=False)
     destination_phone_encrypted = Column(Text, nullable=True)
     display_name = Column(String(120), nullable=True)
@@ -393,6 +398,12 @@ class PhonePreviewSessionModel(Base):
             "organization_id",
             "phone_number_hash",
             "created_at",
+        ),
+        Index(
+            "ix_phone_preview_sessions_global_phone",
+            "phone_number_global_hash",
+            "created_at",
+            postgresql_where=text("phone_number_global_hash IS NOT NULL"),
         ),
         Index("ix_phone_preview_sessions_expires_at", "expires_at"),
     )
@@ -689,7 +700,6 @@ class WorkflowRunTextSessionModel(Base):
     )
 
     __table_args__ = (Index("ix_workflow_run_text_sessions_updated_at", "updated_at"),)
-
 
 
 class OrganizationUsageCycleModel(Base):

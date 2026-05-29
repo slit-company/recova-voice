@@ -23,6 +23,7 @@ from api.services.phone_preview.otp import (
 from api.services.phone_preview.privacy import (
     decrypt_phone,
     encrypt_phone,
+    global_phone_hash,
     mask_phone,
     normalize_preview_phone,
     phone_hash,
@@ -34,7 +35,6 @@ from api.services.phone_preview.otp_delivery import (
 from api.services.quota_service import check_dograh_quota_by_user_id
 from api.utils.common import get_backend_endpoints
 
-
 _PREVIEW_METADATA_SENSITIVE_EXACT_KEYS = {"from", "to"}
 _PREVIEW_METADATA_SENSITIVE_FRAGMENTS = (
     "phone",
@@ -42,6 +42,12 @@ _PREVIEW_METADATA_SENSITIVE_FRAGMENTS = (
     "destination",
     "caller",
     "called",
+    "account",
+    "sid",
+    "secret",
+    "token",
+    "api_key",
+    "credential",
 )
 
 
@@ -91,7 +97,6 @@ class PhonePreviewResult:
             "masked_phone": self.masked_phone,
             "expires_at": self.expires_at,
             "workflow_run_id": self.workflow_run_id,
-            "provider_call_id": self.provider_call_id,
             "failure_reason": self.failure_reason,
         }
         if self.dev_otp_code:
@@ -126,6 +131,15 @@ class PhonePreviewService:
         hashed = phone_hash(
             normalized, organization_id=organization_id, user_id=user.id
         )
+        global_hashed = global_phone_hash(normalized)
+
+        await self._enforce_start_rate_limits(
+            organization_id=organization_id,
+            user_id=user.id,
+            phone_number_global_hash=global_hashed,
+            now=now,
+            settings=settings,
+        )
 
         verified = await db_client.get_recent_verified_phone_preview_verification(
             organization_id=organization_id,
@@ -141,6 +155,7 @@ class PhonePreviewService:
                 workflow_id=workflow_id,
                 verification_id=verified.id,
                 phone_number_hash=hashed,
+                phone_number_global_hash=global_hashed,
                 phone_number_masked=masked,
                 destination_phone_encrypted=encrypt_phone(normalized),
                 display_name=display_name,
@@ -167,6 +182,7 @@ class PhonePreviewService:
             workflow_id=workflow_id,
             verification_id=verification.id,
             phone_number_hash=hashed,
+            phone_number_global_hash=global_hashed,
             phone_number_masked=masked,
             destination_phone_encrypted=encrypt_phone(normalized),
             display_name=display_name,
@@ -208,6 +224,14 @@ class PhonePreviewService:
     ) -> PhonePreviewResult:
         organization_id = self._selected_org(user)
         session = await self._get_user_session(session_id, organization_id, user.id)
+        session = await self._expire_session_if_stale(
+            session,
+            expirable_statuses={"verified"},
+        )
+        if session.status == "expired":
+            raise HTTPException(
+                status_code=400, detail=session.failure_reason or "expired"
+            )
         if session.status in {"verified", "calling", "active", "completed"}:
             return self._session_result(session, otp_required=False)
         if session.status != "pending_verification" or not session.verification_id:
@@ -284,7 +308,9 @@ class PhonePreviewService:
                 raise HTTPException(status_code=400, detail="phone_not_verified")
             if session.status in {"calling", "active", "completed"}:
                 return self._session_result(session, otp_required=False)
-            raise HTTPException(status_code=400, detail=session.failure_reason or session.status)
+            raise HTTPException(
+                status_code=400, detail=session.failure_reason or session.status
+            )
 
         try:
             return await self._start_provider_call(user=user, session=session)
@@ -302,6 +328,7 @@ class PhonePreviewService:
     async def status(self, *, user: UserModel, session_id: int) -> PhonePreviewResult:
         organization_id = self._selected_org(user)
         session = await self._get_user_session(session_id, organization_id, user.id)
+        session = await self._expire_session_if_stale(session)
         if session.workflow_run_id and session.status in {"calling", "active"}:
             workflow_run = await db_client.get_workflow_run(
                 session.workflow_run_id, organization_id=organization_id
@@ -315,7 +342,25 @@ class PhonePreviewService:
             session, otp_required=session.status == "pending_verification"
         )
 
-    async def _start_provider_call(self, *, user: UserModel, session) -> PhonePreviewResult:
+    async def _expire_session_if_stale(
+        self,
+        session,
+        *,
+        expirable_statuses: set[str] | None = None,
+    ):
+        statuses = expirable_statuses or {"pending_verification", "verified"}
+        if session.status not in statuses or session.expires_at > datetime.now(UTC):
+            return session
+        return (
+            await db_client.update_phone_preview_session_status(
+                session.id, status="expired", failure_reason="expired"
+            )
+            or session
+        )
+
+    async def _start_provider_call(
+        self, *, user: UserModel, session
+    ) -> PhonePreviewResult:
         settings = get_preview_telephony_settings()
         assert settings.organization_id is not None
         assert settings.configuration_id is not None
@@ -344,12 +389,17 @@ class PhonePreviewService:
             user_id=session.user_id,
             since=since,
         )
-        phone_count = await db_client.count_phone_preview_sessions_since(
-            phone_number_hash=session.phone_number_hash,
-            since=since,
-        )
         if user_count > settings.daily_user_call_limit:
             raise HTTPException(status_code=429, detail="preview_rate_limited")
+
+        org_count = await db_client.count_phone_preview_sessions_since(
+            organization_id=session.organization_id,
+            since=since,
+        )
+        if org_count > settings.daily_org_call_limit:
+            raise HTTPException(status_code=429, detail="preview_org_rate_limited")
+
+        phone_count = await self._count_recent_phone_sessions(session, since)
         if phone_count > settings.daily_phone_call_limit:
             raise HTTPException(status_code=429, detail="preview_phone_rate_limited")
 
@@ -379,12 +429,8 @@ class PhonePreviewService:
             "called_number": session.phone_number_masked,
             "phone_number_masked": session.phone_number_masked,
             "called_number_masked": session.phone_number_masked,
-            "provider": provider.PROVIDER_NAME,
             "telephony_preview": True,
             "preview_session_id": session.id,
-            "preview_user_id": user.id,
-            "telephony_configuration_id": settings.configuration_id,
-            "telephony_configuration_organization_id": settings.organization_id,
             "max_duration_seconds": session.max_duration_seconds,
         }
         if session.display_name:
@@ -465,8 +511,6 @@ class PhonePreviewService:
             "called_number": session.phone_number_masked,
             "phone_number_masked": session.phone_number_masked,
             "called_number_masked": session.phone_number_masked,
-            "telephony_configuration_id": settings.configuration_id,
-            "telephony_configuration_organization_id": settings.organization_id,
             "telephony_preview": True,
             "preview_session_id": session.id,
         }
@@ -485,14 +529,62 @@ class PhonePreviewService:
         try:
             return decrypt_phone(session.destination_phone_encrypted)
         except Exception:
-            raise HTTPException(status_code=400, detail="preview_destination_unavailable")
+            raise HTTPException(
+                status_code=400, detail="preview_destination_unavailable"
+            )
+
+    async def _enforce_start_rate_limits(
+        self,
+        *,
+        organization_id: int,
+        user_id: int,
+        phone_number_global_hash: str,
+        now: datetime,
+        settings,
+    ) -> None:
+        since = now - timedelta(days=1)
+        user_count = await db_client.count_phone_preview_sessions_since(
+            organization_id=organization_id,
+            user_id=user_id,
+            since=since,
+        )
+        if user_count >= settings.daily_user_call_limit:
+            raise HTTPException(status_code=429, detail="preview_rate_limited")
+
+        org_count = await db_client.count_phone_preview_sessions_since(
+            organization_id=organization_id,
+            since=since,
+        )
+        if org_count >= settings.daily_org_call_limit:
+            raise HTTPException(status_code=429, detail="preview_org_rate_limited")
+
+        phone_count = await db_client.count_phone_preview_sessions_since(
+            phone_number_global_hash=phone_number_global_hash,
+            since=since,
+        )
+        if phone_count >= settings.daily_phone_call_limit:
+            raise HTTPException(status_code=429, detail="preview_phone_rate_limited")
+
+    async def _count_recent_phone_sessions(self, session, since: datetime) -> int:
+        phone_number_global_hash = getattr(session, "phone_number_global_hash", None)
+        if phone_number_global_hash:
+            return await db_client.count_phone_preview_sessions_since(
+                phone_number_global_hash=phone_number_global_hash,
+                since=since,
+            )
+        return await db_client.count_phone_preview_sessions_since(
+            phone_number_hash=session.phone_number_hash,
+            since=since,
+        )
 
     def _selected_org(self, user: UserModel) -> int:
         if not getattr(user, "selected_organization_id", None):
             raise HTTPException(status_code=400, detail="no_organization_selected")
         return user.selected_organization_id
 
-    async def _get_user_session(self, session_id: int, organization_id: int, user_id: int):
+    async def _get_user_session(
+        self, session_id: int, organization_id: int, user_id: int
+    ):
         session = await db_client.get_phone_preview_session(
             session_id, organization_id=organization_id, user_id=user_id
         )

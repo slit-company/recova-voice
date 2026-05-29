@@ -26,6 +26,10 @@ from api.services.configuration.masking import (
 )
 from api.services.configuration.resolve import resolve_effective_config
 from api.services.mps_service_key_client import mps_service_key_client
+from api.services.phone_preview.privacy import (
+    sanitize_preview_workflow_run_contexts,
+    sanitize_preview_workflow_run_logs,
+)
 from api.services.posthog_client import capture_event
 from api.services.reports import generate_workflow_report_csv
 from api.services.storage import storage_fs
@@ -1119,6 +1123,17 @@ async def get_workflow_run(
     if (run.transcript_url or run.recording_url) and not public_access_token:
         public_access_token = await db_client.ensure_public_access_token(run.id)
 
+    public_initial_context, public_gathered_context = (
+        sanitize_preview_workflow_run_contexts(
+            run.initial_context, run.gathered_context
+        )
+    )
+    public_logs = sanitize_preview_workflow_run_logs(
+        run.initial_context,
+        run.gathered_context,
+        run.logs,
+    )
+
     return {
         "id": run.id,
         "workflow_id": run.workflow_id,
@@ -1130,28 +1145,33 @@ async def get_workflow_run(
         "transcript_public_url": artifact_url(public_access_token, "transcript"),
         "recording_public_url": artifact_url(public_access_token, "recording"),
         "public_access_token": public_access_token,
-        "cost_info": {
-            "dograh_token_usage": (
-                run.cost_info.get("dograh_token_usage")
-                if run.cost_info and "dograh_token_usage" in run.cost_info
-                else round(float(run.cost_info.get("total_cost_usd", 0)) * 100, 2)
-                if run.cost_info and "total_cost_usd" in run.cost_info
-                else 0
-            ),
-            "call_duration_seconds": int(
-                round(run.cost_info.get("call_duration_seconds"))
-            )
-            if run.cost_info and run.cost_info.get("call_duration_seconds") is not None
-            else None,
-        }
-        if run.cost_info
-        else None,
+        "cost_info": (
+            {
+                "dograh_token_usage": (
+                    run.cost_info.get("dograh_token_usage")
+                    if run.cost_info and "dograh_token_usage" in run.cost_info
+                    else (
+                        round(float(run.cost_info.get("total_cost_usd", 0)) * 100, 2)
+                        if run.cost_info and "total_cost_usd" in run.cost_info
+                        else 0
+                    )
+                ),
+                "call_duration_seconds": (
+                    int(round(run.cost_info.get("call_duration_seconds")))
+                    if run.cost_info
+                    and run.cost_info.get("call_duration_seconds") is not None
+                    else None
+                ),
+            }
+            if run.cost_info
+            else None
+        ),
         "created_at": run.created_at,
         "definition_id": run.definition_id,
-        "initial_context": run.initial_context,
-        "gathered_context": run.gathered_context,
+        "initial_context": public_initial_context,
+        "gathered_context": public_gathered_context,
         "call_type": run.call_type,
-        "logs": run.logs,
+        "logs": public_logs,
         "annotations": run.annotations,
     }
 
@@ -1222,8 +1242,31 @@ async def get_workflow_runs(
 
     total_pages = (total_count + limit - 1) // limit
 
+    public_runs = []
+    for run in runs:
+        public_initial_context, public_gathered_context = (
+            sanitize_preview_workflow_run_contexts(
+                run.initial_context,
+                run.gathered_context,
+            )
+        )
+        public_logs = sanitize_preview_workflow_run_logs(
+            run.initial_context,
+            run.gathered_context,
+            run.logs,
+        )
+        public_runs.append(
+            run.model_copy(
+                update={
+                    "initial_context": public_initial_context,
+                    "gathered_context": public_gathered_context,
+                    "logs": public_logs,
+                }
+            )
+        )
+
     return WorkflowRunsResponse(
-        runs=runs,
+        runs=public_runs,
         total_count=total_count,
         page=page,
         limit=limit,
