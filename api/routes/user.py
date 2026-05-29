@@ -10,6 +10,7 @@ from api.db.models import (
     UserModel,
 )
 from api.services.auth.depends import get_user
+from api.services.feature_gates import get_self_serve_feature_gates
 from api.services.configuration.check_validity import (
     APIKeyStatusResponse,
     UserConfigurationValidator,
@@ -86,6 +87,7 @@ class UserConfigurationRequestResponseSchema(BaseModel):
     timezone: str | None = None
     ui_language: Literal["en", "ko"] | None = None
     organization_pricing: dict[str, Union[float, str, bool]] | None = None
+    feature_gates: dict[str, bool] | None = None
 
 
 @router.get("/configurations/user")
@@ -105,6 +107,8 @@ async def get_user_configurations(
                 "billing_enabled": True,
             }
 
+    masked_config["feature_gates"] = await get_self_serve_feature_gates(user)
+
     return masked_config
 
 
@@ -117,8 +121,9 @@ async def update_user_configurations(
 
     incoming_dict = request.model_dump(exclude_none=True)
 
-    # Remove organization_pricing from incoming dict as it's read-only
+    # Remove read-only fields from incoming dict.
     incoming_dict.pop("organization_pricing", None)
+    incoming_dict.pop("feature_gates", None)
 
     # Merge via helper
     try:
@@ -157,6 +162,8 @@ async def update_user_configurations(
                 "currency": "USD",
                 "billing_enabled": True,
             }
+
+    masked_config["feature_gates"] = await get_self_serve_feature_gates(user)
 
     return masked_config
 

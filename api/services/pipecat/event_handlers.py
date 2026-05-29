@@ -240,7 +240,10 @@ def register_event_handlers(
                     logger.debug(f"Added trace URL to gathered_context: {trace_url}")
 
         # also consider existing gathered context in workflow_run
-        gathered_context = {**workflow_run.gathered_context, **gathered_context}
+        existing_gathered_context = (
+            workflow_run.gathered_context if workflow_run else {}
+        ) or {}
+        gathered_context = {**existing_gathered_context, **gathered_context}
 
         # Set user_speech call tag
         call_tags = gathered_context.get("call_tags", [])
@@ -323,13 +326,26 @@ def register_event_handlers(
             f"Usage metrics: {usage_info}, Gathered context: {gathered_context}"
         )
 
-        await db_client.update_workflow_run(
-            run_id=workflow_run_id,
-            usage_info=usage_info,
-            gathered_context=gathered_context,
-            is_completed=True,
-            state=WorkflowRunState.COMPLETED.value,
-        )
+        if workflow_run:
+            await db_client.update_workflow_run(
+                run_id=workflow_run_id,
+                usage_info=usage_info,
+                gathered_context=gathered_context,
+                is_completed=True,
+                state=WorkflowRunState.COMPLETED.value,
+            )
+            preview_session = await db_client.get_phone_preview_session_for_run(
+                workflow_run_id
+            )
+            if preview_session and preview_session.status in {"calling", "active"}:
+                await db_client.update_phone_preview_session_status(
+                    preview_session.id, status="completed", completed=True
+                )
+        else:
+            logger.warning(
+                f"Workflow run {workflow_run_id} was not found during pipeline "
+                "finish; skipping completion persistence"
+            )
 
         asyncio.create_task(
             _capture_call_event(

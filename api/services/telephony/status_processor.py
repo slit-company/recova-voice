@@ -20,6 +20,20 @@ from api.services.campaign.campaign_event_publisher import (
 from api.services.campaign.circuit_breaker import circuit_breaker
 
 
+async def _update_preview_session_from_status(
+    workflow_run_id: int, *, preview_status: str, failure_reason: str | None = None
+) -> None:
+    preview_session = await db_client.get_phone_preview_session_for_run(workflow_run_id)
+    if not preview_session:
+        return
+    await db_client.update_phone_preview_session_status(
+        preview_session.id,
+        status=preview_status,
+        failure_reason=failure_reason,
+        completed=preview_status == "completed",
+    )
+
+
 class StatusCallbackRequest(BaseModel):
     """Normalized status callback shape used across all telephony providers.
 
@@ -171,6 +185,9 @@ async def _process_status_update(workflow_run_id: int, status: StatusCallbackReq
                 is_completed=True,
                 state=WorkflowRunState.COMPLETED.value,
             )
+        await _update_preview_session_from_status(
+            workflow_run_id, preview_status="completed"
+        )
 
     elif status.status in ["failed", "busy", "no-answer", "canceled", "error"]:
         logger.warning(
@@ -208,6 +225,11 @@ async def _process_status_update(workflow_run_id: int, status: StatusCallbackReq
             is_completed=True,
             state=WorkflowRunState.COMPLETED.value,
             gathered_context={"call_tags": call_tags},
+        )
+        await _update_preview_session_from_status(
+            workflow_run_id,
+            preview_status="failed",
+            failure_reason=f"telephony_{status.status.lower()}",
         )
     elif status.status in ["in-progress", "initiated", "ringing"]:
         # No-op while the call is in flight.

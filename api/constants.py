@@ -66,6 +66,15 @@ LOG_RETENTION = os.getenv("LOG_RETENTION", "7 days")
 LOG_COMPRESSION = os.getenv("LOG_COMPRESSION", "gz")
 ENABLE_TELEMETRY = os.getenv("ENABLE_TELEMETRY", "false").lower() == "true"
 
+# Self-serve SaaS surface gates. Recova normal users use the call-me preview
+# path; provider/caller ID setup and campaigns stay opt-in for admin/B2B use.
+ENABLE_SELF_SERVE_TELEPHONY = (
+    os.getenv("ENABLE_SELF_SERVE_TELEPHONY", "false").lower() == "true"
+)
+ENABLE_SELF_SERVE_CAMPAIGNS = (
+    os.getenv("ENABLE_SELF_SERVE_CAMPAIGNS", "false").lower() == "true"
+)
+
 
 def _get_version() -> str:
     """Read version from pyproject.toml."""
@@ -89,6 +98,7 @@ COUNTRY_CODES = {
     "CA": "1",  # Canada
     "GB": "44",  # United Kingdom
     "IN": "91",  # India
+    "KR": "82",  # South Korea
     "AU": "61",  # Australia
     "DE": "49",  # Germany
     "FR": "33",  # France

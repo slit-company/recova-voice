@@ -23,6 +23,9 @@ from loguru import logger
 
 from api.db import db_client
 from api.db.models import TelephonyConfigurationModel, WorkflowRunModel
+from api.services.phone_preview.telephony_scope import (
+    resolve_preview_system_telephony_scope,
+)
 from api.services.telephony import registry
 from api.services.telephony.base import TelephonyProvider
 
@@ -143,6 +146,13 @@ async def get_telephony_provider_for_run(
     default config so legacy runs created before the multi-config migration
     still resolve.
     """
+    preview_scope = await resolve_preview_system_telephony_scope(
+        workflow_run, organization_id
+    )
+    if preview_scope is not None:
+        preview_org_id, preview_cfg_id = preview_scope
+        return await get_telephony_provider_by_id(preview_cfg_id, preview_org_id)
+
     cfg_id = (workflow_run.initial_context or {}).get("telephony_configuration_id")
     if cfg_id is not None:
         return await get_telephony_provider_by_id(cfg_id, organization_id)

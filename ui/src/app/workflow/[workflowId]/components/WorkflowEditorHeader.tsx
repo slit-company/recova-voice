@@ -87,7 +87,7 @@ export const WorkflowEditorHeader = ({
     const renameButtonRef = useRef<HTMLButtonElement>(null);
 
     const hasValidationErrors = workflowValidationErrors.length > 0;
-    const isCallDisabled = isDirty || hasValidationErrors;
+    const isCallDisabled = hasValidationErrors;
 
     const handleSave = async () => {
         setSavingWorkflow(true);

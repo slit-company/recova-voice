@@ -11,6 +11,7 @@ from api.routes.knowledge_base import router as knowledge_base_router
 from api.routes.node_types import router as node_types_router
 from api.routes.organization import router as organization_router
 from api.routes.organization_usage import router as organization_usage_router
+from api.routes.phone_preview import router as phone_preview_router
 from api.routes.public_agent import router as public_agent_router
 from api.routes.public_download import router as public_download_router
 from api.routes.public_embed import router as public_embed_router
@@ -35,6 +36,7 @@ router = APIRouter(
 )
 
 router.include_router(telephony_router)
+router.include_router(phone_preview_router)
 router.include_router(superuser_router)
 router.include_router(workflow_router)
 router.include_router(workflow_text_chat_router)

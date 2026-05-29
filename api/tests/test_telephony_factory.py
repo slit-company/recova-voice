@@ -94,3 +94,80 @@ async def test_load_telephony_config_by_id_casts_numeric_string_before_db_lookup
     assert result == {"provider": "twilio"}
     get_config.assert_awaited_once_with(213, 2617)
     normalize.assert_awaited_once_with(row)
+
+
+@pytest.mark.asyncio
+async def test_get_telephony_provider_for_preview_run_uses_allowlisted_scope(
+    monkeypatch,
+):
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_CONFIGURATION_ID", "901")
+    workflow_run = SimpleNamespace(
+        id=501,
+        workflow_id=33,
+        initial_context={
+            "telephony_preview": True,
+            "preview_session_id": 123,
+            "preview_user_id": 7,
+            "telephony_configuration_id": 901,
+            "telephony_configuration_organization_id": 900,
+        },
+    )
+    session = SimpleNamespace(
+        id=123,
+        workflow_run_id=501,
+        workflow_id=33,
+        organization_id=11,
+        user_id=7,
+        status="calling",
+    )
+
+    with (
+        patch(
+            "api.services.phone_preview.telephony_scope.db_client.get_phone_preview_session_for_run",
+            new_callable=AsyncMock,
+            return_value=session,
+        ),
+        patch(
+            "api.services.telephony.factory.get_telephony_provider_by_id",
+            new_callable=AsyncMock,
+            return_value="provider",
+        ) as get_provider,
+        patch(
+            "api.services.telephony.factory.get_default_telephony_provider",
+            new_callable=AsyncMock,
+        ) as get_default,
+    ):
+        result = await get_telephony_provider_for_run(workflow_run, 11)
+
+    assert result == "provider"
+    get_provider.assert_awaited_once_with(901, 900)
+    get_default.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_telephony_provider_for_preview_run_fails_closed_on_allowlist_mismatch(
+    monkeypatch,
+):
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_CONFIGURATION_ID", "901")
+    workflow_run = SimpleNamespace(
+        id=501,
+        workflow_id=33,
+        initial_context={
+            "telephony_preview": True,
+            "preview_session_id": 123,
+            "preview_user_id": 7,
+            "telephony_configuration_id": 902,
+            "telephony_configuration_organization_id": 900,
+        },
+    )
+
+    with patch(
+        "api.services.telephony.factory.get_default_telephony_provider",
+        new_callable=AsyncMock,
+    ) as get_default:
+        with pytest.raises(ValueError, match="preview_telephony_allowlist_mismatch"):
+            await get_telephony_provider_for_run(workflow_run, 11)
+
+    get_default.assert_not_awaited()

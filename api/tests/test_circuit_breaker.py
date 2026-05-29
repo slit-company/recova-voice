@@ -599,6 +599,7 @@ class TestProcessStatusUpdateCircuitBreaker:
         ):
             mock_db.get_workflow_run_by_id = AsyncMock(return_value=mock_workflow_run)
             mock_db.update_workflow_run = AsyncMock()
+            mock_db.get_phone_preview_session_for_run = AsyncMock(return_value=None)
 
             mock_dispatcher.release_call_slot = AsyncMock(return_value=True)
             mock_cb.record_and_evaluate = AsyncMock()
@@ -646,6 +647,7 @@ class TestProcessStatusUpdateCircuitBreaker:
         ):
             mock_db.get_workflow_run_by_id = AsyncMock(return_value=mock_workflow_run)
             mock_db.update_workflow_run = AsyncMock()
+            mock_db.get_phone_preview_session_for_run = AsyncMock(return_value=None)
 
             mock_dispatcher.release_call_slot = AsyncMock(return_value=True)
             mock_cb.record_and_evaluate = AsyncMock()
@@ -681,6 +683,7 @@ class TestProcessStatusUpdateCircuitBreaker:
         ):
             mock_db.get_workflow_run_by_id = AsyncMock(return_value=mock_workflow_run)
             mock_db.update_workflow_run = AsyncMock()
+            mock_db.get_phone_preview_session_for_run = AsyncMock(return_value=None)
 
             await _process_status_update(100, status)
 

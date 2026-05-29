@@ -709,6 +709,8 @@ function RenderWorkflow({
                     onOpenChange={setIsPhoneCallDialogOpen}
                     workflowId={workflowId}
                     user={user}
+                    hasUnsavedChanges={isDirty}
+                    saveLatestDraft={guardedSaveWorkflow}
                 />
             </div>
         </WorkflowProvider>

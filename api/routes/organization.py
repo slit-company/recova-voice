@@ -27,6 +27,10 @@ from api.schemas.telephony_phone_number import (
     ProviderSyncStatus,
 )
 from api.services.auth.depends import get_user
+from api.services.feature_gates import (
+    require_self_serve_campaigns,
+    require_self_serve_telephony,
+)
 from api.services.configuration.masking import is_mask_of, mask_key
 from api.services.posthog_client import capture_event
 from api.services.telephony import registry as telephony_registry
@@ -102,7 +106,7 @@ class TelephonyConfigWarningsResponse(BaseModel):
     "/telephony-providers/metadata",
     response_model=TelephonyProvidersMetadataResponse,
 )
-async def get_telephony_providers_metadata(user: UserModel = Depends(get_user)):
+async def get_telephony_providers_metadata(user: UserModel = Depends(require_self_serve_telephony)):
     """Return the list of available telephony providers and their form schemas.
 
     The UI uses this to render the configuration form generically instead of
@@ -142,7 +146,7 @@ async def get_telephony_providers_metadata(user: UserModel = Depends(get_user)):
     "/telephony-config-warnings",
     response_model=TelephonyConfigWarningsResponse,
 )
-async def get_telephony_config_warnings(user: UserModel = Depends(get_user)):
+async def get_telephony_config_warnings(user: UserModel = Depends(require_self_serve_telephony)):
     """Return aggregated warning counts for the current org's telephony configs.
 
     Today this surfaces only Telnyx configs missing ``webhook_public_key``;
@@ -230,7 +234,7 @@ async def _sync_inbound_for_phone_number(
 
 
 @router.get("/telephony-configs", response_model=TelephonyConfigurationListResponse)
-async def list_telephony_configurations(user: UserModel = Depends(get_user)):
+async def list_telephony_configurations(user: UserModel = Depends(require_self_serve_telephony)):
     """List the org's telephony configurations with phone-number counts."""
     if not user.selected_organization_id:
         raise HTTPException(status_code=400, detail="No organization selected")
@@ -256,7 +260,7 @@ async def list_telephony_configurations(user: UserModel = Depends(get_user)):
 @router.post("/telephony-configs", response_model=TelephonyConfigurationDetail)
 async def create_telephony_configuration(
     request: TelephonyConfigurationCreateRequest,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_telephony),
 ):
     """Create a new telephony configuration for the org."""
     if not user.selected_organization_id:
@@ -304,7 +308,7 @@ async def create_telephony_configuration(
     "/telephony-configs/{config_id}", response_model=TelephonyConfigurationDetail
 )
 async def get_telephony_configuration_by_id(
-    config_id: int, user: UserModel = Depends(get_user)
+    config_id: int, user: UserModel = Depends(require_self_serve_telephony)
 ):
     if not user.selected_organization_id:
         raise HTTPException(status_code=400, detail="No organization selected")
@@ -323,7 +327,7 @@ async def get_telephony_configuration_by_id(
 async def update_telephony_configuration(
     config_id: int,
     request: TelephonyConfigurationUpdateRequest,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_telephony),
 ):
     if not user.selected_organization_id:
         raise HTTPException(status_code=400, detail="No organization selected")
@@ -361,7 +365,7 @@ async def update_telephony_configuration(
     "/telephony-configs/{config_id}/set-default-outbound",
     response_model=TelephonyConfigurationDetail,
 )
-async def set_default_outbound(config_id: int, user: UserModel = Depends(get_user)):
+async def set_default_outbound(config_id: int, user: UserModel = Depends(require_self_serve_telephony)):
     if not user.selected_organization_id:
         raise HTTPException(status_code=400, detail="No organization selected")
 
@@ -375,7 +379,7 @@ async def set_default_outbound(config_id: int, user: UserModel = Depends(get_use
 
 @router.delete("/telephony-configs/{config_id}")
 async def delete_telephony_configuration(
-    config_id: int, user: UserModel = Depends(get_user)
+    config_id: int, user: UserModel = Depends(require_self_serve_telephony)
 ):
     if not user.selected_organization_id:
         raise HTTPException(status_code=400, detail="No organization selected")
@@ -432,7 +436,7 @@ async def _ensure_workflow_belongs_to_org(workflow_id: int, organization_id: int
     "/telephony-configs/{config_id}/phone-numbers",
     response_model=PhoneNumberListResponse,
 )
-async def list_phone_numbers(config_id: int, user: UserModel = Depends(get_user)):
+async def list_phone_numbers(config_id: int, user: UserModel = Depends(require_self_serve_telephony)):
     if not user.selected_organization_id:
         raise HTTPException(status_code=400, detail="No organization selected")
     await _ensure_config_belongs_to_org(config_id, user.selected_organization_id)
@@ -450,7 +454,7 @@ async def list_phone_numbers(config_id: int, user: UserModel = Depends(get_user)
 async def create_phone_number(
     config_id: int,
     request: PhoneNumberCreateRequest,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_telephony),
 ):
     if not user.selected_organization_id:
         raise HTTPException(status_code=400, detail="No organization selected")
@@ -532,7 +536,7 @@ async def create_phone_number(
 async def get_phone_number(
     config_id: int,
     phone_number_id: int,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_telephony),
 ):
     if not user.selected_organization_id:
         raise HTTPException(status_code=400, detail="No organization selected")
@@ -552,7 +556,7 @@ async def update_phone_number(
     config_id: int,
     phone_number_id: int,
     request: PhoneNumberUpdateRequest,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_telephony),
 ):
     if not user.selected_organization_id:
         raise HTTPException(status_code=400, detail="No organization selected")
@@ -597,7 +601,7 @@ async def update_phone_number(
 async def set_default_caller_id(
     config_id: int,
     phone_number_id: int,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_telephony),
 ):
     if not user.selected_organization_id:
         raise HTTPException(status_code=400, detail="No organization selected")
@@ -613,7 +617,7 @@ async def set_default_caller_id(
 async def delete_phone_number(
     config_id: int,
     phone_number_id: int,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_telephony),
 ):
     if not user.selected_organization_id:
         raise HTTPException(status_code=400, detail="No organization selected")
@@ -636,7 +640,7 @@ async def delete_phone_number(
 
 
 @router.get("/telephony-config", response_model=TelephonyConfigurationResponse)
-async def get_telephony_configuration(user: UserModel = Depends(get_user)):
+async def get_telephony_configuration(user: UserModel = Depends(require_self_serve_telephony)):
     """Legacy: returns the org's default config in the original per-provider
     response shape so the existing single-form UI keeps working. Prefer the
     multi-config endpoints (``/telephony-configs``) for new clients.
@@ -664,7 +668,7 @@ async def get_telephony_configuration(user: UserModel = Depends(get_user)):
 @router.post("/telephony-config")
 async def save_telephony_configuration(
     request: TelephonyConfigRequest,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_telephony),
 ):
     """Legacy: upserts the org's default config (and its phone numbers) in the
     original payload shape so existing UI clients keep working. Prefer the
@@ -878,7 +882,7 @@ class CampaignDefaultsResponse(BaseModel):
 
 
 @router.get("/campaign-defaults", response_model=CampaignDefaultsResponse)
-async def get_campaign_defaults(user: UserModel = Depends(get_user)):
+async def get_campaign_defaults(user: UserModel = Depends(require_self_serve_campaigns)):
     """Get campaign limits for the user's organization.
 
     Returns the organization's concurrent call limit and default retry configuration.

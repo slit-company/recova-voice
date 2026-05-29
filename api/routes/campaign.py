@@ -14,7 +14,7 @@ from api.constants import (
 from api.db import db_client
 from api.db.models import UserModel
 from api.enums import OrganizationConfigurationKey
-from api.services.auth.depends import get_user
+from api.services.feature_gates import require_self_serve_campaigns
 from api.services.campaign.runner import campaign_runner_service
 from api.services.campaign.source_sync import CampaignSourceSyncService
 from api.services.campaign.source_sync_factory import get_sync_service
@@ -347,7 +347,7 @@ async def _get_telephony_configuration_name(
 @router.post("/create")
 async def create_campaign(
     request: CreateCampaignRequest,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_campaigns),
 ) -> CampaignResponse:
     """Create a new campaign"""
     # Verify workflow exists and belongs to organization
@@ -463,7 +463,7 @@ async def create_campaign(
 
 @router.get("/")
 async def get_campaigns(
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_campaigns),
 ) -> CampaignsResponse:
     """Get campaigns for user's organization"""
     campaigns = await db_client.get_campaigns(user.selected_organization_id)
@@ -505,7 +505,7 @@ async def get_campaigns(
 @router.get("/{campaign_id}")
 async def get_campaign(
     campaign_id: int,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_campaigns),
 ) -> CampaignResponse:
     """Get campaign details"""
     campaign = await db_client.get_campaign(campaign_id, user.selected_organization_id)
@@ -530,7 +530,7 @@ async def get_campaign(
 @router.post("/{campaign_id}/start")
 async def start_campaign(
     campaign_id: int,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_campaigns),
 ) -> CampaignResponse:
     """Start campaign execution"""
     # Block start if the org has no telephony configuration at all.
@@ -580,7 +580,7 @@ async def start_campaign(
 @router.post("/{campaign_id}/pause")
 async def pause_campaign(
     campaign_id: int,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_campaigns),
 ) -> CampaignResponse:
     """Pause campaign execution"""
     # Verify campaign exists and belongs to organization
@@ -615,7 +615,7 @@ async def pause_campaign(
 async def update_campaign(
     campaign_id: int,
     request: UpdateCampaignRequest,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_campaigns),
 ) -> CampaignResponse:
     """Update campaign settings (name, retry config, max concurrency, schedule)"""
     campaign = await db_client.get_campaign(campaign_id, user.selected_organization_id)
@@ -693,7 +693,7 @@ async def get_campaign_runs(
     sort_order: Optional[str] = Query(
         "desc", description="Sort order ('asc' or 'desc')"
     ),
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_campaigns),
 ) -> CampaignRunsResponse:
     """Get campaign workflow runs with pagination, filters and sorting"""
     offset = (page - 1) * limit
@@ -770,7 +770,7 @@ class RedialCampaignRequest(BaseModel):
 async def redial_campaign(
     campaign_id: int,
     request: RedialCampaignRequest,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_campaigns),
 ) -> CampaignResponse:
     """Create a new campaign that re-dials unique subscribers from a completed
     campaign whose latest call resulted in voicemail, no-answer, or busy.
@@ -852,7 +852,7 @@ async def redial_campaign(
 @router.post("/{campaign_id}/resume")
 async def resume_campaign(
     campaign_id: int,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_campaigns),
 ) -> CampaignResponse:
     """Resume a paused campaign"""
     # Block resume if the org has no telephony configuration at all.
@@ -902,7 +902,7 @@ async def resume_campaign(
 @router.get("/{campaign_id}/progress")
 async def get_campaign_progress(
     campaign_id: int,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_campaigns),
 ) -> CampaignProgressResponse:
     """Get current campaign progress and statistics"""
     # Verify campaign exists and belongs to organization
@@ -926,7 +926,7 @@ class CampaignSourceDownloadResponse(BaseModel):
 @router.get("/{campaign_id}/source-download-url")
 async def get_campaign_source_download_url(
     campaign_id: int,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_campaigns),
 ) -> CampaignSourceDownloadResponse:
     """Get presigned download URL for campaign CSV source file
     Validates that the campaign belongs to the user's organization for security.
@@ -975,7 +975,7 @@ async def get_campaign_source_download_url(
 @router.get("/{campaign_id}/report")
 async def download_campaign_report(
     campaign_id: int,
-    user: UserModel = Depends(get_user),
+    user: UserModel = Depends(require_self_serve_campaigns),
     start_date: Optional[datetime] = Query(
         None, description="Filter runs created on or after this datetime (ISO 8601)"
     ),

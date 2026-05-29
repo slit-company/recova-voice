@@ -89,6 +89,9 @@ class OrganizationConfigurationKey(Enum):
     LANGFUSE_CREDENTIALS = (
         "LANGFUSE_CREDENTIALS"  # Org-level Langfuse tracing credentials
     )
+    SELF_SERVE_FEATURES = (
+        "SELF_SERVE_FEATURES"  # Org-level admin/B2B override for gated SaaS surfaces
+    )
 
 
 class WorkflowStatus(Enum):

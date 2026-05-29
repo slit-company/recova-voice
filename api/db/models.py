@@ -232,6 +232,9 @@ class TelephonyPhoneNumberModel(Base):
     )
     address = Column(String(255), nullable=False)
     address_normalized = Column(String(255), nullable=False)
+    address_masked = Column(String(255), nullable=True)
+    address_hash = Column(String(64), nullable=True)
+    address_encrypted_raw = Column(Text, nullable=True)
     address_type = Column(String(16), nullable=False)
     country_code = Column(String(2), nullable=True)
     label = Column(String(64), nullable=True)
@@ -269,6 +272,11 @@ class TelephonyPhoneNumberModel(Base):
         ),
         Index("ix_phone_numbers_config", "telephony_configuration_id"),
         Index(
+            "ix_phone_numbers_address_hash",
+            "address_hash",
+            postgresql_where=text("address_hash IS NOT NULL"),
+        ),
+        Index(
             "ix_phone_numbers_workflow",
             "inbound_workflow_id",
             postgresql_where=text("inbound_workflow_id IS NOT NULL"),
@@ -285,6 +293,108 @@ class TelephonyPhoneNumberModel(Base):
             unique=True,
             postgresql_where=text("is_default_caller_id = true"),
         ),
+    )
+
+
+class PhonePreviewVerificationModel(Base):
+    __tablename__ = "phone_preview_verifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    phone_number_hash = Column(String(64), nullable=False)
+    phone_number_masked = Column(String(32), nullable=False)
+    code_hash = Column(String(128), nullable=False)
+    code_salt = Column(String(64), nullable=False)
+    status = Column(String(32), nullable=False, default="pending")
+    attempts = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    organization = relationship("OrganizationModel")
+    user = relationship("UserModel")
+    sessions = relationship("PhonePreviewSessionModel", back_populates="verification")
+
+    __table_args__ = (
+        Index(
+            "ix_phone_preview_verifications_lookup",
+            "organization_id",
+            "user_id",
+            "phone_number_hash",
+            "status",
+        ),
+        Index("ix_phone_preview_verifications_expires_at", "expires_at"),
+    )
+
+
+class PhonePreviewSessionModel(Base):
+    __tablename__ = "phone_preview_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    workflow_id = Column(
+        Integer, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
+    )
+    workflow_run_id = Column(
+        Integer, ForeignKey("workflow_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    verification_id = Column(
+        Integer,
+        ForeignKey("phone_preview_verifications.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    phone_number_hash = Column(String(64), nullable=False)
+    phone_number_masked = Column(String(32), nullable=False)
+    destination_phone_encrypted = Column(Text, nullable=True)
+    display_name = Column(String(120), nullable=True)
+    status = Column(String(32), nullable=False, default="pending_verification")
+    provider = Column(String(32), nullable=True)
+    provider_call_id = Column(String(255), nullable=True)
+    failure_reason = Column(String(255), nullable=True)
+    max_duration_seconds = Column(Integer, nullable=False, default=300)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    organization = relationship("OrganizationModel")
+    user = relationship("UserModel")
+    workflow = relationship("WorkflowModel")
+    workflow_run = relationship("WorkflowRunModel")
+    verification = relationship(
+        "PhonePreviewVerificationModel", back_populates="sessions"
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_phone_preview_sessions_owner",
+            "organization_id",
+            "user_id",
+            "status",
+        ),
+        Index("ix_phone_preview_sessions_workflow_run", "workflow_run_id"),
+        Index(
+            "ix_phone_preview_sessions_phone",
+            "organization_id",
+            "phone_number_hash",
+            "created_at",
+        ),
+        Index("ix_phone_preview_sessions_expires_at", "expires_at"),
     )
 
 
@@ -579,6 +689,7 @@ class WorkflowRunTextSessionModel(Base):
     )
 
     __table_args__ = (Index("ix_workflow_run_text_sessions_updated_at", "updated_at"),)
+
 
 
 class OrganizationUsageCycleModel(Base):

@@ -1,18 +1,12 @@
 "use client";
 
-import 'react-international-phone/style.css';
+import "react-international-phone/style.css";
 
-import { Loader2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { PhoneInput } from 'react-international-phone';
+import { CheckCircle2, Loader2, PhoneCall, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { PhoneInput } from "react-international-phone";
 
-import {
-    initiateCallApiV1TelephonyInitiateCallPost,
-    listPhoneNumbersApiV1OrganizationsTelephonyConfigsConfigIdPhoneNumbersGet,
-    listTelephonyConfigurationsApiV1OrganizationsTelephonyConfigsGet
-} from '@/client/sdk.gen';
-import type { PhoneNumberResponse, TelephonyConfigurationListItem } from '@/client/types.gen';
+import { client } from "@/client/client.gen";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -25,356 +19,530 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
 import { useLocale } from "@/context/LocaleContext";
 import { useUserConfig } from "@/context/UserConfigContext";
+
+type PreviewStep = "entry" | "otp" | "calling" | "complete";
+type BusyState = "saving" | "starting" | "verifying" | "calling" | null;
+
+type PhonePreviewResponse = {
+    session_id?: number | string;
+    sessionId?: number | string;
+    id?: number | string;
+    status?: string;
+    otp_required?: boolean;
+    otpRequired?: boolean;
+    masked_phone?: string;
+    maskedPhone?: string;
+    expires_at?: string;
+    expiresAt?: string;
+    workflow_run_id?: number | string | null;
+    workflowRunId?: number | string | null;
+    provider_call_id?: string | null;
+    providerCallId?: string | null;
+    failure_reason?: string | null;
+    failureReason?: string | null;
+    message?: string;
+};
 
 interface PhoneCallDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     workflowId: number;
     user: { id: string; email?: string };
+    hasUnsavedChanges?: boolean;
+    saveLatestDraft?: () => Promise<void>;
 }
+
+const previewEndpoint = (action: "start" | "verify" | "call") => `/api/v1/phone-preview/${action}`;
+const previewStatusEndpoint = (sessionId: number | string) => `/api/v1/phone-preview/status/${sessionId}`;
+
+const getDetailMessage = (error: unknown): string => {
+    if (typeof error === "string") return error;
+    if (!error || typeof error !== "object") return "Request failed";
+
+    const detail = (error as { detail?: unknown }).detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+        return detail
+            .map((item) => {
+                if (item && typeof item === "object" && "msg" in item) {
+                    return String((item as { msg: unknown }).msg);
+                }
+                return String(item);
+            })
+            .join(", ");
+    }
+    if (detail) return JSON.stringify(detail);
+    return JSON.stringify(error);
+};
+
+const sessionIdFrom = (data: PhonePreviewResponse) => {
+    const id = data.session_id ?? data.sessionId ?? data.id;
+    return id === undefined || id === null ? "" : String(id);
+};
+const otpRequiredFrom = (data: PhonePreviewResponse) =>
+    data.otp_required ?? data.otpRequired ?? data.status === "pending_verification";
+const maskedPhoneFrom = (data: PhonePreviewResponse) => data.masked_phone ?? data.maskedPhone ?? "";
+const expiresAtFrom = (data: PhonePreviewResponse) => data.expires_at ?? data.expiresAt ?? "";
+const workflowRunIdFrom = (data: PhonePreviewResponse) => data.workflow_run_id ?? data.workflowRunId ?? null;
+const providerCallIdFrom = (data: PhonePreviewResponse) => data.provider_call_id ?? data.providerCallId ?? null;
+const failureReasonFrom = (data: PhonePreviewResponse) => data.failure_reason ?? data.failureReason ?? null;
 
 export const PhoneCallDialog = ({
     open,
     onOpenChange,
     workflowId,
     user,
+    hasUnsavedChanges = false,
+    saveLatestDraft,
 }: PhoneCallDialogProps) => {
-    const router = useRouter();
     const { t } = useLocale();
     const { userConfig, saveUserConfig } = useUserConfig();
-    const [phoneNumber, setPhoneNumber] = useState(userConfig?.test_phone_number || "");
-    const [callLoading, setCallLoading] = useState(false);
-    const [callError, setCallError] = useState<string | null>(null);
-    const [callSuccessMsg, setCallSuccessMsg] = useState<string | null>(null);
+
+    const [displayName, setDisplayName] = useState("");
+    const [phoneNumber, setPhoneNumber] = useState("");
+    const [otpCode, setOtpCode] = useState("");
+    const [sessionId, setSessionId] = useState("");
+    const [maskedPhone, setMaskedPhone] = useState("");
+    const [expiresAt, setExpiresAt] = useState("");
+    const [workflowRunId, setWorkflowRunId] = useState<number | string | null>(null);
+    const [providerCallId, setProviderCallId] = useState<string | null>(null);
+    const [status, setStatus] = useState<string>("idle");
+    const [step, setStep] = useState<PreviewStep>("entry");
+    const [busy, setBusy] = useState<BusyState>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState<string | null>(null);
     const [phoneChanged, setPhoneChanged] = useState(false);
-    const [checkingConfig, setCheckingConfig] = useState(false);
-    const [needsConfiguration, setNeedsConfiguration] = useState<boolean | null>(null);
-    const [sipMode, setSipMode] = useState(() => /^(PJSIP|SIP)\//i.test(userConfig?.test_phone_number || ""));
-    const [telephonyConfigs, setTelephonyConfigs] = useState<TelephonyConfigurationListItem[]>([]);
-    const [selectedConfigId, setSelectedConfigId] = useState<string>("");
-    const [fromPhoneNumbers, setFromPhoneNumbers] = useState<PhoneNumberResponse[]>([]);
-    const [selectedFromPhoneNumberId, setSelectedFromPhoneNumberId] = useState<string>("");
-    const [loadingPhoneNumbers, setLoadingPhoneNumbers] = useState(false);
 
-    // Check telephony configuration when dialog opens
+    const normalizedDisplayName = useMemo(() => displayName.trim(), [displayName]);
+
     useEffect(() => {
-        const checkConfig = async () => {
-            if (!open) return;
+        if (!open) return;
 
-            setCheckingConfig(true);
-            try {
-                const configResponse = await listTelephonyConfigurationsApiV1OrganizationsTelephonyConfigsGet({});
+        const savedPhone = userConfig?.test_phone_number || "";
+        setDisplayName(user.email?.split("@")[0] ?? "");
+        setPhoneNumber(savedPhone);
+        setOtpCode("");
+        setSessionId("");
+        setMaskedPhone("");
+        setExpiresAt("");
+        setWorkflowRunId(null);
+        setProviderCallId(null);
+        setStatus("idle");
+        setStep("entry");
+        setBusy(null);
+        setError(null);
+        setSuccess(null);
+        setPhoneChanged(false);
+    }, [open, user.email, userConfig?.test_phone_number]);
 
-                const configurations = configResponse.data?.configurations ?? [];
-                if (configResponse.error || configurations.length === 0) {
-                    setNeedsConfiguration(true);
-                    setTelephonyConfigs([]);
-                    setSelectedConfigId("");
-                } else {
-                    setNeedsConfiguration(false);
-                    setTelephonyConfigs(configurations);
-                    const defaultConfig =
-                        configurations.find((c) => c.is_default_outbound) ?? configurations[0];
-                    setSelectedConfigId(String(defaultConfig.id));
-                }
-            } catch (err) {
-                console.error("Failed to check telephony config:", err);
-                setNeedsConfiguration(false);
-                setTelephonyConfigs([]);
-                setSelectedConfigId("");
-            } finally {
-                setCheckingConfig(false);
-            }
-        };
+    const formatError = useCallback((raw: unknown) => {
+        const message = getDetailMessage(raw);
+        const lower = message.toLowerCase();
+        if (lower.includes("telephony_not_configured")) return t("phoneCall.errorTelephonyNotConfigured");
+        if (lower.includes("draft_not_ready")) return t("phoneCall.errorDraftNotReady");
+        if (lower.includes("rate") || lower.includes("cooldown")) return t("phoneCall.errorRateLimited");
+        if (lower.includes("otp") || lower.includes("verification")) return t("phoneCall.errorVerification");
+        return message;
+    }, [t]);
 
-        checkConfig();
-    }, [open]);
+    const applyPreviewStatus = useCallback((data: PhonePreviewResponse) => {
+        const nextSessionId = sessionIdFrom(data);
+        const nextMaskedPhone = maskedPhoneFrom(data);
+        const nextExpiresAt = expiresAtFrom(data);
+        const nextWorkflowRunId = workflowRunIdFrom(data);
+        const nextProviderCallId = providerCallIdFrom(data);
+        const failureReason = failureReasonFrom(data);
 
-    // Reset state when dialog closes
-    useEffect(() => {
-        if (!open) {
-            setCallError(null);
-            setCallSuccessMsg(null);
-            setCallLoading(false);
-            setNeedsConfiguration(null);
-            setTelephonyConfigs([]);
-            setSelectedConfigId("");
-            setFromPhoneNumbers([]);
-            setSelectedFromPhoneNumberId("");
+        if (nextSessionId) setSessionId(nextSessionId);
+        if (nextMaskedPhone) setMaskedPhone(nextMaskedPhone);
+        if (nextExpiresAt) setExpiresAt(nextExpiresAt);
+        setStatus((current) => data.status ?? current);
+        setWorkflowRunId(nextWorkflowRunId);
+        setProviderCallId(nextProviderCallId);
+        if (failureReason) {
+            setError(formatError(failureReason));
+            setSuccess(null);
         }
-    }, [open]);
+        if (data.status === "failed" || data.status === "completed") {
+            setStep("complete");
+        }
+    }, [formatError]);
 
-    // Fetch phone numbers whenever the selected telephony configuration changes.
+    const postPreview = useCallback(async (action: "start" | "verify" | "call", body: Record<string, unknown>) => {
+        const response = (await client.post({
+            url: previewEndpoint(action),
+            body,
+        })) as { data?: unknown; error?: unknown };
+
+        if (response.error) {
+            throw new Error(formatError(response.error));
+        }
+        return (response.data ?? {}) as PhonePreviewResponse;
+    }, [formatError]);
+
+    const getPreviewStatus = useCallback(async (targetSessionId: string) => {
+        const response = (await client.get({
+            url: previewStatusEndpoint(targetSessionId),
+        })) as { data?: unknown; error?: unknown };
+
+        if (response.error) {
+            throw new Error(formatError(response.error));
+        }
+        return (response.data ?? {}) as PhonePreviewResponse;
+    }, [formatError]);
+
+    const savePhoneIfNeeded = async () => {
+        if (!userConfig || !phoneChanged) return;
+        await saveUserConfig({ ...userConfig, test_phone_number: phoneNumber });
+        setPhoneChanged(false);
+    };
+
+    const saveDraftIfNeeded = async () => {
+        if (!hasUnsavedChanges || !saveLatestDraft) return;
+        setBusy("saving");
+        await saveLatestDraft();
+    };
+
     useEffect(() => {
-        if (!open || !selectedConfigId) {
-            setFromPhoneNumbers([]);
-            setSelectedFromPhoneNumberId("");
+        if (!open || !sessionId || step !== "calling") return;
+        if (status === "completed" || status === "failed") return;
+
+        let cancelled = false;
+        const interval = window.setInterval(() => {
+            void getPreviewStatus(sessionId)
+                .then((data) => {
+                    if (!cancelled) applyPreviewStatus(data);
+                })
+                .catch((err) => {
+                    if (!cancelled) {
+                        setError(err instanceof Error ? err.message : formatError(err));
+                    }
+                });
+        }, 3000);
+
+        return () => {
+            cancelled = true;
+            window.clearInterval(interval);
+        };
+    }, [applyPreviewStatus, formatError, getPreviewStatus, open, sessionId, status, step]);
+
+    const beginCall = async (targetSessionId = sessionId) => {
+        if (!targetSessionId) return;
+
+        setBusy("calling");
+        setStep("calling");
+        setStatus("calling");
+        setError(null);
+        setSuccess(null);
+
+        const data = await postPreview("call", { session_id: targetSessionId });
+        const nextStatus = data.status ?? "calling";
+        const nextWorkflowRunId = workflowRunIdFrom(data);
+        const nextProviderCallId = providerCallIdFrom(data);
+        const failureReason = failureReasonFrom(data);
+
+        setStatus(nextStatus);
+        setWorkflowRunId(nextWorkflowRunId);
+        setProviderCallId(nextProviderCallId);
+        setStep(nextStatus === "failed" ? "complete" : "calling");
+        if (failureReason) {
+            setError(formatError(failureReason));
+            setSuccess(null);
+        } else {
+            setSuccess(data.message ?? t("phoneCall.callStarted"));
+        }
+    };
+
+    const handleStartPreview = async () => {
+        const trimmedPhone = phoneNumber.trim();
+        if (!trimmedPhone) {
+            setError(t("phoneCall.phoneRequired"));
             return;
         }
 
-        let cancelled = false;
-        const fetchPhoneNumbers = async () => {
-            setLoadingPhoneNumbers(true);
-            try {
-                const response = await listPhoneNumbersApiV1OrganizationsTelephonyConfigsConfigIdPhoneNumbersGet({
-                    path: { config_id: Number(selectedConfigId) },
-                });
-                if (cancelled) return;
+        setError(null);
+        setSuccess(null);
+        setBusy("starting");
 
-                const all = response.data?.phone_numbers ?? [];
-                const active = all.filter((p) => p.is_active);
-                setFromPhoneNumbers(active);
-                const defaultPhone = active.find((p) => p.is_default_caller_id) ?? active[0];
-                setSelectedFromPhoneNumberId(defaultPhone ? String(defaultPhone.id) : "");
-            } catch (err) {
-                if (cancelled) return;
-                console.error("Failed to load phone numbers for config:", err);
-                setFromPhoneNumbers([]);
-                setSelectedFromPhoneNumberId("");
-            } finally {
-                if (!cancelled) setLoadingPhoneNumbers(false);
+        try {
+            await saveDraftIfNeeded();
+            await savePhoneIfNeeded();
+
+            setBusy("starting");
+            const data = await postPreview("start", {
+                workflow_id: workflowId,
+                display_name: normalizedDisplayName || null,
+                phone_number: trimmedPhone,
+            });
+            const nextSessionId = sessionIdFrom(data);
+            const nextMaskedPhone = maskedPhoneFrom(data);
+            const nextExpiresAt = expiresAtFrom(data);
+
+            setSessionId(nextSessionId);
+            setMaskedPhone(nextMaskedPhone);
+            setExpiresAt(nextExpiresAt);
+            setStatus(data.status ?? (otpRequiredFrom(data) ? "pending_verification" : "verified"));
+
+            if (otpRequiredFrom(data)) {
+                setStep("otp");
+                setSuccess(t("phoneCall.otpSent"));
+                return;
             }
-        };
 
-        fetchPhoneNumbers();
-        return () => {
-            cancelled = true;
-        };
-    }, [open, selectedConfigId]);
-
-    // Keep phoneNumber in sync with userConfig when dialog opens
-    useEffect(() => {
-        if (open) {
-            const saved = userConfig?.test_phone_number || "";
-            setPhoneNumber(saved);
-            setSipMode(/^(PJSIP|SIP)\//i.test(saved));
-            setPhoneChanged(false);
-            setCallError(null);
-            setCallSuccessMsg(null);
-            setCallLoading(false);
+            await beginCall(nextSessionId);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : formatError(err));
+            setStep("entry");
+        } finally {
+            setBusy(null);
         }
-    }, [open, userConfig?.test_phone_number]);
+    };
+
+    const handleVerifyAndCall = async () => {
+        if (!sessionId) {
+            setError(t("phoneCall.missingSession"));
+            return;
+        }
+        if (otpCode.length !== 6) {
+            setError(t("phoneCall.otpRequired"));
+            return;
+        }
+
+        setError(null);
+        setSuccess(null);
+        setBusy("verifying");
+
+        try {
+            const verified = await postPreview("verify", {
+                session_id: sessionId,
+                otp_code: otpCode,
+            });
+            const nextSessionId = sessionIdFrom(verified) || sessionId;
+            setSessionId(nextSessionId);
+            setStatus(verified.status ?? "verified");
+            await beginCall(nextSessionId);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : formatError(err));
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    const resetToEntry = () => {
+        setOtpCode("");
+        setSessionId("");
+        setMaskedPhone("");
+        setExpiresAt("");
+        setWorkflowRunId(null);
+        setProviderCallId(null);
+        setStatus("idle");
+        setStep("entry");
+        setError(null);
+        setSuccess(null);
+        setBusy(null);
+    };
 
     const handlePhoneInputChange = (formattedValue: string) => {
         setPhoneNumber(formattedValue);
-        setPhoneChanged(formattedValue !== userConfig?.test_phone_number);
-        setCallError(null);
-        setCallSuccessMsg(null);
+        setPhoneChanged(formattedValue !== (userConfig?.test_phone_number || ""));
+        setError(null);
+        setSuccess(null);
     };
 
-    const handleConfigureContinue = () => {
-        onOpenChange(false);
-        router.push('/telephony-configurations');
-    };
+    const statusLabel = (() => {
+        if (busy === "saving") return t("phoneCall.statusSavingDraft");
+        if (busy === "starting") return t("phoneCall.statusPreparing");
+        if (busy === "verifying") return t("phoneCall.statusVerifying");
+        if (busy === "calling") return t("phoneCall.statusCalling");
+        if (step === "otp") return t("phoneCall.statusOtp");
+        if (status === "failed") return t("phoneCall.statusFailed");
+        if (status === "completed" || status === "complete") return t("phoneCall.statusCompleted");
+        if (status === "calling" || step === "calling") return t("phoneCall.statusCalling");
+        return t("phoneCall.statusReady");
+    })();
 
-    const handleStartCall = async () => {
-        setCallLoading(true);
-        setCallError(null);
-        setCallSuccessMsg(null);
-        try {
-            if (!user || !userConfig) return;
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="sm:max-w-[520px]">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <PhoneCall className="h-5 w-5 text-teal-600" />
+                        {t("phoneCall.title")}
+                    </DialogTitle>
+                    <DialogDescription>{t("phoneCall.description")}</DialogDescription>
+                </DialogHeader>
 
-            // Save phone number if it has changed
-            if (phoneChanged) {
-                await saveUserConfig({ ...userConfig, test_phone_number: phoneNumber });
-                setPhoneChanged(false);
-            }
-
-            const response = await initiateCallApiV1TelephonyInitiateCallPost({
-                body: {
-                    workflow_id: workflowId,
-                    phone_number: phoneNumber,
-                    telephony_configuration_id: selectedConfigId ? Number(selectedConfigId) : null,
-                    from_phone_number_id: selectedFromPhoneNumberId ? Number(selectedFromPhoneNumberId) : null,
-                },
-            });
-
-            if (response.error) {
-                let errMsg = "Failed to initiate call";
-                if (typeof response.error === "string") {
-                    errMsg = response.error;
-                } else if (response.error && typeof response.error === "object") {
-                    errMsg = (response.error as unknown as { detail: string }).detail || JSON.stringify(response.error);
-                }
-                setCallError(errMsg);
-            } else {
-                const msg = response.data && (response.data as unknown as { message: string }).message || "Call initiated successfully!";
-                setCallSuccessMsg(typeof msg === "string" ? msg : JSON.stringify(msg));
-            }
-        } catch (err: unknown) {
-            setCallError(err instanceof Error ? err.message : "Failed to initiate call");
-        } finally {
-            setCallLoading(false);
-        }
-    };
-
-    // Render loading state
-    const renderLoading = () => (
-        <>
-            <DialogHeader>
-                <DialogTitle>{t("phoneCall.title")}</DialogTitle>
-            </DialogHeader>
-            <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-        </>
-    );
-
-    // Render configuration needed state
-    const renderConfigurationNeeded = () => (
-        <>
-            <DialogHeader>
-                <DialogTitle>{t("phoneCall.configureTitle")}</DialogTitle>
-                <DialogDescription>
-                    {t("phoneCall.configureDescription")}
-                </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-                <Button variant="ghost" onClick={() => onOpenChange(false)}>
-                    {t("phoneCall.doLater")}
-                </Button>
-                <Button onClick={handleConfigureContinue}>
-                    {t("common.next")}
-                </Button>
-            </DialogFooter>
-        </>
-    );
-
-    // Render phone call form
-    const renderPhoneCallForm = () => (
-        <>
-            <DialogHeader>
-                <DialogTitle>{t("phoneCall.title")}</DialogTitle>
-                <DialogDescription>
-                    {t("phoneCall.description")}
-                </DialogDescription>
-            </DialogHeader>
-            {telephonyConfigs.length > 0 && (
-                <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="telephony-config">{t("phoneCall.telephonyConfig")}</Label>
-                    <Select value={selectedConfigId} onValueChange={setSelectedConfigId}>
-                        <SelectTrigger id="telephony-config" className="w-full">
-                            <SelectValue placeholder={t("phoneCall.selectConfiguration")} />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {telephonyConfigs.map((config) => (
-                                <SelectItem key={config.id} value={String(config.id)}>
-                                    {config.name} ({config.provider})
-                                    {config.is_default_outbound ? ` — ${t("campaignNew.default")}` : ""}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </div>
-            )}
-            {selectedConfigId && (
-                <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="from-phone-number">{t("phoneCall.callerId")}</Label>
-                    {loadingPhoneNumbers ? (
-                        <div className="flex items-center text-sm text-muted-foreground">
-                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                            {t("phoneCall.loadingPhoneNumbers")}
+                <div className="space-y-4">
+                    <div className="rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+                        <div className="flex items-start gap-2">
+                            <ShieldCheck className="mt-0.5 h-4 w-4 text-teal-600" />
+                            <div>
+                                <p className="font-medium">{t("phoneCall.systemCallerTitle")}</p>
+                                <p className="text-muted-foreground">{t("phoneCall.systemCallerDescription")}</p>
+                            </div>
                         </div>
-                    ) : fromPhoneNumbers.length > 0 ? (
-                        <Select
-                            value={selectedFromPhoneNumberId}
-                            onValueChange={setSelectedFromPhoneNumberId}
-                        >
-                            <SelectTrigger id="from-phone-number" className="w-full">
-                                <SelectValue placeholder={t("phoneCall.selectPhoneNumber")} />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {fromPhoneNumbers.map((phone) => (
-                                    <SelectItem key={phone.id} value={String(phone.id)}>
-                                        {phone.label ? `${phone.label} — ${phone.address}` : phone.address}
-                                        {phone.is_default_caller_id ? ` — ${t("campaignNew.default")}` : ""}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    ) : (
-                        <div className="text-xs text-muted-foreground">
-                            {t("phoneCall.noPhoneNumbers")}
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+                        <span className="text-muted-foreground">{t("phoneCall.status")}</span>
+                        <span className="font-medium">{statusLabel}</span>
+                    </div>
+
+                    {step === "entry" && (
+                        <>
+                            <div className="space-y-1.5">
+                                <Label htmlFor="preview-display-name">{t("phoneCall.nameLabel")}</Label>
+                                <Input
+                                    id="preview-display-name"
+                                    value={displayName}
+                                    onChange={(event) => setDisplayName(event.target.value)}
+                                    placeholder={t("phoneCall.namePlaceholder")}
+                                    disabled={busy !== null}
+                                />
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <Label htmlFor="preview-phone-number">{t("phoneCall.phoneLabel")}</Label>
+                                <PhoneInput
+                                    inputProps={{ id: "preview-phone-number", name: "preview-phone-number" }}
+                                    defaultCountry="kr"
+                                    value={phoneNumber}
+                                    onChange={handlePhoneInputChange}
+                                    disabled={busy !== null}
+                                />
+                                <p className="text-xs text-muted-foreground">{t("phoneCall.phoneHelp")}</p>
+                            </div>
+
+                            {hasUnsavedChanges && (
+                                <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-700">
+                                    {t("phoneCall.unsavedDraftWillSave")}
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    {step === "otp" && (
+                        <div className="space-y-3">
+                            <div className="rounded-md border border-teal-500/30 bg-teal-500/10 px-3 py-2 text-sm">
+                                <p className="font-medium">{t("phoneCall.otpTitle")}</p>
+                                <p className="text-muted-foreground">
+                                    {t("phoneCall.otpDescription")} {maskedPhone || phoneNumber}
+                                </p>
+                                {expiresAt && (
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        {t("phoneCall.otpExpires")} {new Date(expiresAt).toLocaleTimeString()}
+                                    </p>
+                                )}
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label htmlFor="preview-otp">{t("phoneCall.otpLabel")}</Label>
+                                <Input
+                                    id="preview-otp"
+                                    inputMode="numeric"
+                                    autoComplete="one-time-code"
+                                    value={otpCode}
+                                    maxLength={6}
+                                    onChange={(event) =>
+                                        setOtpCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+                                    }
+                                    placeholder="123456"
+                                    disabled={busy !== null}
+                                />
+                            </div>
+                        </div>
+                    )}
+
+                    {(step === "calling" || step === "complete") && (
+                        <div className="rounded-md border border-teal-500/30 bg-teal-500/10 px-3 py-3 text-sm">
+                            <div className="flex items-start gap-2">
+                                {busy === "calling" ? (
+                                    <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-teal-600" />
+                                ) : (
+                                    <CheckCircle2 className="mt-0.5 h-4 w-4 text-teal-600" />
+                                )}
+                                <div>
+                                    <p className="font-medium">{t("phoneCall.callStatusTitle")}</p>
+                                    <p className="text-muted-foreground">{success ?? t("phoneCall.callStarted")}</p>
+                                    {workflowRunId && (
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            {t("phoneCall.workflowRun")} {workflowRunId}
+                                        </p>
+                                    )}
+                                    {providerCallId && (
+                                        <p className="text-xs text-muted-foreground">
+                                            {t("phoneCall.providerCall")} {providerCallId}
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {error && (
+                        <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
+                            {error}
+                        </div>
+                    )}
+
+                    {success && step !== "calling" && step !== "complete" && (
+                        <div className="rounded-md border border-teal-500/30 bg-teal-500/10 px-3 py-2 text-sm text-teal-700">
+                            {success}
                         </div>
                     )}
                 </div>
-            )}
-            {sipMode ? (
-                <Input
-                    value={phoneNumber}
-                    onChange={(e) => handlePhoneInputChange(e.target.value)}
-                    placeholder="PJSIP/1234 or SIP/1234"
-                />
-            ) : (
-                <PhoneInput
-                    defaultCountry="in"
-                    value={phoneNumber}
-                    onChange={handlePhoneInputChange}
-                />
-            )}
-            <button
-                type="button"
-                className="text-xs text-muted-foreground hover:text-foreground underline"
-                onClick={() => { setSipMode(!sipMode); setPhoneNumber(""); setPhoneChanged(true); }}
-            >
-                {sipMode ? t("phoneCall.usePhone") : t("phoneCall.useSip")}
-            </button>
-            <DialogFooter className="flex-col sm:flex-row gap-2">
-                <Button
-                    variant="outline"
-                    onClick={() => {
-                        onOpenChange(false);
-                        router.push('/telephony-configurations');
-                    }}
-                >
-                    {t("phoneCall.configure")}
-                </Button>
-                <div className="flex gap-2 flex-1 justify-end">
-                    <DialogClose asChild>
-                        <Button variant="outline">{t("common.cancel")}</Button>
-                    </DialogClose>
-                    {!callSuccessMsg ? (
-                        <Button
-                            onClick={handleStartCall}
-                            disabled={callLoading || !phoneNumber}
-                        >
-                            {callLoading ? t("phoneCall.calling") : t("phoneCall.start")}
-                        </Button>
-                    ) : (
+
+                <DialogFooter className="gap-2 sm:gap-0">
+                    {step === "entry" && (
                         <>
-                            <Button variant="outline" onClick={() => { setCallSuccessMsg(null); setCallError(null); }}>
+                            <DialogClose asChild>
+                                <Button variant="outline" disabled={busy !== null}>
+                                    {t("common.cancel")}
+                                </Button>
+                            </DialogClose>
+                            <Button onClick={handleStartPreview} disabled={busy !== null || !phoneNumber.trim()}>
+                                {busy ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        {busy === "saving" ? t("common.saving") : t("phoneCall.preparing")}
+                                    </>
+                                ) : (
+                                    t("phoneCall.start")
+                                )}
+                            </Button>
+                        </>
+                    )}
+
+                    {step === "otp" && (
+                        <>
+                            <Button variant="outline" onClick={resetToEntry} disabled={busy !== null}>
+                                {t("phoneCall.changeNumber")}
+                            </Button>
+                            <Button onClick={handleVerifyAndCall} disabled={busy !== null || otpCode.length !== 6}>
+                                {busy ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        {busy === "verifying" ? t("phoneCall.verifying") : t("phoneCall.calling")}
+                                    </>
+                                ) : (
+                                    t("phoneCall.verifyAndCall")
+                                )}
+                            </Button>
+                        </>
+                    )}
+
+                    {(step === "calling" || step === "complete") && (
+                        <>
+                            <Button variant="outline" onClick={resetToEntry} disabled={busy !== null}>
                                 {t("phoneCall.again")}
                             </Button>
-                            <Button onClick={() => onOpenChange(false)}>
+                            <Button onClick={() => onOpenChange(false)} disabled={busy !== null}>
                                 {t("phoneCall.close")}
                             </Button>
                         </>
                     )}
-                </div>
-            </DialogFooter>
-            {callError && <div className="text-red-500 text-sm mt-2">{callError}</div>}
-            {callSuccessMsg && <div className="text-green-600 text-sm mt-2">{callSuccessMsg}</div>}
-        </>
-    );
-
-    return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent>
-                {checkingConfig || needsConfiguration === null
-                    ? renderLoading()
-                    : needsConfiguration
-                        ? renderConfigurationNeeded()
-                        : renderPhoneCallForm()
-                }
+                </DialogFooter>
             </DialogContent>
         </Dialog>
     );

@@ -54,6 +54,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useAppConfig } from "@/context/AppConfigContext";
 import { useLocale } from "@/context/LocaleContext";
 import { useTelephonyConfigWarnings } from "@/context/TelephonyConfigWarningsContext";
+import { useUserConfig } from "@/context/UserConfigContext";
 import { useLatestReleaseVersion } from "@/hooks/useLatestReleaseVersion";
 import type { LocalUser } from "@/lib/auth";
 import { useAuth } from "@/lib/auth";
@@ -114,6 +115,7 @@ export function AppSidebar() {
   const router = useRouter();
   const { state, isMobile, setOpenMobile } = useSidebar();
   const { provider, getSelectedTeam, logout, user } = useAuth();
+  const { featureGates, permissions } = useUserConfig();
   const { config } = useAppConfig();
   const { t } = useLocale();
   const { telnyxMissingWebhookPublicKeyCount } = useTelephonyConfigWarnings();
@@ -127,6 +129,10 @@ export function AppSidebar() {
   }
   const selectedTeam = selectedTeamRef.current;
 
+  const hasAdminPermission = permissions.some((permission) => permission.id === "admin");
+  const canAccessCampaigns = featureGates.self_serve_campaigns || hasAdminPermission;
+  const canAccessTelephony = featureGates.self_serve_telephony || hasAdminPermission;
+
   const versionInfo = config ? { ui: config.uiVersion, api: config.apiVersion } : null;
 
   const { latest: latestRelease, isBehind, isLatest } = useLatestReleaseVersion(
@@ -137,12 +143,18 @@ export function AppSidebar() {
   const translatedSections = useMemo(
     () => NAV_SECTIONS.map((section) => ({
       label: section.labelKey ? t(section.labelKey as never) : undefined,
-      items: section.items.map((item) => ({
-        ...item,
-        title: t(item.titleKey as never),
-      })),
-    })),
-    [t],
+      items: section.items
+        .filter((item) => {
+          if (item.url === "/campaigns") return canAccessCampaigns;
+          if (item.url === "/telephony-configurations") return canAccessTelephony;
+          return true;
+        })
+        .map((item) => ({
+          ...item,
+          title: t(item.titleKey as never),
+        })),
+    })).filter((section) => section.items.length > 0),
+    [canAccessCampaigns, canAccessTelephony, t],
   );
 
   const isActive = (path: string) => pathname.startsWith(path);

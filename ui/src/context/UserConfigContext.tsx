@@ -20,6 +20,20 @@ interface OrganizationPricing {
     billing_enabled: boolean;
 }
 
+export interface FeatureGates {
+    self_serve_telephony: boolean;
+    self_serve_campaigns: boolean;
+}
+
+type UserConfigurationWithFeatureGates = UserConfigurationRequestResponseSchema & {
+    feature_gates?: Partial<FeatureGates> | null;
+};
+
+const DEFAULT_FEATURE_GATES: FeatureGates = {
+    self_serve_telephony: false,
+    self_serve_campaigns: false,
+};
+
 interface UserConfigContextType {
     userConfig: UserConfigurationRequestResponseSchema | null;
     saveUserConfig: (userConfig: UserConfigurationRequestResponseSchema) => Promise<void>;
@@ -29,6 +43,7 @@ interface UserConfigContextType {
     permissions: TeamPermission[];
     user: AuthUser | null;
     organizationPricing: OrganizationPricing | null;
+    featureGates: FeatureGates;
 }
 
 const UserConfigContext = createContext<UserConfigContextType | null>(null);
@@ -38,6 +53,7 @@ export function UserConfigProvider({ children }: { children: ReactNode }) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
     const [organizationPricing, setOrganizationPricing] = useState<OrganizationPricing | null>(null);
+    const [featureGates, setFeatureGates] = useState<FeatureGates>(DEFAULT_FEATURE_GATES);
     const [permissions, setPermissions] = useState<TeamPermission[]>([]);
 
     const auth = useAuth();
@@ -99,7 +115,9 @@ export function UserConfigProvider({ children }: { children: ReactNode }) {
                 const response = await getUserConfigurationsApiV1UserConfigurationsUserGet();
 
                 if (response.data) {
+                    const dataWithFeatureGates = response.data as UserConfigurationWithFeatureGates;
                     setUserConfig(response.data);
+                    setFeatureGates({ ...DEFAULT_FEATURE_GATES, ...(dataWithFeatureGates.feature_gates ?? {}) });
                     if (response.data.organization_pricing) {
                         setOrganizationPricing({
                             price_per_second_usd: response.data.organization_pricing.price_per_second_usd as number | null,
@@ -141,7 +159,9 @@ export function UserConfigProvider({ children }: { children: ReactNode }) {
             }
             throw new Error(msg);
         }
+        const dataWithFeatureGates = response.data as UserConfigurationWithFeatureGates | undefined;
         setUserConfig(response.data!);
+        setFeatureGates({ ...DEFAULT_FEATURE_GATES, ...(dataWithFeatureGates?.feature_gates ?? {}) });
 
         if (response.data?.organization_pricing) {
             setOrganizationPricing({
@@ -161,7 +181,9 @@ export function UserConfigProvider({ children }: { children: ReactNode }) {
             const response = await getUserConfigurationsApiV1UserConfigurationsUserGet();
 
             if (response.data) {
+                const dataWithFeatureGates = response.data as UserConfigurationWithFeatureGates;
                 setUserConfig(response.data);
+                setFeatureGates({ ...DEFAULT_FEATURE_GATES, ...(dataWithFeatureGates.feature_gates ?? {}) });
                 if (response.data.organization_pricing) {
                     setOrganizationPricing({
                         price_per_second_usd: response.data.organization_pricing.price_per_second_usd as number | null,
@@ -189,6 +211,7 @@ export function UserConfigProvider({ children }: { children: ReactNode }) {
                 permissions,
                 user: auth.user,
                 organizationPricing,
+                featureGates,
             }}
         >
             {children}

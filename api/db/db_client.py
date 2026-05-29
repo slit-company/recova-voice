@@ -8,6 +8,7 @@ from api.db.knowledge_base_client import KnowledgeBaseClient
 from api.db.organization_client import OrganizationClient
 from api.db.organization_configuration_client import OrganizationConfigurationClient
 from api.db.organization_usage_client import OrganizationUsageClient
+from api.db.phone_preview_client import PhonePreviewClient
 from api.db.reports_client import ReportsClient
 from api.db.telephony_configuration_client import TelephonyConfigurationClient
 from api.db.telephony_phone_number_client import TelephonyPhoneNumberClient
@@ -42,6 +43,7 @@ class DBClient(
     WorkflowRecordingClient,
     TelephonyConfigurationClient,
     TelephonyPhoneNumberClient,
+    PhonePreviewClient,
     FolderClient,
 ):
     """
@@ -64,6 +66,7 @@ class DBClient(
     - WebhookCredentialClient: handles webhook credential operations
     - ToolClient: handles tool operations for reusable HTTP API tools
     - KnowledgeBaseClient: handles knowledge base document and vector search operations
+    - PhonePreviewClient: handles logged-in call-me preview sessions
     - FolderClient: handles folder operations for grouping workflows (agents)
     """
 

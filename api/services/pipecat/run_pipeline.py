@@ -187,10 +187,24 @@ async def run_pipeline_telephony(
     # then resolve the org's default config).
     workflow_run = await db_client.get_workflow_run(workflow_run_id)
     telephony_configuration_id = None
+    transport_organization_id = workflow.organization_id
     if workflow_run and workflow_run.initial_context:
         telephony_configuration_id = workflow_run.initial_context.get(
             "telephony_configuration_id"
         )
+        if workflow_run.initial_context.get("telephony_preview"):
+            from api.services.phone_preview.telephony_scope import (
+                resolve_preview_system_telephony_scope,
+            )
+
+            (
+                preview_org_id,
+                preview_config_id,
+            ) = await resolve_preview_system_telephony_scope(
+                workflow_run, workflow.organization_id
+            )
+            telephony_configuration_id = preview_config_id
+            transport_organization_id = preview_org_id
 
     # Resolve effective user config here so the transport can tune its
     # bot-stopped-speaking fallback based on is_realtime; pass the resolved
@@ -213,7 +227,7 @@ async def run_pipeline_telephony(
         websocket,
         workflow_run_id,
         audio_config,
-        workflow.organization_id,
+        transport_organization_id,
         ambient_noise_config=ambient_noise_config,
         telephony_configuration_id=telephony_configuration_id,
         is_realtime=is_realtime,

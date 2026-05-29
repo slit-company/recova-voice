@@ -126,6 +126,18 @@ async def get_user(
             detail=f"Failed to map user to organization: {exc}",
         )
 
+    selected_team = stack_user.get("selected_team") or {}
+    # Preserve Stack team permission metadata for downstream feature gates when
+    # the server response includes it. The gate still fails closed if Stack does
+    # not return permissions here.
+    user_model.team_permissions = (
+        stack_user.get("team_permissions")
+        or stack_user.get("permissions")
+        or selected_team.get("permissions")
+        or selected_team.get("user_permissions")
+        or []
+    )
+
     return user_model
 
 

@@ -17,6 +17,7 @@ from api.db.models import (
     TelephonyPhoneNumberModel,
     WorkflowModel,
 )
+from api.utils.phone_security import build_stored_phone_number
 from api.utils.telephony_address import normalize_telephony_address
 
 
@@ -234,6 +235,7 @@ class TelephonyPhoneNumberClient(BaseDBClient):
         extra_metadata: Optional[Dict[str, Any]] = None,
     ) -> TelephonyPhoneNumberModel:
         normalized = normalize_telephony_address(address, country_hint=country_code)
+        stored_phone = build_stored_phone_number(address, country_code=country_code)
 
         async with self.async_session() as session:
             if is_default_caller_id:
@@ -244,6 +246,9 @@ class TelephonyPhoneNumberClient(BaseDBClient):
                 telephony_configuration_id=telephony_configuration_id,
                 address=address,
                 address_normalized=normalized.canonical,
+                address_masked=stored_phone.masked,
+                address_hash=stored_phone.lookup_hash,
+                address_encrypted_raw=stored_phone.encrypted_raw,
                 address_type=normalized.address_type,
                 country_code=country_code or normalized.country_code,
                 label=label,
