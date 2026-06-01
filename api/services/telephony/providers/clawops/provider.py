@@ -79,14 +79,29 @@ class ClawOpsProvider(TelephonyProvider):
                 f"{workflow_run_id}"
             )
 
+        response_data: Dict[str, Any] = {}
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                endpoint,
-                json=payload,
-                headers=self._api_headers(),
-            ) as response:
-                response_data = await self._safe_json_response(response)
-                if response.status != 201:
+            for attempt in range(2):
+                async with session.post(
+                    endpoint,
+                    json=payload,
+                    headers=self._api_headers(),
+                ) as response:
+                    response_data = await self._safe_json_response(response)
+                    if response.status == 201:
+                        break
+
+                    if self._should_retry_call_initiation_failure(
+                        response.status, response_data, attempt
+                    ):
+                        logger.warning(
+                            "ClawOps call initiation returned retryable "
+                            "phone validation failure; retrying once: "
+                            f"status={response.status} body="
+                            f"{redact_telephony_payload_for_logs(response_data)}"
+                        )
+                        continue
+
                     logger.error(
                         "ClawOps call initiation failed: "
                         f"status={response.status} body="
@@ -451,6 +466,16 @@ class ClawOpsProvider(TelephonyProvider):
             return normalize_telephony_address(str(value), country_hint="KR").canonical
         except Exception:
             return str(value)
+
+    @staticmethod
+    def _should_retry_call_initiation_failure(
+        status: int, response_data: Dict[str, Any], attempt: int
+    ) -> bool:
+        return (
+            attempt == 0
+            and status == 400
+            and response_data.get("code") == "INVALID_PHONE_NUMBER"
+        )
 
     @staticmethod
     def _to_clawops_number(value: str) -> str:

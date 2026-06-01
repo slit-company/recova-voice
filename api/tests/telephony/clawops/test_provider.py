@@ -36,8 +36,8 @@ class _FakeResponse:
 
 
 class _FakeSession:
-    def __init__(self, response: _FakeResponse):
-        self.response = response
+    def __init__(self, response: _FakeResponse | list[_FakeResponse]):
+        self.responses = response if isinstance(response, list) else [response]
         self.posts = []
         self.puts = []
         self.gets = []
@@ -50,15 +50,16 @@ class _FakeSession:
 
     def post(self, url, *, json=None, headers=None):
         self.posts.append({"url": url, "json": json, "headers": headers})
-        return self.response
+        index = min(len(self.posts) - 1, len(self.responses) - 1)
+        return self.responses[index]
 
     def put(self, url, *, json=None, headers=None):
         self.puts.append({"url": url, "json": json, "headers": headers})
-        return self.response
+        return self.responses[0]
 
     def get(self, url, *, headers=None):
         self.gets.append({"url": url, "headers": headers})
-        return self.response
+        return self.responses[0]
 
 
 def _provider(**overrides) -> ClawOpsProvider:
@@ -178,6 +179,43 @@ async def test_initiate_call_uses_clawops_calls_api_and_korean_domestic_numbers(
     )
     assert "workflow_id" not in request["json"]
     assert "user_id" not in request["json"]
+
+
+@pytest.mark.asyncio
+async def test_initiate_call_retries_retryable_clawops_phone_validation_failure_once():
+    fake_session = _FakeSession(
+        [
+            _FakeResponse(
+                400,
+                {
+                    "error": "전화번호 형식이 올바르지 않습니다",
+                    "code": "INVALID_PHONE_NUMBER",
+                },
+            ),
+            _FakeResponse(
+                201,
+                {
+                    "callId": "CA-retry",
+                    "status": "queued",
+                },
+            ),
+        ]
+    )
+    provider = _provider()
+
+    with patch(
+        "api.services.telephony.providers.clawops.provider.aiohttp.ClientSession",
+        return_value=fake_session,
+    ):
+        result = await provider.initiate_call(
+            to_number="+821012345678",
+            webhook_url="https://backend.example/api/v1/telephony/clawops-voiceml",
+            from_number="+827012345678",
+        )
+
+    assert result.call_id == "CA-retry"
+    assert len(fake_session.posts) == 2
+    assert fake_session.posts[0]["json"] == fake_session.posts[1]["json"]
 
 
 @pytest.mark.asyncio
