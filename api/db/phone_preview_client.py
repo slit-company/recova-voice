@@ -252,6 +252,113 @@ class PhonePreviewClient(BaseDBClient):
             await session.refresh(row)
             return row, True
 
+    async def begin_phone_preview_inbound_wait(
+        self,
+        session_id: int,
+        *,
+        organization_id: int,
+        user_id: int,
+        provider: str,
+        telephony_configuration_id: int,
+        from_phone_number_id: int,
+    ) -> tuple[Optional[PhonePreviewSessionModel], bool]:
+        """Atomically reserve a verified session for one inbound preview call.
+
+        Returns ``(session, is_waiting)``. Already-waiting sessions are
+        idempotent and return ``True`` without changing the route.
+        """
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(PhonePreviewSessionModel)
+                .where(
+                    PhonePreviewSessionModel.id == session_id,
+                    PhonePreviewSessionModel.organization_id == organization_id,
+                    PhonePreviewSessionModel.user_id == user_id,
+                )
+                .with_for_update()
+            )
+            row = result.scalars().first()
+            if not row:
+                return None, False
+            now = datetime.now(UTC)
+            if row.expires_at <= now:
+                row.status = "expired"
+                row.failure_reason = "expired"
+                row.destination_phone_encrypted = None
+                row.updated_at = now
+                await session.commit()
+                await session.refresh(row)
+                return row, False
+            if row.status == "awaiting_inbound":
+                route_matches = (
+                    row.provider == provider
+                    and row.preview_telephony_configuration_id
+                    == telephony_configuration_id
+                    and row.preview_from_phone_number_id == from_phone_number_id
+                )
+                return row, route_matches
+            if row.workflow_run_id and row.status in {
+                "calling",
+                "active",
+                "completed",
+            }:
+                return row, False
+            if row.status != "verified":
+                return row, False
+            row.status = "awaiting_inbound"
+            row.provider = provider
+            row.preview_telephony_configuration_id = telephony_configuration_id
+            row.preview_from_phone_number_id = from_phone_number_id
+            row.failure_reason = None
+            row.updated_at = now
+            await session.commit()
+            await session.refresh(row)
+            return row, True
+
+    async def claim_phone_preview_inbound_session(
+        self,
+        *,
+        organization_id: int,
+        phone_number_global_hash: str,
+        provider: str,
+        telephony_configuration_id: int,
+        from_phone_number_id: int,
+        now: datetime,
+    ) -> Optional[PhonePreviewSessionModel]:
+        """Claim the newest verified inbound preview session for a caller.
+
+        Matching uses the global phone hash because inbound webhooks arrive
+        without a logged-in user context. The phone number itself was verified
+        before the session could enter ``awaiting_inbound``.
+        """
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(PhonePreviewSessionModel)
+                .where(
+                    PhonePreviewSessionModel.phone_number_global_hash
+                    == phone_number_global_hash,
+                    PhonePreviewSessionModel.organization_id == organization_id,
+                    PhonePreviewSessionModel.provider == provider,
+                    PhonePreviewSessionModel.preview_telephony_configuration_id
+                    == telephony_configuration_id,
+                    PhonePreviewSessionModel.preview_from_phone_number_id
+                    == from_phone_number_id,
+                    PhonePreviewSessionModel.status == "awaiting_inbound",
+                    PhonePreviewSessionModel.expires_at > now,
+                )
+                .order_by(PhonePreviewSessionModel.updated_at.desc())
+                .limit(1)
+                .with_for_update(skip_locked=True)
+            )
+            row = result.scalars().first()
+            if not row:
+                return None
+            row.status = "calling"
+            row.updated_at = now
+            await session.commit()
+            await session.refresh(row)
+            return row
+
     async def attach_phone_preview_call(
         self,
         session_id: int,
@@ -346,7 +453,7 @@ class PhonePreviewClient(BaseDBClient):
                 .where(
                     PhonePreviewSessionModel.expires_at <= now,
                     PhonePreviewSessionModel.status.in_(
-                        ("pending_verification", "verified")
+                        ("pending_verification", "verified", "awaiting_inbound")
                     ),
                 )
                 .values(

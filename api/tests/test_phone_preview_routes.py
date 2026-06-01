@@ -35,6 +35,12 @@ def _make_test_app() -> FastAPI:
             "verify",
         ),
         ("post", "/phone-preview/call", {"session_id": 123}, "call"),
+        (
+            "post",
+            "/phone-preview/wait-inbound",
+            {"session_id": 123},
+            "wait_for_inbound",
+        ),
         ("get", "/phone-preview/status/123", None, "status"),
         ("get", "/phone-preview/123", None, "status"),
     ],
@@ -147,6 +153,38 @@ def test_call_route_delegates_to_preview_service():
     assert response.json()["workflow_run_id"] == 501
     assert "provider_call_id" not in response.json()
     call.assert_awaited_once()
+
+
+def test_wait_inbound_route_delegates_to_preview_service():
+    app = _make_test_app()
+    client = TestClient(app)
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+
+    with patch(
+        "api.routes.phone_preview.phone_preview_service.wait_for_inbound",
+        new=AsyncMock(
+            return_value=SimpleNamespace(
+                as_dict=lambda: {
+                    "session_id": 123,
+                    "status": "awaiting_inbound",
+                    "otp_required": False,
+                    "masked_phone": "+82****5678",
+                    "expires_at": expires_at,
+                    "workflow_run_id": None,
+                    "provider_call_id": None,
+                    "failure_reason": None,
+                    "inbound_phone_number": "070-0000-0000",
+                }
+            )
+        ),
+    ) as wait_for_inbound:
+        response = client.post("/phone-preview/wait-inbound", json={"session_id": 123})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "awaiting_inbound"
+    assert response.json()["inbound_phone_number"] == "070-0000-0000"
+    assert "provider_call_id" not in response.json()
+    wait_for_inbound.assert_awaited_once()
 
 
 def test_status_route_delegates_to_preview_service():

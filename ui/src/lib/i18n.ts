@@ -652,7 +652,7 @@ export const messages = {
 
     "phoneCall.title": "Call me preview",
     "phoneCall.description":
-      "Enter your Korean phone number and Recova will call you with the latest saved draft.",
+      "Enter your Korean phone number, then choose whether Recova calls you or you call Recova's representative number.",
     "phoneCall.systemCallerTitle": "Recova system caller ID",
     "phoneCall.systemCallerDescription":
       "No provider, telephony configuration, or caller ID selection is needed for this preview.",
@@ -663,8 +663,11 @@ export const messages = {
     "phoneCall.statusOtp": "Verification required",
     "phoneCall.statusVerifying": "Checking code",
     "phoneCall.statusCalling": "Calling",
+    "phoneCall.statusWaitingInbound": "Waiting for your call",
     "phoneCall.statusCompleted": "Completed",
     "phoneCall.statusFailed": "Failed",
+    "phoneCall.modeOutbound": "Call me",
+    "phoneCall.modeInbound": "I'll call Recova",
     "phoneCall.nameLabel": "Name (optional)",
     "phoneCall.namePlaceholder": "Your name",
     "phoneCall.phoneLabel": "Phone number",
@@ -683,9 +686,12 @@ export const messages = {
     "phoneCall.preparing": "Preparing...",
     "phoneCall.verifying": "Verifying...",
     "phoneCall.verifyAndCall": "Verify & call me",
+    "phoneCall.verifyAndWaitInbound": "Verify & show number",
     "phoneCall.calling": "Calling...",
     "phoneCall.start": "Start call-me preview",
+    "phoneCall.startInbound": "Show Recova number",
     "phoneCall.callStarted": "Recova is calling now. Keep your phone nearby.",
+    "phoneCall.inboundWaiting": "Call the Recova number below from the verified phone. The latest draft will answer.",
     "phoneCall.callStatusTitle": "Preview call requested",
     "phoneCall.workflowRun": "Workflow run:",
     "phoneCall.again": "Preview another number",
@@ -695,6 +701,7 @@ export const messages = {
     "phoneCall.errorDraftNotReady": "Save or fix the latest draft before starting a preview call.",
     "phoneCall.errorRateLimited": "Too many preview attempts. Please wait before trying again.",
     "phoneCall.errorVerification": "The verification code was invalid, expired, or already used.",
+    "phoneCall.errorInboundAlreadyWaiting": "This number is already waiting for an inbound preview call.",
 
     "workflowHeader.publishing": "Publishing...",
     "workflowHeader.publish": "Publish",
@@ -1394,7 +1401,7 @@ export const messages = {
 
     "phoneCall.title": "전화로 프리뷰",
     "phoneCall.description":
-      "한국 전화번호를 입력하면 Recova가 최신 저장된 draft 에이전트로 전화를 걸어드립니다.",
+      "한국 전화번호를 입력한 뒤 Recova가 전화하게 하거나 Recova 대표번호로 직접 전화할 수 있습니다.",
     "phoneCall.systemCallerTitle": "Recova 시스템 대표번호",
     "phoneCall.systemCallerDescription":
       "이 프리뷰에서는 제공자, 전화 설정, 발신번호를 선택할 필요가 없습니다.",
@@ -1405,8 +1412,11 @@ export const messages = {
     "phoneCall.statusOtp": "인증 필요",
     "phoneCall.statusVerifying": "코드 확인 중",
     "phoneCall.statusCalling": "전화 거는 중",
+    "phoneCall.statusWaitingInbound": "전화를 기다리는 중",
     "phoneCall.statusCompleted": "완료",
     "phoneCall.statusFailed": "실패",
+    "phoneCall.modeOutbound": "전화 받기",
+    "phoneCall.modeInbound": "내가 전화하기",
     "phoneCall.nameLabel": "이름 (선택)",
     "phoneCall.namePlaceholder": "이름",
     "phoneCall.phoneLabel": "전화번호",
@@ -1425,9 +1435,12 @@ export const messages = {
     "phoneCall.preparing": "준비 중...",
     "phoneCall.verifying": "확인 중...",
     "phoneCall.verifyAndCall": "인증하고 전화 받기",
+    "phoneCall.verifyAndWaitInbound": "인증하고 대표번호 보기",
     "phoneCall.calling": "전화 거는 중...",
     "phoneCall.start": "전화 프리뷰 시작",
+    "phoneCall.startInbound": "대표번호 보기",
     "phoneCall.callStarted": "Recova가 지금 전화를 걸고 있습니다. 휴대폰을 확인해 주세요.",
+    "phoneCall.inboundWaiting": "인증한 휴대폰에서 아래 Recova 대표번호로 전화하세요. 최신 draft 에이전트가 응답합니다.",
     "phoneCall.callStatusTitle": "프리뷰 전화 요청됨",
     "phoneCall.workflowRun": "워크플로 실행:",
     "phoneCall.again": "다른 번호로 프리뷰",
@@ -1437,6 +1450,7 @@ export const messages = {
     "phoneCall.errorDraftNotReady": "전화 프리뷰를 시작하기 전에 최신 draft를 저장하거나 수정해 주세요.",
     "phoneCall.errorRateLimited": "프리뷰 시도 횟수가 너무 많습니다. 잠시 후 다시 시도해 주세요.",
     "phoneCall.errorVerification": "인증 코드가 올바르지 않거나 만료되었거나 이미 사용되었습니다.",
+    "phoneCall.errorInboundAlreadyWaiting": "이미 이 번호로 수신 프리뷰 전화를 기다리고 있습니다.",
 
     "workflowHeader.publishing": "게시 중...",
     "workflowHeader.publish": "게시",

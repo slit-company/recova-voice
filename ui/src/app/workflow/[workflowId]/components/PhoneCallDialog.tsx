@@ -6,6 +6,7 @@ import { CheckCircle2, Loader2, PhoneCall, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PhoneInput } from "react-international-phone";
 
+import { client } from "@/client/client.gen";
 import {
     callPhonePreviewApiV1PhonePreviewCallPost,
     getPhonePreviewStatusByStatusPathApiV1PhonePreviewStatusSessionIdGet,
@@ -25,10 +26,15 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useLocale } from "@/context/LocaleContext";
 
 type PreviewStep = "entry" | "otp" | "calling" | "complete";
-type BusyState = "saving" | "starting" | "verifying" | "calling" | null;
+type PreviewMode = "outbound" | "inbound";
+type BusyState = "saving" | "starting" | "verifying" | "calling" | "waiting" | null;
+type ExtendedPhonePreviewResponse = PhonePreviewResponse & {
+    inbound_phone_number?: string | null;
+};
 
 interface PhoneCallDialogProps {
     open: boolean;
@@ -69,6 +75,7 @@ const maskedPhoneFrom = (data: PhonePreviewResponse) => data.masked_phone ?? "";
 const expiresAtFrom = (data: PhonePreviewResponse) => data.expires_at ?? "";
 const workflowRunIdFrom = (data: PhonePreviewResponse) => data.workflow_run_id ?? null;
 const failureReasonFrom = (data: PhonePreviewResponse) => data.failure_reason ?? null;
+const inboundPhoneNumberFrom = (data: ExtendedPhonePreviewResponse) => data.inbound_phone_number ?? "";
 
 export const PhoneCallDialog = ({
     open,
@@ -82,9 +89,11 @@ export const PhoneCallDialog = ({
 
     const [displayName, setDisplayName] = useState("");
     const [phoneNumber, setPhoneNumber] = useState("");
+    const [previewMode, setPreviewMode] = useState<PreviewMode>("outbound");
     const [otpCode, setOtpCode] = useState("");
     const [sessionId, setSessionId] = useState("");
     const [maskedPhone, setMaskedPhone] = useState("");
+    const [inboundPhoneNumber, setInboundPhoneNumber] = useState("");
     const [expiresAt, setExpiresAt] = useState("");
     const [workflowRunId, setWorkflowRunId] = useState<number | string | null>(null);
     const [status, setStatus] = useState<string>("idle");
@@ -100,9 +109,11 @@ export const PhoneCallDialog = ({
 
         setDisplayName(user.email?.split("@")[0] ?? "");
         setPhoneNumber("");
+        setPreviewMode("outbound");
         setOtpCode("");
         setSessionId("");
         setMaskedPhone("");
+        setInboundPhoneNumber("");
         setExpiresAt("");
         setWorkflowRunId(null);
         setStatus("idle");
@@ -118,20 +129,23 @@ export const PhoneCallDialog = ({
         if (lower.includes("telephony_not_configured")) return t("phoneCall.errorTelephonyNotConfigured");
         if (lower.includes("draft_not_ready")) return t("phoneCall.errorDraftNotReady");
         if (lower.includes("rate") || lower.includes("cooldown")) return t("phoneCall.errorRateLimited");
+        if (lower.includes("awaiting_inbound")) return t("phoneCall.errorInboundAlreadyWaiting");
         if (lower.includes("otp") || lower.includes("verification")) return t("phoneCall.errorVerification");
         return message;
     }, [t]);
 
-    const applyPreviewStatus = useCallback((data: PhonePreviewResponse) => {
+    const applyPreviewStatus = useCallback((data: ExtendedPhonePreviewResponse) => {
         const nextSessionId = sessionIdFrom(data);
         const nextMaskedPhone = maskedPhoneFrom(data);
         const nextExpiresAt = expiresAtFrom(data);
         const nextWorkflowRunId = workflowRunIdFrom(data);
         const failureReason = failureReasonFrom(data);
+        const nextInboundPhoneNumber = inboundPhoneNumberFrom(data);
 
         if (nextSessionId) setSessionId(nextSessionId);
         if (nextMaskedPhone) setMaskedPhone(nextMaskedPhone);
         if (nextExpiresAt) setExpiresAt(nextExpiresAt);
+        if (nextInboundPhoneNumber) setInboundPhoneNumber(nextInboundPhoneNumber);
         setStatus((current) => data.status ?? current);
         setWorkflowRunId(nextWorkflowRunId);
         if (failureReason) {
@@ -143,7 +157,7 @@ export const PhoneCallDialog = ({
         }
     }, [formatError]);
 
-    const unwrapPreviewResponse = useCallback((response: { data?: PhonePreviewResponse; error?: unknown }) => {
+    const unwrapPreviewResponse = useCallback((response: { data?: ExtendedPhonePreviewResponse; error?: unknown }) => {
         if (response.error) {
             throw new Error(formatError(response.error));
         }
@@ -178,6 +192,15 @@ export const PhoneCallDialog = ({
         const response = await callPhonePreviewApiV1PhonePreviewCallPost({
             body,
         });
+        return unwrapPreviewResponse(response);
+    }, [unwrapPreviewResponse]);
+
+    const waitInboundPreview = useCallback(async (body: { session_id: number }) => {
+        const response = await client.post({
+            url: "/api/v1/phone-preview/wait-inbound",
+            body,
+            headers: { "Content-Type": "application/json" },
+        }) as { data?: ExtendedPhonePreviewResponse; error?: unknown };
         return unwrapPreviewResponse(response);
     }, [unwrapPreviewResponse]);
 
@@ -243,6 +266,39 @@ export const PhoneCallDialog = ({
         }
     };
 
+    const beginInboundWait = async (targetSessionId = sessionId) => {
+        if (!targetSessionId) return;
+
+        setBusy("waiting");
+        setStep("calling");
+        setStatus("awaiting_inbound");
+        setError(null);
+        setSuccess(null);
+
+        const data = await waitInboundPreview({ session_id: Number(targetSessionId) });
+        const nextStatus = data.status ?? "awaiting_inbound";
+        const nextInboundPhoneNumber = inboundPhoneNumberFrom(data);
+        const failureReason = failureReasonFrom(data);
+
+        setStatus(nextStatus);
+        if (nextInboundPhoneNumber) setInboundPhoneNumber(nextInboundPhoneNumber);
+        setStep(nextStatus === "failed" ? "complete" : "calling");
+        if (failureReason) {
+            setError(formatError(failureReason));
+            setSuccess(null);
+        } else {
+            setSuccess(t("phoneCall.inboundWaiting"));
+        }
+    };
+
+    const continueAfterVerification = async (targetSessionId = sessionId) => {
+        if (previewMode === "inbound") {
+            await beginInboundWait(targetSessionId);
+            return;
+        }
+        await beginCall(targetSessionId);
+    };
+
     const handleStartPreview = async () => {
         const trimmedPhone = phoneNumber.trim();
         if (!trimmedPhone) {
@@ -278,7 +334,7 @@ export const PhoneCallDialog = ({
                 return;
             }
 
-            await beginCall(nextSessionId);
+            await continueAfterVerification(nextSessionId);
         } catch (err) {
             setError(err instanceof Error ? err.message : formatError(err));
             setStep("entry");
@@ -309,7 +365,7 @@ export const PhoneCallDialog = ({
             const nextSessionId = sessionIdFrom(verified) || sessionId;
             setSessionId(nextSessionId);
             setStatus(verified.status ?? "verified");
-            await beginCall(nextSessionId);
+            await continueAfterVerification(nextSessionId);
         } catch (err) {
             setError(err instanceof Error ? err.message : formatError(err));
         } finally {
@@ -321,6 +377,7 @@ export const PhoneCallDialog = ({
         setOtpCode("");
         setSessionId("");
         setMaskedPhone("");
+        setInboundPhoneNumber("");
         setExpiresAt("");
         setWorkflowRunId(null);
         setStatus("idle");
@@ -341,7 +398,9 @@ export const PhoneCallDialog = ({
         if (busy === "starting") return t("phoneCall.statusPreparing");
         if (busy === "verifying") return t("phoneCall.statusVerifying");
         if (busy === "calling") return t("phoneCall.statusCalling");
+        if (busy === "waiting") return t("phoneCall.statusWaitingInbound");
         if (step === "otp") return t("phoneCall.statusOtp");
+        if (status === "awaiting_inbound") return t("phoneCall.statusWaitingInbound");
         if (status === "failed") return t("phoneCall.statusFailed");
         if (status === "completed" || status === "complete") return t("phoneCall.statusCompleted");
         if (status === "calling" || step === "calling") return t("phoneCall.statusCalling");
@@ -377,6 +436,21 @@ export const PhoneCallDialog = ({
 
                     {step === "entry" && (
                         <>
+                            <Tabs
+                                value={previewMode}
+                                onValueChange={(value) => setPreviewMode(value as PreviewMode)}
+                                className="w-full"
+                            >
+                                <TabsList className="grid w-full grid-cols-2">
+                                    <TabsTrigger value="outbound" disabled={busy !== null}>
+                                        {t("phoneCall.modeOutbound")}
+                                    </TabsTrigger>
+                                    <TabsTrigger value="inbound" disabled={busy !== null}>
+                                        {t("phoneCall.modeInbound")}
+                                    </TabsTrigger>
+                                </TabsList>
+                            </Tabs>
+
                             <div className="space-y-1.5">
                                 <Label htmlFor="preview-display-name">{t("phoneCall.nameLabel")}</Label>
                                 <Input
@@ -442,14 +516,25 @@ export const PhoneCallDialog = ({
                     {(step === "calling" || step === "complete") && (
                         <div className="rounded-md border border-teal-500/30 bg-teal-500/10 px-3 py-3 text-sm">
                             <div className="flex items-start gap-2">
-                                {busy === "calling" ? (
+                                {busy === "calling" || busy === "waiting" ? (
                                     <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-teal-600" />
                                 ) : (
                                     <CheckCircle2 className="mt-0.5 h-4 w-4 text-teal-600" />
                                 )}
                                 <div>
                                     <p className="font-medium">{t("phoneCall.callStatusTitle")}</p>
-                                    <p className="text-muted-foreground">{success ?? t("phoneCall.callStarted")}</p>
+                                    <p className="text-muted-foreground">
+                                        {success ?? (
+                                            previewMode === "inbound"
+                                                ? t("phoneCall.inboundWaiting")
+                                                : t("phoneCall.callStarted")
+                                        )}
+                                    </p>
+                                    {previewMode === "inbound" && inboundPhoneNumber && (
+                                        <p className="mt-2 rounded bg-background px-2 py-1 font-mono text-base">
+                                            {inboundPhoneNumber}
+                                        </p>
+                                    )}
                                     {workflowRunId && (
                                         <p className="mt-1 text-xs text-muted-foreground">
                                             {t("phoneCall.workflowRun")} {workflowRunId}
@@ -488,7 +573,9 @@ export const PhoneCallDialog = ({
                                         {busy === "saving" ? t("common.saving") : t("phoneCall.preparing")}
                                     </>
                                 ) : (
-                                    t("phoneCall.start")
+                                    previewMode === "inbound"
+                                        ? t("phoneCall.startInbound")
+                                        : t("phoneCall.start")
                                 )}
                             </Button>
                         </>
@@ -506,7 +593,9 @@ export const PhoneCallDialog = ({
                                         {busy === "verifying" ? t("phoneCall.verifying") : t("phoneCall.calling")}
                                     </>
                                 ) : (
-                                    t("phoneCall.verifyAndCall")
+                                    previewMode === "inbound"
+                                        ? t("phoneCall.verifyAndWaitInbound")
+                                        : t("phoneCall.verifyAndCall")
                                 )}
                             </Button>
                         </>

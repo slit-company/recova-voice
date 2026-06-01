@@ -360,6 +360,16 @@ class PhonePreviewSessionModel(Base):
     )
     phone_number_hash = Column(String(64), nullable=False)
     phone_number_global_hash = Column(String(64), nullable=True)
+    preview_telephony_configuration_id = Column(
+        Integer,
+        ForeignKey("telephony_configurations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    preview_from_phone_number_id = Column(
+        Integer,
+        ForeignKey("telephony_phone_numbers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     phone_number_masked = Column(String(32), nullable=False)
     destination_phone_encrypted = Column(Text, nullable=True)
     display_name = Column(String(120), nullable=True)
@@ -384,6 +394,8 @@ class PhonePreviewSessionModel(Base):
     verification = relationship(
         "PhonePreviewVerificationModel", back_populates="sessions"
     )
+    preview_telephony_configuration = relationship("TelephonyConfigurationModel")
+    preview_from_phone_number = relationship("TelephonyPhoneNumberModel")
 
     __table_args__ = (
         Index(
@@ -404,6 +416,18 @@ class PhonePreviewSessionModel(Base):
             "phone_number_global_hash",
             "created_at",
             postgresql_where=text("phone_number_global_hash IS NOT NULL"),
+        ),
+        Index(
+            "ix_phone_preview_sessions_inbound_route",
+            "phone_number_global_hash",
+            "provider",
+            "preview_telephony_configuration_id",
+            "preview_from_phone_number_id",
+            "updated_at",
+            postgresql_where=text(
+                "phone_number_global_hash IS NOT NULL "
+                "AND preview_from_phone_number_id IS NOT NULL"
+            ),
         ),
         Index("ix_phone_preview_sessions_expires_at", "expires_at"),
     )

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import FastAPI
+from fastapi import Response
 from fastapi.testclient import TestClient
 
 from api.routes.telephony import router
@@ -41,6 +42,36 @@ def _provider():
             )
         ),
     )
+
+
+class _InboundPreviewProviderClass:
+    PROVIDER_NAME = "clawops"
+
+    @staticmethod
+    def can_handle_webhook(webhook_data, headers):
+        return webhook_data.get("AccountId") == "AC123"
+
+    @staticmethod
+    def parse_inbound_webhook(webhook_data):
+        return SimpleNamespace(
+            provider="clawops",
+            call_id=webhook_data["CallId"],
+            from_number="+821012345678",
+            to_number="+827000000000",
+            direction="inbound",
+            call_status=webhook_data.get("CallStatus", "in-progress"),
+            account_id=webhook_data["AccountId"],
+            from_country="KR",
+            to_country="KR",
+            raw_data=webhook_data,
+        )
+
+    @staticmethod
+    def generate_validation_error_response(error_type):
+        return Response(
+            content=f"<Response><Say>{error_type}</Say></Response>",
+            media_type="application/xml",
+        )
 
 
 def test_initiate_call_executes_as_workflow_owner_for_shared_org_workflow():
@@ -195,3 +226,63 @@ def test_initiate_call_rejects_outbound_control_only_provider_before_dispatch():
     )
     mock_db.get_workflow.assert_not_awaited()
     provider.initiate_call.assert_not_awaited()
+
+
+def test_inbound_run_routes_unassigned_recova_number_to_preview_reservation():
+    app = _make_test_app()
+    client = TestClient(app)
+    provider_instance = SimpleNamespace(
+        PROVIDER_NAME="clawops",
+        verify_inbound_signature=AsyncMock(return_value=True),
+    )
+    preview_response = Response(
+        content="<Response><Connect/></Response>", media_type="application/xml"
+    )
+
+    with (
+        patch(
+            "api.routes.telephony.get_all_telephony_providers",
+            new=AsyncMock(return_value=[_InboundPreviewProviderClass]),
+        ),
+        patch("api.routes.telephony.db_client") as mock_db,
+        patch(
+            "api.routes.telephony.get_telephony_provider_by_id",
+            new=AsyncMock(return_value=provider_instance),
+        ) as get_provider,
+        patch(
+            "api.services.phone_preview.service.phone_preview_service.answer_inbound_preview",
+            new=AsyncMock(return_value=preview_response),
+        ) as answer_preview,
+    ):
+        config = SimpleNamespace(id=901, organization_id=900)
+        phone_row = SimpleNamespace(id=902, inbound_workflow_id=None)
+        mock_db.find_inbound_route_by_account = AsyncMock(
+            return_value=(config, phone_row)
+        )
+        mock_db.get_workflow = AsyncMock()
+
+        response = client.post(
+            "/telephony/inbound/run",
+            data={
+                "CallId": "CA123",
+                "AccountId": "AC123",
+                "From": "01012345678",
+                "To": "07000000000",
+                "CallStatus": "in-progress",
+                "Direction": "inbound",
+            },
+            headers={"X-Signature": "valid"},
+        )
+
+    assert response.status_code == 200
+    assert "<Connect" in response.text
+    get_provider.assert_awaited_once_with(901, 900)
+    provider_instance.verify_inbound_signature.assert_awaited_once()
+    answer_preview.assert_awaited_once()
+    preview_kwargs = answer_preview.await_args.kwargs
+    assert preview_kwargs["provider_instance"] is provider_instance
+    assert preview_kwargs["normalized_data"].call_id == "CA123"
+    assert preview_kwargs["organization_id"] == 900
+    assert preview_kwargs["telephony_configuration_id"] == 901
+    assert preview_kwargs["from_phone_number_id"] == 902
+    mock_db.get_workflow.assert_not_awaited()

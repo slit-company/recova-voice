@@ -48,6 +48,7 @@ class PhonePreviewResponse(BaseModel):
     workflow_run_id: int | None = None
     failure_reason: str | None = None
     dev_otp_code: str | None = None
+    inbound_phone_number: str | None = None
 
 
 @router.post("/start", response_model=PhonePreviewResponse)
@@ -83,6 +84,17 @@ async def call_phone_preview(
     user: UserModel = Depends(get_phone_preview_user),
 ):
     result = await phone_preview_service.call(user=user, session_id=request.session_id)
+    return result.as_dict()
+
+
+@router.post("/wait-inbound", response_model=PhonePreviewResponse)
+async def wait_for_inbound_phone_preview(
+    request: PhonePreviewCallRequest,
+    user: UserModel = Depends(get_phone_preview_user),
+):
+    result = await phone_preview_service.wait_for_inbound(
+        user=user, session_id=request.session_id
+    )
     return result.as_dict()
 
 

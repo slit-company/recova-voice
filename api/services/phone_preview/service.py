@@ -33,7 +33,9 @@ from api.services.phone_preview.otp_delivery import (
     PhonePreviewOtpDeliveryError,
     deliver_otp_code,
 )
+from api.services.configuration.resolve import resolve_effective_config
 from api.services.quota_service import check_dograh_quota_by_user_id
+from api.services.telephony.registry import get_optional as get_provider_spec
 from api.utils.common import get_backend_endpoints
 
 _PREVIEW_METADATA_SENSITIVE_EXACT_KEYS = {"from", "to"}
@@ -78,6 +80,18 @@ def _redact_preview_metadata(value: Any, *, key: object | None = None) -> Any:
     return value
 
 
+def _preview_config_has_service(config: Any, field_name: str) -> bool:
+    """Return whether an effective user configuration has a usable service slot.
+
+    The concrete provider validators own provider-specific credential validation.
+    This guard intentionally checks only that the pipeline-critical section is
+    present, preventing the known no-configuration crash before a PSTN call is
+    dispatched.
+    """
+
+    return getattr(config, field_name, None) is not None
+
+
 @dataclass
 class PhonePreviewResult:
     session_id: int
@@ -89,6 +103,7 @@ class PhonePreviewResult:
     provider_call_id: str | None = None
     failure_reason: str | None = None
     dev_otp_code: str | None = None
+    inbound_phone_number: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         data = {
@@ -102,6 +117,8 @@ class PhonePreviewResult:
         }
         if self.dev_otp_code:
             data["dev_otp_code"] = self.dev_otp_code
+        if self.inbound_phone_number:
+            data["inbound_phone_number"] = self.inbound_phone_number
         return data
 
 
@@ -326,6 +343,131 @@ class PhonePreviewService:
             )
             raise HTTPException(status_code=500, detail="call_failed") from exc
 
+    async def wait_for_inbound(
+        self, *, user: UserModel, session_id: int
+    ) -> PhonePreviewResult:
+        """Prepare a verified preview session for "user calls Recova" testing."""
+        organization_id = self._selected_org(user)
+        settings = get_preview_telephony_settings()
+        if not settings.is_configured or settings.from_phone_number_id is None:
+            raise HTTPException(status_code=400, detail="telephony_not_configured")
+
+        provider = await _get_preview_telephony_provider_by_id(
+            settings.configuration_id, settings.organization_id
+        )
+        if not provider.validate_config():
+            raise HTTPException(status_code=400, detail="telephony_not_configured")
+        self._require_preview_provider(provider.PROVIDER_NAME, inbound=True)
+
+        phone_row = await db_client.get_phone_number_for_config(
+            settings.from_phone_number_id, settings.configuration_id
+        )
+        if not phone_row or not phone_row.is_active:
+            raise HTTPException(
+                status_code=400, detail="preview_from_phone_number_not_found"
+            )
+        if getattr(phone_row, "inbound_workflow_id", None):
+            raise HTTPException(
+                status_code=400, detail="preview_from_phone_number_must_be_unassigned"
+            )
+
+        session, is_waiting = await db_client.begin_phone_preview_inbound_wait(
+            session_id,
+            organization_id=organization_id,
+            user_id=user.id,
+            provider=provider.PROVIDER_NAME,
+            telephony_configuration_id=settings.configuration_id,
+            from_phone_number_id=phone_row.id,
+        )
+        if not session:
+            raise HTTPException(status_code=404, detail="preview_session_not_found")
+        if not is_waiting:
+            if session.status == "pending_verification":
+                raise HTTPException(status_code=400, detail="phone_not_verified")
+            if session.status in {"calling", "active", "completed"}:
+                return self._session_result(
+                    session,
+                    otp_required=False,
+                    inbound_phone_number=phone_row.address,
+                )
+            raise HTTPException(
+                status_code=400, detail=session.failure_reason or session.status
+            )
+
+        try:
+            workflow = await db_client.get_workflow(
+                session.workflow_id, organization_id=session.organization_id
+            )
+            if not workflow:
+                raise HTTPException(status_code=404, detail="workflow_not_found")
+            if workflow.user_id is None:
+                raise HTTPException(status_code=409, detail="workflow_has_no_owner")
+            draft = await db_client.get_draft_version(session.workflow_id)
+            if not draft:
+                raise HTTPException(status_code=400, detail="draft_not_ready")
+            await self._require_preview_model_configuration(
+                user_id=workflow.user_id,
+                workflow_configurations=getattr(draft, "workflow_configurations", None),
+            )
+        except HTTPException as exc:
+            await db_client.update_phone_preview_session_status(
+                session.id, status="failed", failure_reason=str(exc.detail)
+            )
+            raise
+
+        return self._session_result(
+            session,
+            otp_required=False,
+            inbound_phone_number=phone_row.address,
+        )
+
+    async def answer_inbound_preview(
+        self,
+        *,
+        provider_instance,
+        normalized_data,
+        organization_id: int,
+        telephony_configuration_id: int,
+        from_phone_number_id: int,
+    ):
+        """Answer an inbound call if it matches a verified preview reservation.
+
+        This path is for the Recova-owned representative number: the logged-in
+        user first verifies their own phone number in the canvas, then calls the
+        representative number. The inbound webhook carries only telephony data,
+        so matching is by the previously verified caller-number hash.
+        """
+        now = datetime.now(UTC)
+        caller_hash = global_phone_hash(normalized_data.from_number)
+        session = await db_client.claim_phone_preview_inbound_session(
+            organization_id=organization_id,
+            phone_number_global_hash=caller_hash,
+            provider=provider_instance.PROVIDER_NAME,
+            telephony_configuration_id=telephony_configuration_id,
+            from_phone_number_id=from_phone_number_id,
+            now=now,
+        )
+        if not session:
+            return None
+
+        try:
+            return await self._start_inbound_preview_stream(
+                provider_instance=provider_instance,
+                session=session,
+                normalized_data=normalized_data,
+            )
+        except Exception as exc:
+            await db_client.update_phone_preview_session_status(
+                session.id,
+                status="failed",
+                failure_reason="inbound_preview_failed",
+            )
+            logger.error(
+                "Failed to start inbound preview session "
+                f"{session.id}: {exc.__class__.__name__}"
+            )
+            raise
+
     async def status(self, *, user: UserModel, session_id: int) -> PhonePreviewResult:
         organization_id = self._selected_org(user)
         session = await self._get_user_session(session_id, organization_id, user.id)
@@ -334,6 +476,7 @@ class PhonePreviewService:
             expirable_statuses={
                 "pending_verification",
                 "verified",
+                "awaiting_inbound",
                 "calling",
                 "active",
             },
@@ -353,8 +496,96 @@ class PhonePreviewService:
                     workflow_run=workflow_run,
                     organization_id=organization_id,
                 )
+        inbound_phone_number = None
+        if session.status == "awaiting_inbound":
+            inbound_phone_number = await self._preview_inbound_phone_number(session)
         return self._session_result(
-            session, otp_required=session.status == "pending_verification"
+            session,
+            otp_required=session.status == "pending_verification",
+            inbound_phone_number=inbound_phone_number,
+        )
+
+    async def _start_inbound_preview_stream(
+        self,
+        *,
+        provider_instance,
+        session,
+        normalized_data,
+    ):
+        workflow = await db_client.get_workflow(
+            session.workflow_id, organization_id=session.organization_id
+        )
+        if not workflow:
+            raise HTTPException(status_code=404, detail="workflow_not_found")
+        if workflow.user_id is None:
+            raise HTTPException(status_code=409, detail="workflow_has_no_owner")
+
+        draft = await db_client.get_draft_version(session.workflow_id)
+        if not draft:
+            raise HTTPException(status_code=400, detail="draft_not_ready")
+        await self._require_preview_model_configuration(
+            user_id=workflow.user_id,
+            workflow_configurations=getattr(draft, "workflow_configurations", None),
+        )
+
+        quota_result = await check_dograh_quota_by_user_id(
+            workflow.user_id, workflow_id=workflow.id
+        )
+        if not quota_result.has_quota:
+            raise HTTPException(status_code=402, detail=quota_result.error_message)
+
+        numeric_suffix = int(str(uuid.uuid4()).replace("-", "")[:8], 16) % 100000000
+        workflow_run_name = f"WR-PREVIEW-IN-{numeric_suffix:08d}"
+        initial_context = {
+            **(draft.template_context_variables or {}),
+            "phone_number": session.phone_number_masked,
+            "caller_number_masked": session.phone_number_masked,
+            "called_number": mask_phone(normalized_data.to_number),
+            "called_number_masked": mask_phone(normalized_data.to_number),
+            "direction": "inbound",
+            "telephony_preview": True,
+            "preview_session_id": session.id,
+            "max_duration_seconds": session.max_duration_seconds,
+        }
+        if session.display_name:
+            initial_context["preview_display_name"] = session.display_name
+
+        workflow_run = await db_client.create_workflow_run(
+            workflow_run_name,
+            workflow.id,
+            provider_instance.PROVIDER_NAME,
+            user_id=workflow.user_id,
+            call_type=CallType.INBOUND,
+            initial_context=initial_context,
+            gathered_context={
+                "provider": provider_instance.PROVIDER_NAME,
+                "preview_session_id": session.id,
+                "call_id": normalized_data.call_id,
+            },
+            use_draft=True,
+            organization_id=session.organization_id,
+        )
+
+        session = await db_client.attach_phone_preview_call(
+            session.id,
+            workflow_run_id=workflow_run.id,
+            provider=provider_instance.PROVIDER_NAME,
+            provider_call_id=normalized_data.call_id,
+            clear_destination_phone=True,
+        )
+        if not session:
+            raise HTTPException(status_code=404, detail="preview_session_not_found")
+
+        backend_endpoint, wss_backend_endpoint = await get_backend_endpoints()
+        websocket_url = (
+            f"{wss_backend_endpoint}/api/v1/telephony/ws/"
+            f"{workflow.id}/{workflow.user_id}/{workflow_run.id}"
+        )
+        return await provider_instance.start_inbound_stream(
+            websocket_url=websocket_url,
+            workflow_run_id=workflow_run.id,
+            normalized_data=normalized_data,
+            backend_endpoint=backend_endpoint,
         )
 
     async def _refresh_aws_connect_preview_status(
@@ -466,6 +697,10 @@ class PhonePreviewService:
         draft = await db_client.get_draft_version(session.workflow_id)
         if not draft:
             raise HTTPException(status_code=400, detail="draft_not_ready")
+        await self._require_preview_model_configuration(
+            user_id=workflow.user_id,
+            workflow_configurations=getattr(draft, "workflow_configurations", None),
+        )
 
         quota_result = await check_dograh_quota_by_user_id(
             workflow.user_id, workflow_id=workflow.id
@@ -498,6 +733,7 @@ class PhonePreviewService:
         )
         if not provider.validate_config():
             raise HTTPException(status_code=400, detail="telephony_not_configured")
+        self._require_preview_provider(provider.PROVIDER_NAME, inbound=False)
 
         destination = self._decrypt_destination(session)
         from_number = None
@@ -680,6 +916,76 @@ class PhonePreviewService:
             since=since,
         )
 
+    def _require_preview_provider(self, provider_name: str, *, inbound: bool) -> None:
+        """Allow only providers explicitly approved for Recova-owned preview calls."""
+
+        # Ensure provider modules have registered their ProviderSpec even in
+        # unit tests that import this service directly.
+        import api.services.telephony.providers  # noqa: F401
+
+        spec = get_provider_spec(provider_name)
+        if not spec or not spec.supports_preview_smoke:
+            raise HTTPException(
+                status_code=400,
+                detail="telephony_provider_not_supported_for_preview",
+            )
+        if inbound and not spec.supports_media_transport:
+            raise HTTPException(
+                status_code=400,
+                detail="telephony_provider_not_supported_for_inbound_preview",
+            )
+
+    async def _preview_inbound_phone_number(self, session) -> str | None:
+        configuration_id = getattr(session, "preview_telephony_configuration_id", None)
+        phone_number_id = getattr(session, "preview_from_phone_number_id", None)
+        if not configuration_id or not phone_number_id:
+            return None
+        phone_row = await db_client.get_phone_number_for_config(
+            phone_number_id, configuration_id
+        )
+        if not phone_row or not getattr(phone_row, "is_active", False):
+            return None
+        return getattr(phone_row, "address", None)
+
+    async def _require_preview_model_configuration(
+        self,
+        *,
+        user_id: int,
+        workflow_configurations: dict[str, Any] | None,
+    ) -> None:
+        """Fail before dialing when the workflow owner has no voice model config.
+
+        Phone preview uses live PSTN calls. If the owner has no BYO model
+        configuration, Pipecat can accept the telephony WebSocket and then crash
+        while creating STT/TTS/LLM services. That burns a real call and produces
+        a confusing failure. This preflight keeps the failure local and explicit.
+        """
+
+        user_config = await db_client.get_user_configurations(user_id)
+        user_config = resolve_effective_config(
+            user_config,
+            (workflow_configurations or {}).get("model_overrides"),
+        )
+
+        if (
+            getattr(user_config, "is_realtime", False)
+            and getattr(user_config, "realtime", None) is not None
+        ):
+            # Realtime handles speech-to-speech, but the pipeline still creates
+            # a side-channel text LLM for variable extraction and inference.
+            required_fields = ("realtime", "llm")
+        else:
+            required_fields = ("stt", "tts", "llm")
+
+        if not all(
+            _preview_config_has_service(user_config, field_name)
+            for field_name in required_fields
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="model_configuration_required",
+            )
+
     def _selected_org(self, user: UserModel) -> int:
         if not getattr(user, "selected_organization_id", None):
             raise HTTPException(status_code=400, detail="no_organization_selected")
@@ -695,7 +1001,13 @@ class PhonePreviewService:
             raise HTTPException(status_code=404, detail="preview_session_not_found")
         return session
 
-    def _session_result(self, session, *, otp_required: bool) -> PhonePreviewResult:
+    def _session_result(
+        self,
+        session,
+        *,
+        otp_required: bool,
+        inbound_phone_number: str | None = None,
+    ) -> PhonePreviewResult:
         return PhonePreviewResult(
             session_id=session.id,
             status=session.status,
@@ -705,6 +1017,7 @@ class PhonePreviewService:
             workflow_run_id=session.workflow_run_id,
             provider_call_id=session.provider_call_id,
             failure_reason=session.failure_reason,
+            inbound_phone_number=inbound_phone_number,
         )
 
 

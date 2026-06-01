@@ -20,6 +20,10 @@ from api.services.telephony.providers.aws_connect.config import (
     AWSConnectConfigurationRequest,
     AWSConnectConfigurationResponse,
 )
+from api.services.telephony.providers.clawops.config import (
+    ClawOpsConfigurationRequest,
+    ClawOpsConfigurationResponse,
+)
 from api.services.telephony.providers.cloudonix.config import (
     CloudonixConfigurationRequest,
     CloudonixConfigurationResponse,
@@ -52,6 +56,7 @@ TelephonyConfigRequest = Annotated[
     Union[
         ARIConfigurationRequest,
         AWSConnectConfigurationRequest,
+        ClawOpsConfigurationRequest,
         CloudonixConfigurationRequest,
         PlivoConfigurationRequest,
         TelnyxConfigurationRequest,
@@ -76,6 +81,7 @@ class TelephonyConfigurationResponse(BaseModel):
     vonage: Optional[VonageConfigurationResponse] = None
     vobiz: Optional[VobizConfigurationResponse] = None
     cloudonix: Optional[CloudonixConfigurationResponse] = None
+    clawops: Optional[ClawOpsConfigurationResponse] = None
     ari: Optional[ARIConfigurationResponse] = None
     aws_connect: Optional[AWSConnectConfigurationResponse] = None
     telnyx: Optional[TelnyxConfigurationResponse] = None
@@ -142,6 +148,8 @@ __all__ = [
     "ARIConfigurationResponse",
     "AWSConnectConfigurationRequest",
     "AWSConnectConfigurationResponse",
+    "ClawOpsConfigurationRequest",
+    "ClawOpsConfigurationResponse",
     "CloudonixConfigurationRequest",
     "CloudonixConfigurationResponse",
     "PlivoConfigurationRequest",

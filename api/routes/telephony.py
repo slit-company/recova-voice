@@ -747,10 +747,43 @@ async def handle_inbound_run(request: Request):
         config, phone_row = match
         telephony_configuration_id = config.id
 
+        # 2. Verify webhook signature against the matched config's
+        # credentials before either static routing or preview routing. This is
+        # intentionally before the inbound_workflow_id check so the Recova
+        # representative number can serve short-lived canvas preview
+        # reservations without assigning the number permanently to one
+        # workflow.
+        provider_instance = await get_telephony_provider_by_id(
+            telephony_configuration_id, config.organization_id
+        )
+        signature_valid = await provider_instance.verify_inbound_signature(
+            str(request.url), webhook_data, headers, raw_body
+        )
+        if not signature_valid:
+            logger.warning(
+                f"/inbound/run: signature validation failed for "
+                f"{provider_class.PROVIDER_NAME}"
+            )
+            return provider_class.generate_validation_error_response(
+                TelephonyError.SIGNATURE_VALIDATION_FAILED
+            )
+
         if not phone_row.inbound_workflow_id:
+            from api.services.phone_preview.service import phone_preview_service
+
+            preview_response = await phone_preview_service.answer_inbound_preview(
+                provider_instance=provider_instance,
+                normalized_data=normalized_data,
+                organization_id=config.organization_id,
+                telephony_configuration_id=config.id,
+                from_phone_number_id=phone_row.id,
+            )
+            if preview_response is not None:
+                return preview_response
+
             logger.warning(
                 "/inbound/run: called number [redacted] has no "
-                "inbound_workflow_id assigned"
+                "inbound_workflow_id assigned and no matching preview reservation"
             )
             return provider_class.generate_validation_error_response(
                 TelephonyError.WORKFLOW_NOT_FOUND
@@ -768,22 +801,6 @@ async def handle_inbound_run(request: Request):
                 TelephonyError.WORKFLOW_NOT_FOUND
             )
         user_id = workflow.user_id
-
-        # 3. Verify webhook signature against the matched config's credentials.
-        provider_instance = await get_telephony_provider_by_id(
-            telephony_configuration_id, config.organization_id
-        )
-        signature_valid = await provider_instance.verify_inbound_signature(
-            str(request.url), webhook_data, headers, raw_body
-        )
-        if not signature_valid:
-            logger.warning(
-                f"/inbound/run: signature validation failed for "
-                f"{provider_class.PROVIDER_NAME}"
-            )
-            return provider_class.generate_validation_error_response(
-                TelephonyError.SIGNATURE_VALIDATION_FAILED
-            )
 
         # 4. Quota check (use the workflow's model_overrides if set).
         quota_result = await check_dograh_quota_by_user_id(
