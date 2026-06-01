@@ -58,6 +58,8 @@ from pipecat.services.speechmatics.stt import (
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.xml_function_tag_filter import XMLFunctionTagFilter
 
+OPENAI_TTS_NATIVE_SAMPLE_RATE = 24000
+
 if TYPE_CHECKING:
     from api.services.pipecat.audio_config import AudioConfig
 
@@ -263,6 +265,7 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
     elif user_config.tts.provider == ServiceProviders.OPENAI.value:
         return OpenAITTSService(
             api_key=user_config.tts.api_key,
+            sample_rate=OPENAI_TTS_NATIVE_SAMPLE_RATE,
             settings=OpenAITTSSettings(model=user_config.tts.model),
             text_filters=[xml_function_tag_filter],
             skip_aggregator_types=["recording_router", "recording"],

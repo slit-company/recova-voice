@@ -34,6 +34,7 @@ type PreviewMode = "outbound" | "inbound";
 type BusyState = "saving" | "starting" | "verifying" | "calling" | "waiting" | null;
 type ExtendedPhonePreviewResponse = PhonePreviewResponse & {
     inbound_phone_number?: string | null;
+    dev_otp_code?: string | null;
 };
 
 interface PhoneCallDialogProps {
@@ -76,6 +77,7 @@ const expiresAtFrom = (data: PhonePreviewResponse) => data.expires_at ?? "";
 const workflowRunIdFrom = (data: PhonePreviewResponse) => data.workflow_run_id ?? null;
 const failureReasonFrom = (data: PhonePreviewResponse) => data.failure_reason ?? null;
 const inboundPhoneNumberFrom = (data: ExtendedPhonePreviewResponse) => data.inbound_phone_number ?? "";
+const devOtpCodeFrom = (data: ExtendedPhonePreviewResponse) => data.dev_otp_code ?? "";
 
 export const PhoneCallDialog = ({
     open,
@@ -91,6 +93,7 @@ export const PhoneCallDialog = ({
     const [phoneNumber, setPhoneNumber] = useState("");
     const [previewMode, setPreviewMode] = useState<PreviewMode>("outbound");
     const [otpCode, setOtpCode] = useState("");
+    const [devOtpCode, setDevOtpCode] = useState("");
     const [sessionId, setSessionId] = useState("");
     const [maskedPhone, setMaskedPhone] = useState("");
     const [inboundPhoneNumber, setInboundPhoneNumber] = useState("");
@@ -111,6 +114,7 @@ export const PhoneCallDialog = ({
         setPhoneNumber("");
         setPreviewMode("outbound");
         setOtpCode("");
+        setDevOtpCode("");
         setSessionId("");
         setMaskedPhone("");
         setInboundPhoneNumber("");
@@ -141,11 +145,16 @@ export const PhoneCallDialog = ({
         const nextWorkflowRunId = workflowRunIdFrom(data);
         const failureReason = failureReasonFrom(data);
         const nextInboundPhoneNumber = inboundPhoneNumberFrom(data);
+        const nextDevOtpCode = devOtpCodeFrom(data);
 
         if (nextSessionId) setSessionId(nextSessionId);
         if (nextMaskedPhone) setMaskedPhone(nextMaskedPhone);
         if (nextExpiresAt) setExpiresAt(nextExpiresAt);
         if (nextInboundPhoneNumber) setInboundPhoneNumber(nextInboundPhoneNumber);
+        if (nextDevOtpCode) {
+            setDevOtpCode(nextDevOtpCode);
+            setOtpCode(nextDevOtpCode);
+        }
         setStatus((current) => data.status ?? current);
         setWorkflowRunId(nextWorkflowRunId);
         if (failureReason) {
@@ -322,10 +331,13 @@ export const PhoneCallDialog = ({
             const nextSessionId = sessionIdFrom(data);
             const nextMaskedPhone = maskedPhoneFrom(data);
             const nextExpiresAt = expiresAtFrom(data);
+            const nextDevOtpCode = devOtpCodeFrom(data);
 
             setSessionId(nextSessionId);
             setMaskedPhone(nextMaskedPhone);
             setExpiresAt(nextExpiresAt);
+            setDevOtpCode(nextDevOtpCode);
+            if (nextDevOtpCode) setOtpCode(nextDevOtpCode);
             setStatus(data.status ?? (otpRequiredFrom(data) ? "pending_verification" : "verified"));
 
             if (otpRequiredFrom(data)) {
@@ -375,6 +387,7 @@ export const PhoneCallDialog = ({
 
     const resetToEntry = () => {
         setOtpCode("");
+        setDevOtpCode("");
         setSessionId("");
         setMaskedPhone("");
         setInboundPhoneNumber("");
@@ -495,6 +508,19 @@ export const PhoneCallDialog = ({
                                     </p>
                                 )}
                             </div>
+                            {devOtpCode && (
+                                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
+                                    <p className="font-medium text-amber-800 dark:text-amber-200">
+                                        {t("phoneCall.devOtpTitle")}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                        {t("phoneCall.devOtpDescription")}
+                                    </p>
+                                    <p className="mt-2 w-fit rounded bg-background px-2 py-1 font-mono text-lg font-semibold tracking-widest">
+                                        {devOtpCode}
+                                    </p>
+                                </div>
+                            )}
                             <div className="space-y-1.5">
                                 <Label htmlFor="preview-otp">{t("phoneCall.otpLabel")}</Label>
                                 <Input
