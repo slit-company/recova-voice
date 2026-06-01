@@ -80,6 +80,11 @@ def _normalize_pstn(digits: str, country_hint: Optional[str]) -> NormalizedAddre
         dial = get_country_code(country_hint)
         if dial:
             country_code = country_hint.upper()
+            if country_code == "KR" and digits.startswith(f"{dial}0"):
+                # Korean local numbers are commonly written with a trunk
+                # prefix (010/070/02). In international form that trunk "0"
+                # must be removed: +82 10..., not +82 010....
+                digits = f"{dial}{digits[len(dial) + 1 :]}"
             if not digits.startswith(dial):
                 stripped = digits.lstrip("0")
                 # Only apply the hint if doing so yields a sane E.164 length.

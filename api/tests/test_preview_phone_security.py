@@ -16,6 +16,7 @@ from api.services.phone_preview.config import get_preview_telephony_settings
 from api.services.phone_preview.privacy import (
     global_phone_hash,
     phone_hash,
+    normalize_preview_phone,
     sanitize_preview_workflow_run_logs,
     sanitize_preview_workflow_run_contexts,
 )
@@ -38,6 +39,22 @@ def test_kr_phone_normalization_supports_local_mobile_numbers():
     assert normalized.address_type == "pstn"
     assert normalized.country_code == "KR"
     assert normalize_kr_phone_number("01012345678") == "+821012345678"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("010-1234-5678", "+821012345678"),
+        ("+82 10 1234 5678", "+821012345678"),
+        ("+82 010 1234 5678", "+821012345678"),
+        ("8201012345678", "+821012345678"),
+    ],
+)
+def test_preview_phone_normalization_removes_korean_trunk_zero_after_country_code(
+    raw, expected
+):
+    assert normalize_preview_phone(raw) == expected
+    assert normalize_telephony_address(raw, country_hint="KR").canonical == expected
 
 
 def test_phone_mask_and_hash_are_safe_for_preview_storage(monkeypatch):

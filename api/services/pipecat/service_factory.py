@@ -59,6 +59,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.text.xml_function_tag_filter import XMLFunctionTagFilter
 
 OPENAI_TTS_NATIVE_SAMPLE_RATE = 24000
+OPENAI_TTS_AGGREGATION_SILENCE_SECONDS = 0.35
 
 if TYPE_CHECKING:
     from api.services.pipecat.audio_config import AudioConfig
@@ -250,7 +251,11 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
         transport_type: Type of transport (e.g., 'twilio', 'webrtc')
     """
     logger.info(
-        f"Creating TTS service: provider={user_config.tts.provider}, model={user_config.tts.model}"
+        "Creating TTS service: "
+        f"provider={user_config.tts.provider}, "
+        f"model={user_config.tts.model}, "
+        f"voice={getattr(user_config.tts, 'voice', None)}, "
+        f"speed={getattr(user_config.tts, 'speed', None)}"
     )
     # Create function call filter to prevent TTS from speaking function call tags
     xml_function_tag_filter = XMLFunctionTagFilter()
@@ -263,13 +268,18 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
             silence_time_s=1.0,
         )
     elif user_config.tts.provider == ServiceProviders.OPENAI.value:
+        speed = getattr(user_config.tts, "speed", None)
         return OpenAITTSService(
             api_key=user_config.tts.api_key,
             sample_rate=OPENAI_TTS_NATIVE_SAMPLE_RATE,
-            settings=OpenAITTSSettings(model=user_config.tts.model),
+            settings=OpenAITTSSettings(
+                model=user_config.tts.model,
+                voice=getattr(user_config.tts, "voice", None) or "alloy",
+                **({"speed": speed} if speed is not None else {}),
+            ),
             text_filters=[xml_function_tag_filter],
             skip_aggregator_types=["recording_router", "recording"],
-            silence_time_s=1.0,
+            silence_time_s=OPENAI_TTS_AGGREGATION_SILENCE_SECONDS,
         )
     elif user_config.tts.provider == ServiceProviders.GOOGLE.value:
         model = getattr(user_config.tts, "model", None) or "chirp_3_hd"

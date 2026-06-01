@@ -671,7 +671,9 @@ export const messages = {
     "phoneCall.nameLabel": "Name (optional)",
     "phoneCall.namePlaceholder": "Your name",
     "phoneCall.phoneLabel": "Phone number",
-    "phoneCall.phoneHelp": "Korean mobile numbers such as 010-1234-5678 are accepted and sent as E.164.",
+    "phoneCall.phoneHelp": "Use 010-1234-5678 or +82 10-1234-5678. In international format, drop the domestic 0 after +82.",
+    "phoneCall.phoneFormatInvalid": "Enter a Korean mobile number as 010-1234-5678 or +82 10-1234-5678. Do not use +82 010....",
+    "phoneCall.phoneNormalized": "Will be sent as",
     "phoneCall.unsavedDraftWillSave":
       "Your latest canvas changes will be saved before Recova starts the preview call.",
     "phoneCall.phoneRequired": "Enter a phone number first.",
@@ -1422,7 +1424,9 @@ export const messages = {
     "phoneCall.nameLabel": "이름 (선택)",
     "phoneCall.namePlaceholder": "이름",
     "phoneCall.phoneLabel": "전화번호",
-    "phoneCall.phoneHelp": "010-1234-5678 같은 한국 휴대폰 번호를 입력하면 E.164 형식으로 전송됩니다.",
+    "phoneCall.phoneHelp": "010-1234-5678 또는 +82 10-1234-5678로 입력하세요. 국제 형식에서는 +82 뒤의 국내용 0을 빼야 합니다.",
+    "phoneCall.phoneFormatInvalid": "한국 휴대폰 번호를 010-1234-5678 또는 +82 10-1234-5678 형식으로 입력하세요. +82 010...은 쓰지 않습니다.",
+    "phoneCall.phoneNormalized": "전송 형식",
     "phoneCall.unsavedDraftWillSave":
       "전화 프리뷰를 시작하기 전에 캔버스의 최신 변경사항을 저장합니다.",
     "phoneCall.phoneRequired": "전화번호를 먼저 입력해 주세요.",

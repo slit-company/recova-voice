@@ -799,6 +799,12 @@ class OpenAITTSService(BaseTTSConfiguration):
         default="alloy",
         description="OpenAI TTS voice name.",
     )
+    speed: float = Field(
+        default=1.2,
+        ge=0.25,
+        le=2.0,
+        description="OpenAI TTS speech speed multiplier. Recova defaults slightly faster than 1.0 for phone previews.",
+    )
 
 
 DOGRAH_TTS_MODELS = ["default"]

@@ -130,6 +130,12 @@ def test_validate_config_requires_signing_key_and_from_number():
     assert _provider(from_numbers=[]).validate_config() is False
 
 
+def test_to_clawops_number_removes_korean_trunk_zero_after_country_code():
+    assert ClawOpsProvider._to_clawops_number("+821012345678") == "01012345678"
+    assert ClawOpsProvider._to_clawops_number("010-1234-5678") == "01012345678"
+    assert ClawOpsProvider._to_clawops_number("+82 010 1234 5678") == "01012345678"
+
+
 @pytest.mark.asyncio
 async def test_initiate_call_uses_clawops_calls_api_and_korean_domestic_numbers():
     fake_session = _FakeSession(

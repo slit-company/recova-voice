@@ -79,6 +79,38 @@ const failureReasonFrom = (data: PhonePreviewResponse) => data.failure_reason ??
 const inboundPhoneNumberFrom = (data: ExtendedPhonePreviewResponse) => data.inbound_phone_number ?? "";
 const devOtpCodeFrom = (data: ExtendedPhonePreviewResponse) => data.dev_otp_code ?? "";
 
+const PHONE_NUMBER_FORMAT_CHARS = /[\s\-().]/g;
+
+const normalizeKoreanPreviewPhoneInput = (value: string) => {
+    const compact = value.trim().replace(PHONE_NUMBER_FORMAT_CHARS, "");
+    if (!compact) return { normalized: "", isValid: false };
+
+    let normalized = compact;
+    if (normalized.startsWith("+820")) {
+        normalized = `+82${normalized.slice(4)}`;
+    } else if (normalized.startsWith("820")) {
+        normalized = `+82${normalized.slice(3)}`;
+    } else if (normalized.startsWith("+82")) {
+        normalized = `+${normalized.slice(1).replace(/\D/g, "")}`;
+    } else if (normalized.startsWith("82")) {
+        normalized = `+${normalized.replace(/\D/g, "")}`;
+    } else {
+        const digits = normalized.replace(/\D/g, "");
+        if (digits.startsWith("010")) {
+            normalized = `+82${digits.slice(1)}`;
+        } else if (digits.startsWith("10") && digits.length === 10) {
+            normalized = `+82${digits}`;
+        } else {
+            normalized = compact.startsWith("+") ? compact : digits;
+        }
+    }
+
+    return {
+        normalized,
+        isValid: /^\+8210\d{8}$/.test(normalized),
+    };
+};
+
 export const PhoneCallDialog = ({
     open,
     onOpenChange,
@@ -106,6 +138,10 @@ export const PhoneCallDialog = ({
     const [success, setSuccess] = useState<string | null>(null);
 
     const normalizedDisplayName = useMemo(() => displayName.trim(), [displayName]);
+    const phoneValidation = useMemo(
+        () => normalizeKoreanPreviewPhoneInput(phoneNumber),
+        [phoneNumber],
+    );
 
     useEffect(() => {
         if (!open) return;
@@ -309,9 +345,12 @@ export const PhoneCallDialog = ({
     };
 
     const handleStartPreview = async () => {
-        const trimmedPhone = phoneNumber.trim();
-        if (!trimmedPhone) {
+        if (!phoneNumber.trim()) {
             setError(t("phoneCall.phoneRequired"));
+            return;
+        }
+        if (!phoneValidation.isValid) {
+            setError(t("phoneCall.phoneFormatInvalid"));
             return;
         }
 
@@ -320,13 +359,16 @@ export const PhoneCallDialog = ({
         setBusy("starting");
 
         try {
+            if (phoneValidation.normalized !== phoneNumber) {
+                setPhoneNumber(phoneValidation.normalized);
+            }
             await saveDraftIfNeeded();
 
             setBusy("starting");
             const data = await startPreview({
                 workflow_id: workflowId,
                 display_name: normalizedDisplayName || null,
-                phone_number: trimmedPhone,
+                phone_number: phoneValidation.normalized,
             });
             const nextSessionId = sessionIdFrom(data);
             const nextMaskedPhone = maskedPhoneFrom(data);
@@ -478,13 +520,26 @@ export const PhoneCallDialog = ({
                             <div className="space-y-1.5">
                                 <Label htmlFor="preview-phone-number">{t("phoneCall.phoneLabel")}</Label>
                                 <PhoneInput
-                                    inputProps={{ id: "preview-phone-number", name: "preview-phone-number" }}
+                                    inputProps={{
+                                        id: "preview-phone-number",
+                                        name: "preview-phone-number",
+                                        placeholder: "010-1234-5678",
+                                    }}
                                     defaultCountry="kr"
                                     value={phoneNumber}
                                     onChange={handlePhoneInputChange}
                                     disabled={busy !== null}
                                 />
                                 <p className="text-xs text-muted-foreground">{t("phoneCall.phoneHelp")}</p>
+                                {phoneNumber.trim() && !phoneValidation.isValid && (
+                                    <p className="text-xs text-red-600">{t("phoneCall.phoneFormatInvalid")}</p>
+                                )}
+                                {phoneValidation.isValid && (
+                                    <p className="text-xs text-muted-foreground">
+                                        {t("phoneCall.phoneNormalized")}{" "}
+                                        <span className="font-mono">{phoneValidation.normalized}</span>
+                                    </p>
+                                )}
                             </div>
 
                             {hasUnsavedChanges && (
@@ -592,7 +647,10 @@ export const PhoneCallDialog = ({
                                     {t("common.cancel")}
                                 </Button>
                             </DialogClose>
-                            <Button onClick={handleStartPreview} disabled={busy !== null || !phoneNumber.trim()}>
+                            <Button
+                                onClick={handleStartPreview}
+                                disabled={busy !== null || !phoneNumber.trim() || !phoneValidation.isValid}
+                            >
                                 {busy ? (
                                     <>
                                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
