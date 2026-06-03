@@ -33,6 +33,9 @@ interface SchemaProperty {
     format?: string;
     multiline?: boolean;
     docs_url?: string;
+    hidden?: boolean;
+    secret?: boolean;
+    writeOnly?: boolean;
 }
 
 interface ProviderSchema {
@@ -112,6 +115,33 @@ function getGlobalSummary(
     return model ? `${providerLabel} / ${model}` : providerLabel || provider;
 }
 
+function getActualSchema(
+    schema: SchemaProperty | undefined,
+    providerSchema: ProviderSchema,
+): SchemaProperty | undefined {
+    if (!schema?.$ref || !providerSchema.$defs) return schema;
+    return providerSchema.$defs[schema.$ref.split('/').pop() || ''];
+}
+
+function getFieldSchema(
+    providerSchema: ProviderSchema | undefined,
+    field: string,
+): SchemaProperty | undefined {
+    if (!providerSchema) return undefined;
+    return getActualSchema(providerSchema.properties[field], providerSchema);
+}
+
+function isHiddenField(
+    providerSchema: ProviderSchema | undefined,
+    field: string,
+): boolean {
+    return !!getFieldSchema(providerSchema, field)?.hidden;
+}
+
+function isSecretField(schema: SchemaProperty | undefined): boolean {
+    return !!(schema?.secret || schema?.writeOnly || schema?.format === "password");
+}
+
 export function ServiceConfigurationForm({
     mode,
     currentOverrides,
@@ -156,7 +186,6 @@ export function ServiceConfigurationForm({
     const {
         register,
         handleSubmit,
-        formState: { },
         reset,
         getValues,
         setValue,
@@ -240,6 +269,10 @@ export function ServiceConfigurationForm({
                     : response.data![service as "llm" | "tts" | "stt" | "embeddings"] as Record<string, ProviderSchema> | undefined;
 
                 if (src?.provider) {
+                    const currentProviderSchema = src.provider
+                        ? schemaSource?.[src.provider as string]
+                        : undefined;
+
                     Object.entries(src).forEach(([field, value]) => {
                         if (field === "api_key") {
                             if (mode === 'override') {
@@ -262,7 +295,7 @@ export function ServiceConfigurationForm({
                                     loadedApiKeys[service] = value ? [value as string] : [""];
                                 }
                             }
-                        } else if (field !== "provider") {
+                        } else if (field !== "provider" && !isHiddenField(currentProviderSchema, field)) {
                             defaultValues[`${service}_${field}`] = value as string | number | boolean;
                         }
                     });
@@ -271,7 +304,7 @@ export function ServiceConfigurationForm({
                     if (properties) {
                         Object.entries(properties).forEach(([field, schema]) => {
                             const key = `${service}_${field}`;
-                            if (field !== "provider" && field !== "api_key" && schema.default !== undefined && !(key in defaultValues)) {
+                            if (field !== "provider" && field !== "api_key" && !isHiddenField(schemaSource?.[selectedProviders[service]], field) && schema.default !== undefined && !(key in defaultValues)) {
                                 defaultValues[key] = schema.default;
                             }
                         });
@@ -280,7 +313,7 @@ export function ServiceConfigurationForm({
                     const properties = schemaSource?.[selectedProviders[service]]?.properties as Record<string, SchemaProperty>;
                     if (properties) {
                         Object.entries(properties).forEach(([field, schema]) => {
-                            if (field !== "provider" && schema.default !== undefined) {
+                            if (field !== "provider" && !isHiddenField(schemaSource?.[selectedProviders[service]], field) && schema.default !== undefined) {
                                 defaultValues[`${service}_${field}`] = schema.default;
                             }
                         });
@@ -307,9 +340,8 @@ export function ServiceConfigurationForm({
                     : (configSource as Record<string, unknown> | null)?.[service] as Record<string, unknown> | undefined;
 
                 Object.entries(providerSchema.properties).forEach(([field, schema]) => {
-                    const actualSchema = (schema as SchemaProperty).$ref && providerSchema.$defs
-                        ? providerSchema.$defs[(schema as SchemaProperty).$ref!.split('/').pop() || '']
-                        : schema as SchemaProperty;
+                    if (isHiddenField(providerSchema, field)) return;
+                    const actualSchema = getActualSchema(schema as SchemaProperty, providerSchema);
 
                     if (!actualSchema?.allow_custom_input || !actualSchema?.examples) return;
 
@@ -382,7 +414,7 @@ export function ServiceConfigurationForm({
         if (schemas?.[service]?.[providerName]) {
             const providerSchema = schemas[service][providerName];
             Object.entries(providerSchema.properties).forEach(([field, schema]: [string, SchemaProperty]) => {
-                if (field !== "provider" && schema.default !== undefined) {
+                if (field !== "provider" && !isHiddenField(providerSchema, field) && schema.default !== undefined) {
                     preservedValues[`${service}_${field}`] = schema.default;
                 }
             });
@@ -403,7 +435,7 @@ export function ServiceConfigurationForm({
     };
 
     const buildServiceConfig = (service: ServiceSegment, data: FormValues) => {
-        const config: Record<string, string | number | string[]> = {
+        const config: Record<string, string | number | boolean | string[]> = {
             provider: serviceProviders[service],
         };
         const keys = apiKeys[service].map(k => k.trim()).filter(k => k.length > 0);
@@ -414,7 +446,7 @@ export function ServiceConfigurationForm({
             if (!property.startsWith(`${service}_`)) return;
             const field = property.slice(service.length + 1);
             if (field === "api_key" || field === "provider") return;
-            config[field] = value as string | number;
+            config[field] = value as string | number | boolean;
         });
         return config;
     };
@@ -475,7 +507,7 @@ export function ServiceConfigurationForm({
         const providerSchema = schemas?.[service]?.[currentProvider];
         if (!providerSchema) return [];
         return Object.keys(providerSchema.properties).filter(
-            field => field !== "provider" && field !== "api_key"
+            field => field !== "provider" && field !== "api_key" && !isHiddenField(providerSchema, field)
         );
     };
 
@@ -536,9 +568,7 @@ export function ServiceConfigurationForm({
                     <div className="grid grid-cols-2 gap-4">
                         {configFields.slice(1).map((field) => {
                             const fieldSchema = providerSchema.properties[field];
-                            const actualFieldSchema = fieldSchema?.$ref && providerSchema.$defs
-                                ? providerSchema.$defs[fieldSchema.$ref.split('/').pop() || '']
-                                : fieldSchema;
+                            const actualFieldSchema = getActualSchema(fieldSchema, providerSchema);
                             const fullWidth = actualFieldSchema?.multiline;
                             return (
                                 <div key={field} className={`space-y-2 ${fullWidth ? "col-span-2" : ""}`}>
@@ -550,14 +580,14 @@ export function ServiceConfigurationForm({
                     </div>
                 )}
 
-                {currentProvider && providerSchema && providerSchema.properties.api_key && (
+                {currentProvider && providerSchema && providerSchema.properties.api_key && !isHiddenField(providerSchema, "api_key") && (
                     <div className="space-y-2">
                         <Label>{mode === 'override' ? 'API Key (leave empty to use global)' : 'API Key(s)'}</Label>
                         {renderFieldDescription("api_key", providerSchema)}
                         {apiKeys[service].map((key, index) => (
                             <div key={index} className="flex gap-2">
                                 <Input
-                                    type="text"
+                                    type="password"
                                     placeholder="Enter API key"
                                     value={key}
                                     onChange={(e) => {
@@ -607,10 +637,7 @@ export function ServiceConfigurationForm({
 
     const renderFieldDescription = (field: string, providerSchema: ProviderSchema) => {
         const schema = providerSchema.properties[field];
-        if (!schema) return null;
-        const actualSchema = schema.$ref && providerSchema.$defs
-            ? providerSchema.$defs[schema.$ref.split('/').pop() || '']
-            : schema;
+        const actualSchema = getActualSchema(schema, providerSchema);
         if (!actualSchema?.description && !actualSchema?.docs_url) return null;
         return (
             <p className="text-xs text-muted-foreground">
@@ -640,9 +667,7 @@ export function ServiceConfigurationForm({
 
     const renderFieldInput = (service: ServiceSegment, field: string, providerSchema: ProviderSchema) => {
         const schema = providerSchema.properties[field];
-        const actualSchema = schema.$ref && providerSchema.$defs
-            ? providerSchema.$defs[schema.$ref.split('/').pop() || '']
-            : schema;
+        const actualSchema = getActualSchema(schema, providerSchema);
 
         if (service === "tts" && field === "voice" && !actualSchema?.allow_custom_input) {
             const hasVoiceOptions = actualSchema?.enum || actualSchema?.examples;
@@ -669,7 +694,7 @@ export function ServiceConfigurationForm({
                 return (
                     <div className="space-y-2">
                         <Input
-                            type="text"
+                            type={isSecretField(actualSchema) ? "password" : "text"}
                             placeholder={`Enter ${field}`}
                             value={currentValue}
                             onChange={(e) => {
@@ -786,9 +811,20 @@ export function ServiceConfigurationForm({
             );
         }
 
+        if (actualSchema?.type === "boolean") {
+            return (
+                <Switch
+                    checked={!!watch(`${service}_${field}`)}
+                    onCheckedChange={(checked) => {
+                        setValue(`${service}_${field}`, checked, { shouldDirty: true });
+                    }}
+                />
+            );
+        }
+
         return (
             <Input
-                type={actualSchema?.type === "number" ? "number" : "text"}
+                type={actualSchema?.type === "number" ? "number" : isSecretField(actualSchema) ? "password" : "text"}
                 {...(actualSchema?.type === "number" && { step: "any" })}
                 placeholder={`Enter ${field}`}
                 {...register(`${service}_${field}`, {

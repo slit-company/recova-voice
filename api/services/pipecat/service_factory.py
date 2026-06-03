@@ -7,6 +7,10 @@ from loguru import logger
 from api.constants import MPS_API_URL
 from api.services.configuration.registry import ServiceProviders
 from api.services.pipecat.minimax_tts import MiniMaxOwnedSessionTTSService
+from api.services.pipecat.returnzero_stt import (
+    ReturnZeroSTTService,
+    ReturnZeroSTTSettings,
+)
 from pipecat.services.assemblyai.stt import AssemblyAISTTService, AssemblyAISTTSettings
 from pipecat.services.aws.llm import AWSBedrockLLMService, AWSBedrockLLMSettings
 from pipecat.services.azure.llm import AzureLLMService, AzureLLMSettings
@@ -209,6 +213,26 @@ def create_stt_service(
         return GladiaSTTService(
             api_key=user_config.stt.api_key,
             settings=GladiaSTTSettings(**settings_kwargs),
+            sample_rate=audio_config.transport_in_sample_rate,
+        )
+    elif user_config.stt.provider == ServiceProviders.RETURNZERO.value:
+        return ReturnZeroSTTService(
+            client_id=user_config.stt.client_id,
+            client_secret=user_config.stt.client_secret,
+            settings=ReturnZeroSTTSettings(
+                model=user_config.stt.model,
+                language=getattr(user_config.stt, "language", None) or "ko",
+                domain=getattr(user_config.stt, "domain", None) or "CALL",
+                use_itn=getattr(user_config.stt, "use_itn", True),
+                use_disfluency_filter=getattr(
+                    user_config.stt, "use_disfluency_filter", False
+                ),
+                use_profanity_filter=getattr(
+                    user_config.stt, "use_profanity_filter", False
+                ),
+                use_punctuation=getattr(user_config.stt, "use_punctuation", True),
+            ),
+            keyterms=keyterms,
             sample_rate=audio_config.transport_in_sample_rate,
         )
     elif user_config.stt.provider == ServiceProviders.SPEECHMATICS.value:

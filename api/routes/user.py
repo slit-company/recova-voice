@@ -77,11 +77,11 @@ async def get_auth_user(
 
 
 class UserConfigurationRequestResponseSchema(BaseModel):
-    llm: dict[str, Union[str, float, list[str], None]] | None = None
-    tts: dict[str, Union[str, float, list[str], None]] | None = None
-    stt: dict[str, Union[str, float, list[str], None]] | None = None
-    embeddings: dict[str, Union[str, float, list[str], None]] | None = None
-    realtime: dict[str, Union[str, float, list[str], None]] | None = None
+    llm: dict[str, Union[str, float, bool, list[str], None]] | None = None
+    tts: dict[str, Union[str, float, bool, list[str], None]] | None = None
+    stt: dict[str, Union[str, float, bool, list[str], None]] | None = None
+    embeddings: dict[str, Union[str, float, bool, list[str], None]] | None = None
+    realtime: dict[str, Union[str, float, bool, list[str], None]] | None = None
     is_realtime: bool | None = None
     test_phone_number: str | None = None
     timezone: str | None = None

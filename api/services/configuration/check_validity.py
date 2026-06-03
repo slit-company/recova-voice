@@ -55,6 +55,7 @@ class UserConfigurationValidator:
             ServiceProviders.GOOGLE_VERTEX_REALTIME.value: self._check_google_vertex_realtime_api_key,
             ServiceProviders.ASSEMBLYAI.value: self._check_assemblyai_api_key,
             ServiceProviders.GLADIA.value: self._check_gladia_api_key,
+            ServiceProviders.RETURNZERO.value: self._check_returnzero_credentials,
             ServiceProviders.RIME.value: self._check_rime_api_key,
             ServiceProviders.MINIMAX.value: self._check_minimax_api_key,
         }
@@ -106,6 +107,19 @@ class UserConfigurationValidator:
             return []  # Optional service not configured is OK
 
         provider = service_config.provider
+
+        if provider == ServiceProviders.RETURNZERO.value:
+            try:
+                if not self._check_returnzero_credentials(provider, service_config):
+                    return [
+                        {
+                            "model": service_name,
+                            "message": f"Invalid {provider} configuration",
+                        }
+                    ]
+            except ValueError as e:
+                return [{"model": service_name, "message": str(e)}]
+            return []
 
         # Speaches doesn't require an API key
         if provider == ServiceProviders.SPEACHES.value:
@@ -293,6 +307,13 @@ class UserConfigurationValidator:
         return True
 
     def _check_gladia_api_key(self, model: str, api_key: str) -> bool:
+        return True
+
+    def _check_returnzero_credentials(self, model: str, service_config) -> bool:
+        if not getattr(service_config, "client_id", None) or not getattr(
+            service_config, "client_secret", None
+        ):
+            raise ValueError("client_id and client_secret are required for ReturnZero STT")
         return True
 
     def _check_rime_api_key(self, model: str, api_key: str) -> bool:

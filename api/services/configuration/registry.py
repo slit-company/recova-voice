@@ -57,6 +57,7 @@ class ServiceProviders(str, Enum):
     SPEACHES = "speaches"
     ASSEMBLYAI = "assemblyai"
     GLADIA = "gladia"
+    RETURNZERO = "returnzero"
     RIME = "rime"
     MINIMAX = "minimax"
     GOOGLE_VERTEX = "google_vertex"
@@ -81,6 +82,7 @@ class BaseServiceConfiguration(BaseModel):
         ServiceProviders.SPEACHES,
         ServiceProviders.ASSEMBLYAI,
         ServiceProviders.GLADIA,
+        ServiceProviders.RETURNZERO,
         ServiceProviders.RIME,
         ServiceProviders.MINIMAX,
         ServiceProviders.GOOGLE_VERTEX,
@@ -231,6 +233,11 @@ GOOGLE_CLOUD_PROVIDER_MODEL_CONFIG = provider_model_config("Google Cloud")
 SPEECHMATICS_PROVIDER_MODEL_CONFIG = provider_model_config("Speechmatics")
 ASSEMBLYAI_PROVIDER_MODEL_CONFIG = provider_model_config("AssemblyAI")
 GLADIA_PROVIDER_MODEL_CONFIG = provider_model_config("Gladia")
+RETURNZERO_PROVIDER_MODEL_CONFIG = provider_model_config(
+    "ReturnZero",
+    description="ReturnZero RTZR/VITO realtime streaming STT.",
+    provider_docs_url="https://developers.rtzr.ai/docs/stt-streaming/websocket",
+)
 SPEACHES_PROVIDER_MODEL_CONFIG = provider_model_config(
     "Local Models (Speaches)",
     description=(
@@ -1065,6 +1072,68 @@ class OpenAISTTConfiguration(BaseSTTConfiguration):
     )
 
 
+RETURNZERO_STT_MODELS = ["sommers_ko", "sommers_ja", "whisper"]
+RETURNZERO_STT_LANGUAGES = ["ko", "ja", "en"]
+RETURNZERO_STT_DOMAINS = ["CALL", "MEETING"]
+
+
+@register_stt
+class ReturnZeroSTTConfiguration(BaseSTTConfiguration):
+    model_config = RETURNZERO_PROVIDER_MODEL_CONFIG
+    provider: Literal[ServiceProviders.RETURNZERO] = ServiceProviders.RETURNZERO
+    model: str = Field(
+        default="sommers_ko",
+        description="ReturnZero streaming STT model_name.",
+        json_schema_extra={"examples": RETURNZERO_STT_MODELS},
+    )
+    language: str = Field(
+        default="ko",
+        description="Recognition language code. Korean is the default for sommers_ko.",
+        json_schema_extra={
+            "examples": RETURNZERO_STT_LANGUAGES,
+            "allow_custom_input": True,
+            "model_options": {
+                "sommers_ko": ["ko"],
+                "sommers_ja": ["ja"],
+                "whisper": RETURNZERO_STT_LANGUAGES,
+            },
+        },
+    )
+    client_id: str = Field(
+        description="ReturnZero application client ID.",
+    )
+    client_secret: str = Field(
+        description="ReturnZero application client secret.",
+        json_schema_extra={"secret": True},
+    )
+    domain: str = Field(
+        default="CALL",
+        description="Recognition domain hint for ReturnZero.",
+        json_schema_extra={"examples": RETURNZERO_STT_DOMAINS},
+    )
+    use_itn: bool = Field(
+        default=True,
+        description="Apply inverse text normalization to recognized text.",
+    )
+    use_disfluency_filter: bool = Field(
+        default=False,
+        description="Filter filler words and disfluencies.",
+    )
+    use_profanity_filter: bool = Field(
+        default=False,
+        description="Mask profanity in recognized text.",
+    )
+    use_punctuation: bool = Field(
+        default=True,
+        description="Add punctuation to recognized text.",
+    )
+    api_key: str | list[str] | None = Field(
+        default=None,
+        description="Not used for ReturnZero STT. Use client_id and client_secret.",
+        json_schema_extra={"hidden": True},
+    )
+
+
 @register_stt
 class GoogleSTTConfiguration(BaseSTTConfiguration):
     model_config = GOOGLE_CLOUD_PROVIDER_MODEL_CONFIG
@@ -1241,6 +1310,7 @@ STTConfig = Annotated[
         SpeachesSTTConfiguration,
         AssemblyAISTTConfiguration,
         GladiaSTTConfiguration,
+        ReturnZeroSTTConfiguration,
     ],
     Field(discriminator="provider"),
 ]
