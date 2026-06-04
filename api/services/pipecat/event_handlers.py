@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Mapping
 
 from loguru import logger
 
@@ -12,6 +13,7 @@ from api.services.pipecat.in_memory_buffers import (
     InMemoryAudioBuffer,
     InMemoryLogsBuffer,
 )
+from api.services.pipecat.latency_events import build_voice_latency_breakdown_event
 from api.services.pipecat.pipeline_metrics_aggregator import PipelineMetricsAggregator
 from api.services.pipecat.tracing_config import get_trace_url
 from api.services.posthog_client import capture_event
@@ -24,6 +26,103 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.utils.enums import EndTaskReason
+
+
+async def _append_pre_call_fetch_event(
+    *,
+    in_memory_logs_buffer: InMemoryLogsBuffer,
+    workflow_run_id: int,
+    latency_profile: str,
+    waited_seconds: float,
+    late: bool,
+    late_keys: list[str],
+    conflict_keys: list[str],
+    timed_out: bool,
+) -> None:
+    message = build_voice_latency_breakdown_event(
+        workflow_run_id=workflow_run_id,
+        latency_profile=latency_profile,
+        pre_call_fetch_wait_ms=round(waited_seconds * 1000, 3),
+        extra_payload={
+            "pre_call_fetch_late": late,
+            "pre_call_fetch_late_keys": late_keys,
+            "pre_call_fetch_late_conflict_keys": conflict_keys,
+            "pre_call_fetch_timed_out": timed_out,
+        },
+    )
+    try:
+        await in_memory_logs_buffer.append(message)
+    except Exception as e:
+        logger.error(f"Failed to append pre-call fetch latency event: {e}")
+
+
+async def _merge_pre_call_fetch_result(
+    *,
+    workflow_run_id: int,
+    engine: PipecatEngine,
+    fetch_result: Mapping,
+    overwrite_existing: bool,
+) -> tuple[list[str], list[str]]:
+    merged_keys: list[str] = []
+    conflict_keys: list[str] = []
+    for key, value in fetch_result.items():
+        key_text = str(key)
+        if not overwrite_existing and key in engine._call_context_vars:
+            conflict_keys.append(key_text)
+            continue
+        engine._call_context_vars[key] = value
+        merged_keys.append(key_text)
+
+    if merged_keys or conflict_keys:
+        try:
+            await db_client.update_workflow_run(
+                workflow_run_id,
+                initial_context={**engine._call_context_vars},
+            )
+        except Exception as e:
+            logger.error(f"Failed to persist pre-call fetch context: {e}")
+
+    return merged_keys, conflict_keys
+
+
+async def _merge_late_pre_call_fetch_result(
+    *,
+    pre_call_fetch_task: asyncio.Task,
+    workflow_run_id: int,
+    engine: PipecatEngine,
+    in_memory_logs_buffer: InMemoryLogsBuffer,
+    latency_profile: str,
+) -> None:
+    try:
+        fetch_result = await pre_call_fetch_task
+    except asyncio.CancelledError:
+        return
+    except Exception as e:
+        logger.error(f"Late pre-call fetch failed: {e}")
+        return
+
+    if not fetch_result:
+        return
+
+    merged_keys, conflict_keys = await _merge_pre_call_fetch_result(
+        workflow_run_id=workflow_run_id,
+        engine=engine,
+        fetch_result=fetch_result,
+        overwrite_existing=False,
+    )
+    await _append_pre_call_fetch_event(
+        in_memory_logs_buffer=in_memory_logs_buffer,
+        workflow_run_id=workflow_run_id,
+        latency_profile=latency_profile,
+        waited_seconds=0.0,
+        late=True,
+        late_keys=merged_keys,
+        conflict_keys=conflict_keys,
+        timed_out=False,
+    )
+    logger.info(
+        f"Late pre-call fetch merged keys: {merged_keys}, conflicts: {conflict_keys}"
+    )
 
 
 async def _capture_call_event(
@@ -67,6 +166,9 @@ def register_event_handlers(
     pipeline_metrics_aggregator: PipelineMetricsAggregator,
     audio_config=AudioConfig,
     pre_call_fetch_task: asyncio.Task | None = None,
+    pre_call_fetch_timeout_seconds: float = 10.0,
+    pre_call_fetch_required: bool = True,
+    latency_profile: str = "balanced",
     user_provider_id: str | None = None,
     integration_runtime_sessions: list[IntegrationRuntimeSession] | None = None,
 ):
@@ -115,9 +217,16 @@ def register_event_handlers(
                 )
             )
 
-            # Wait for pre-call fetch if in progress, playing ringer meanwhile
+            pre_call_fetch_wait_seconds = 0.0
             if pre_call_fetch_task is not None:
-                if not pre_call_fetch_task.done():
+                fetch_result = {}
+                fetch_timed_out = False
+                if pre_call_fetch_task.done():
+                    try:
+                        fetch_result = pre_call_fetch_task.result()
+                    except Exception as e:
+                        logger.error(f"Pre-call fetch failed before startup: {e}")
+                else:
                     logger.info(
                         "Pre-call fetch still in progress, playing ringer while waiting"
                     )
@@ -130,26 +239,73 @@ def register_event_handlers(
                             queue_frame=transport.output().queue_frame,
                         )
                     )
+                    wait_started_at = asyncio.get_running_loop().time()
                     try:
-                        fetch_result = await pre_call_fetch_task
+                        fetch_awaitable = (
+                            pre_call_fetch_task
+                            if pre_call_fetch_required
+                            else asyncio.shield(pre_call_fetch_task)
+                        )
+                        fetch_result = await asyncio.wait_for(
+                            fetch_awaitable,
+                            timeout=pre_call_fetch_timeout_seconds,
+                        )
+                    except asyncio.TimeoutError:
+                        fetch_timed_out = True
+                        logger.warning(
+                            "Pre-call fetch timed out after {}s; required={}",
+                            pre_call_fetch_timeout_seconds,
+                            pre_call_fetch_required,
+                        )
                     finally:
+                        pre_call_fetch_wait_seconds = (
+                            asyncio.get_running_loop().time() - wait_started_at
+                        )
                         stop_ringer.set()
                         await ringer_task
-                else:
-                    fetch_result = pre_call_fetch_task.result()
 
-                if fetch_result:
-                    engine._call_context_vars.update(fetch_result)
-                    try:
-                        await db_client.update_workflow_run(
-                            workflow_run_id,
-                            initial_context={**engine._call_context_vars},
+                if fetch_timed_out and not pre_call_fetch_required:
+                    asyncio.create_task(
+                        _merge_late_pre_call_fetch_result(
+                            pre_call_fetch_task=pre_call_fetch_task,
+                            workflow_run_id=workflow_run_id,
+                            engine=engine,
+                            in_memory_logs_buffer=in_memory_logs_buffer,
+                            latency_profile=latency_profile,
                         )
-                    except Exception as e:
-                        logger.error(f"Failed to persist pre-call fetch context: {e}")
-                    logger.info(
-                        f"Pre-call fetch complete, merged keys: "
-                        f"{list(fetch_result.keys())}"
+                    )
+                    await _append_pre_call_fetch_event(
+                        in_memory_logs_buffer=in_memory_logs_buffer,
+                        workflow_run_id=workflow_run_id,
+                        latency_profile=latency_profile,
+                        waited_seconds=pre_call_fetch_wait_seconds,
+                        late=True,
+                        late_keys=[],
+                        conflict_keys=[],
+                        timed_out=True,
+                    )
+                else:
+                    merged_keys: list[str] = []
+                    conflict_keys: list[str] = []
+                    if fetch_result:
+                        merged_keys, conflict_keys = await _merge_pre_call_fetch_result(
+                            workflow_run_id=workflow_run_id,
+                            engine=engine,
+                            fetch_result=fetch_result,
+                            overwrite_existing=True,
+                        )
+                        logger.info(
+                            f"Pre-call fetch complete, merged keys: {merged_keys}"
+                        )
+                    await _append_pre_call_fetch_event(
+                        in_memory_logs_buffer=in_memory_logs_buffer,
+                        workflow_run_id=workflow_run_id,
+                        latency_profile=latency_profile,
+                        waited_seconds=pre_call_fetch_wait_seconds,
+                        late=False,
+                        late_keys=merged_keys,
+                        conflict_keys=conflict_keys,
+                        timed_out=fetch_timed_out,
                     )
 
             # Set the start node now (after pre-call fetch data is merged)

@@ -15,16 +15,33 @@ from api.services.pipecat.run_pipeline import _create_realtime_user_turn_config
 
 
 def test_gemini_realtime_uses_local_vad_without_local_interruptions():
-    strategies, vad_analyzer = _create_realtime_user_turn_config(
-        ServiceProviders.GOOGLE_REALTIME.value
-    )
-
+    # Given
+    provider = ServiceProviders.GOOGLE_REALTIME.value
+    # When
+    strategies, vad_analyzer = _create_realtime_user_turn_config(provider)
+    # Then
     assert isinstance(vad_analyzer, SileroVADAnalyzer)
     assert len(strategies.start) == 1
     assert isinstance(strategies.start[0], VADUserTurnStartStrategy)
     assert strategies.start[0]._enable_interruptions is False
     assert len(strategies.stop) == 1
     assert isinstance(strategies.stop[0], SpeechTimeoutUserTurnStopStrategy)
+
+
+def test_gemini_realtime_applies_configured_speech_timeout():
+    # Given
+    provider = ServiceProviders.GOOGLE_REALTIME.value
+    user_speech_timeout_seconds = 0.35
+    # When
+    strategies, vad_analyzer = _create_realtime_user_turn_config(
+        provider,
+        user_speech_timeout_seconds=user_speech_timeout_seconds,
+    )
+    # Then
+    assert isinstance(vad_analyzer, SileroVADAnalyzer)
+    assert len(strategies.stop) == 1
+    assert isinstance(strategies.stop[0], SpeechTimeoutUserTurnStopStrategy)
+    assert strategies.stop[0]._user_speech_timeout == 0.35
 
 
 def test_gemini_vertex_realtime_uses_same_turn_config_as_gemini_live():
@@ -47,6 +64,21 @@ def test_openai_realtime_uses_provider_turn_frames_without_local_vad():
     assert len(strategies.start) == 1
     assert isinstance(strategies.start[0], ExternalUserTurnStartStrategy)
     assert strategies.start[0]._enable_interruptions is False
+    assert len(strategies.stop) == 1
+    assert isinstance(strategies.stop[0], ExternalUserTurnStopStrategy)
+
+
+def test_openai_realtime_ignores_configured_speech_timeout_with_external_turn_frames():
+    # Given
+    provider = ServiceProviders.OPENAI_REALTIME.value
+    user_speech_timeout_seconds = 0.35
+    # When
+    strategies, vad_analyzer = _create_realtime_user_turn_config(
+        provider,
+        user_speech_timeout_seconds=user_speech_timeout_seconds,
+    )
+    # Then
+    assert vad_analyzer is None
     assert len(strategies.stop) == 1
     assert isinstance(strategies.stop[0], ExternalUserTurnStopStrategy)
 

@@ -17,6 +17,8 @@ import { useAuth } from '@/lib/auth';
 import logger from '@/lib/logger';
 import { getRandomId } from '@/lib/utils';
 
+const DEMO_GREETING_TEXT = "안녕하세요, Recova 데모 상담원입니다. 무엇을 도와드릴까요?";
+
 const BLANK_WORKFLOW_DEFINITION = {
     nodes: [
         {
@@ -26,7 +28,9 @@ const BLANK_WORKFLOW_DEFINITION = {
             data: {
                 prompt: "# Goal\nYou are a helpful agent who is handing a conversation over voice with a human. This is a voice conversation, so transcripts can be error prone.\n\n## Rules\n- Language: UK English but does not have to be correct english\n- Keep responses short and 2-3 sentences max\n- If you have to repeat something that you said in your previous two turns, then rephrase a bit while keeping the same meaning. Never repeat the exact same words as in your previous 2 responses.\n\n## Speech Handling\n- There could be multiple transcription errors. \n- Accept variations: yes/yeah/yep/aye, no/nah/nope\n- If user says \"sorry?\" or \"pardon me\" or \"can you repeat\"  or \"what?\", they might not have heard you- so just repeat what you just said.\n\n### Flow\nStart by saying \"Hi\". Be polite and courteous. ",
                 name: "start call",
-                allow_interrupt: false,
+                greeting_type: "text",
+                greeting: DEMO_GREETING_TEXT,
+                allow_interrupt: true,
                 invalid: false,
                 validationMessage: null,
                 add_global_prompt: false,

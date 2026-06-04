@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -5,11 +6,15 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastapi import HTTPException
 from fastapi import Response
+from loguru import logger
 
 from api.services.phone_preview.otp import generate_otp_salt, hash_otp_code
 from api.services.phone_preview.otp_delivery import PhonePreviewOtpDeliveryError
 from api.services.phone_preview.privacy import encrypt_phone, global_phone_hash
-from api.services.phone_preview.service import PhonePreviewService
+from api.services.phone_preview.service import (
+    PhonePreviewService,
+    _log_preview_latency_profile,
+)
 from api.schemas.user_configuration import UserConfiguration
 from api.services.configuration.registry import (
     OpenAILLMService,
@@ -639,6 +644,341 @@ async def test_call_after_verification_uses_system_provider_and_preview_markers(
 
 
 @pytest.mark.asyncio
+async def test_phone_preview_workflow_run_initial_context_carries_runtime_latency_profile(
+    monkeypatch,
+):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_CONFIGURATION_ID", "901")
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    session = SimpleNamespace(
+        id=123,
+        organization_id=11,
+        user_id=7,
+        workflow_id=33,
+        workflow_run_id=None,
+        status="verified",
+        phone_number_hash="hash",
+        phone_number_global_hash="global-hash",
+        phone_number_masked="+82****5678",
+        destination_phone_encrypted=encrypt_phone("+821012345678"),
+        display_name=None,
+        max_duration_seconds=300,
+        expires_at=expires_at,
+        provider_call_id=None,
+        failure_reason=None,
+    )
+    provider = SimpleNamespace(
+        PROVIDER_NAME="clawops",
+        WEBHOOK_ENDPOINT="clawops-voiceml",
+        validate_config=Mock(return_value=True),
+        initiate_call=AsyncMock(
+            return_value=SimpleNamespace(call_id="call-123", provider_metadata={})
+        ),
+    )
+
+    async def create_run(*args, **kwargs):
+        return SimpleNamespace(
+            id=501,
+            name=args[0],
+            initial_context=kwargs["initial_context"],
+        )
+
+    attached_session = SimpleNamespace(
+        **{
+            **session.__dict__,
+            "status": "calling",
+            "workflow_run_id": 501,
+            "provider": "clawops",
+            "provider_call_id": "call-123",
+        }
+    )
+
+    with (
+        patch("api.services.phone_preview.service.db_client") as mock_db,
+        patch(
+            "api.services.phone_preview.service._get_preview_telephony_provider_by_id",
+            new=AsyncMock(return_value=provider),
+        ),
+        patch(
+            "api.services.phone_preview.service.check_dograh_quota_by_user_id",
+            new=AsyncMock(
+                return_value=SimpleNamespace(has_quota=True, error_message="")
+            ),
+        ),
+        patch(
+            "api.services.phone_preview.service.get_backend_endpoints",
+            new=AsyncMock(return_value=("https://api.example.com", "wss://ignored")),
+        ),
+    ):
+        mock_db.begin_phone_preview_call = AsyncMock(return_value=(session, True))
+        mock_db.get_workflow = AsyncMock(
+            return_value=SimpleNamespace(id=33, user_id=99, organization_id=11)
+        )
+        mock_db.get_draft_version = AsyncMock(
+            return_value=SimpleNamespace(
+                id=44,
+                template_context_variables={},
+                workflow_configurations={},
+            )
+        )
+        mock_db.get_user_configurations = AsyncMock(
+            return_value=_valid_voice_user_config()
+        )
+        mock_db.count_phone_preview_sessions_since = AsyncMock(return_value=1)
+        mock_db.create_workflow_run = AsyncMock(side_effect=create_run)
+        mock_db.attach_phone_preview_call = AsyncMock(return_value=attached_session)
+        mock_db.update_workflow_run = AsyncMock()
+
+        result = await service.call(user=user, session_id=123)
+
+    assert result.workflow_run_id == 501
+    create_context = mock_db.create_workflow_run.await_args.kwargs["initial_context"]
+    assert create_context["runtime_latency_profile"] == "speed_demo"
+    update_context = mock_db.update_workflow_run.await_args.kwargs["initial_context"]
+    assert update_context["runtime_latency_profile"] == "speed_demo"
+
+
+def test_phone_preview_logs_runtime_latency_profile_for_operator_qa():
+    # Given
+    messages: list[str] = []
+    sink_id = logger.add(messages.append, format="{message}")
+
+    # When
+    try:
+        _log_preview_latency_profile(
+            session_id=15,
+            workflow_run_id=16,
+            direction="outbound",
+        )
+    finally:
+        logger.remove(sink_id)
+
+    # Then
+    assert any("phone_preview_session_id=15" in message for message in messages)
+    assert any("workflow_run_id=16" in message for message in messages)
+    assert any("direction=outbound" in message for message in messages)
+    assert any("latency_profile=speed_demo" in message for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_phone_preview_uses_speed_demo_latency_profile_without_persisting_workflow(
+    monkeypatch,
+):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_CONFIGURATION_ID", "901")
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    session = SimpleNamespace(
+        id=123,
+        organization_id=11,
+        user_id=7,
+        workflow_id=33,
+        workflow_run_id=None,
+        status="verified",
+        phone_number_hash="hash",
+        phone_number_global_hash="global-hash",
+        phone_number_masked="+82****5678",
+        destination_phone_encrypted=encrypt_phone("+821012345678"),
+        display_name=None,
+        max_duration_seconds=300,
+        expires_at=expires_at,
+        provider_call_id=None,
+        failure_reason=None,
+    )
+    saved_workflow_config = {"latency_profile": "balanced"}
+    provider = SimpleNamespace(
+        PROVIDER_NAME="clawops",
+        WEBHOOK_ENDPOINT="clawops-voiceml",
+        validate_config=Mock(return_value=True),
+        initiate_call=AsyncMock(return_value=SimpleNamespace(call_id="call-123")),
+    )
+    attached_session = SimpleNamespace(
+        **{
+            **session.__dict__,
+            "status": "calling",
+            "workflow_run_id": 501,
+            "provider": "clawops",
+            "provider_call_id": "call-123",
+        }
+    )
+
+    async def create_run(*args, **kwargs):
+        return SimpleNamespace(
+            id=501,
+            name=args[0],
+            initial_context=kwargs["initial_context"],
+        )
+
+    with (
+        patch("api.services.phone_preview.service.db_client") as mock_db,
+        patch(
+            "api.services.phone_preview.service._get_preview_telephony_provider_by_id",
+            new=AsyncMock(return_value=provider),
+        ),
+        patch(
+            "api.services.phone_preview.service.check_dograh_quota_by_user_id",
+            new=AsyncMock(
+                return_value=SimpleNamespace(has_quota=True, error_message="")
+            ),
+        ),
+        patch(
+            "api.services.phone_preview.service.get_backend_endpoints",
+            new=AsyncMock(return_value=("https://api.example.com", "wss://ignored")),
+        ),
+    ):
+        mock_db.begin_phone_preview_call = AsyncMock(return_value=(session, True))
+        mock_db.get_workflow = AsyncMock(
+            return_value=SimpleNamespace(id=33, user_id=99, organization_id=11)
+        )
+        mock_db.get_draft_version = AsyncMock(
+            return_value=SimpleNamespace(
+                id=44,
+                template_context_variables={},
+                workflow_configurations=saved_workflow_config,
+            )
+        )
+        mock_db.get_user_configurations = AsyncMock(
+            return_value=_valid_voice_user_config()
+        )
+        mock_db.count_phone_preview_sessions_since = AsyncMock(return_value=1)
+        mock_db.create_workflow_run = AsyncMock(side_effect=create_run)
+        mock_db.attach_phone_preview_call = AsyncMock(return_value=attached_session)
+        mock_db.update_workflow_run = AsyncMock()
+        mock_db.save_workflow_draft = AsyncMock()
+
+        result = await service.call(user=user, session_id=123)
+
+    assert result.status == "calling"
+    create_context = mock_db.create_workflow_run.await_args.kwargs["initial_context"]
+    assert create_context["runtime_latency_profile"] == "speed_demo"
+    update_context = mock_db.update_workflow_run.await_args.kwargs["initial_context"]
+    assert update_context["runtime_latency_profile"] == "speed_demo"
+    assert saved_workflow_config == {"latency_profile": "balanced"}
+    mock_db.save_workflow_draft.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_phone_preview_inbound_workflow_run_initial_context_carries_runtime_latency_profile(
+    monkeypatch,
+):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    service = PhonePreviewService()
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    session = SimpleNamespace(
+        id=123,
+        organization_id=11,
+        user_id=7,
+        workflow_id=33,
+        workflow_run_id=None,
+        status="calling",
+        phone_number_masked="+82****5678",
+        display_name=None,
+        max_duration_seconds=300,
+        expires_at=expires_at,
+        provider_call_id=None,
+        failure_reason=None,
+    )
+    attached_session = SimpleNamespace(
+        **{
+            **session.__dict__,
+            "workflow_run_id": 501,
+            "provider": "clawops",
+            "provider_call_id": "CA123",
+        }
+    )
+    normalized_data = SimpleNamespace(
+        call_id="CA123",
+        from_number="+821012345678",
+        to_number="+827000000000",
+    )
+    provider = SimpleNamespace(
+        PROVIDER_NAME="clawops",
+        start_inbound_stream=AsyncMock(
+            return_value=Response(content="<Response/>", media_type="application/xml")
+        ),
+    )
+
+    async def create_run(*args, **kwargs):
+        return SimpleNamespace(
+            id=501,
+            name=args[0],
+            initial_context=kwargs["initial_context"],
+        )
+
+    with (
+        patch("api.services.phone_preview.service.db_client") as mock_db,
+        patch(
+            "api.services.phone_preview.service.check_dograh_quota_by_user_id",
+            new=AsyncMock(
+                return_value=SimpleNamespace(has_quota=True, error_message="")
+            ),
+        ),
+        patch(
+            "api.services.phone_preview.service.get_backend_endpoints",
+            new=AsyncMock(
+                return_value=("https://api.example.com", "wss://api.example.com")
+            ),
+        ),
+    ):
+        mock_db.claim_phone_preview_inbound_session = AsyncMock(return_value=session)
+        mock_db.get_workflow = AsyncMock(
+            return_value=SimpleNamespace(id=33, user_id=99, organization_id=11)
+        )
+        mock_db.get_draft_version = AsyncMock(
+            return_value=SimpleNamespace(
+                id=44,
+                template_context_variables={},
+                workflow_configurations={},
+            )
+        )
+        mock_db.get_user_configurations = AsyncMock(
+            return_value=_valid_voice_user_config()
+        )
+        mock_db.create_workflow_run = AsyncMock(side_effect=create_run)
+        mock_db.attach_phone_preview_call = AsyncMock(return_value=attached_session)
+        mock_db.update_phone_preview_session_status = AsyncMock()
+
+        response = await service.answer_inbound_preview(
+            provider_instance=provider,
+            normalized_data=normalized_data,
+            organization_id=11,
+            telephony_configuration_id=901,
+            from_phone_number_id=902,
+        )
+
+    assert response is not None
+    context = mock_db.create_workflow_run.await_args.kwargs["initial_context"]
+    assert context["runtime_latency_profile"] == "speed_demo"
+    assert context["telephony_preview"] is True
+    assert context["direction"] == "inbound"
+
+
+def test_phone_preview_qa_fixture_outputs_workflow_url(tmp_path):
+    from api.scripts.create_phone_preview_qa_fixture import write_fixture_payload
+
+    output = tmp_path / "fixture.json"
+
+    write_fixture_payload(
+        output_path=output,
+        workflow_id=33,
+        session_id=123,
+        auth_token=None,
+        base_url="http://localhost:3000",
+    )
+
+    payload = output.read_text(encoding="utf-8")
+    assert '"workflow_id": 33' in payload
+    assert '"session_id": 123' in payload
+    assert '"auth_token": null' in payload
+    assert '"url": "http://localhost:3000/workflow/33"' in payload
+
+
+@pytest.mark.asyncio
 async def test_call_requires_model_configuration_before_provider_dispatch(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")
@@ -1027,6 +1367,7 @@ async def test_call_is_idempotent_after_session_is_already_calling(monkeypatch):
         phone_number_masked="+82****5678",
         expires_at=expires_at,
         workflow_run_id=501,
+        provider="clawops",
         provider_call_id="call-123",
         failure_reason=None,
     )
@@ -1190,6 +1531,7 @@ async def test_status_marks_completed_run_and_clears_preview_destination():
         phone_number_masked="+82****5678",
         expires_at=expires_at,
         workflow_run_id=501,
+        provider="clawops",
         provider_call_id="call-123",
         failure_reason=None,
     )
@@ -1211,6 +1553,75 @@ async def test_status_marks_completed_run_and_clears_preview_destination():
     mock_db.update_phone_preview_session_status.assert_awaited_once_with(
         123, status="completed", completed=True
     )
+
+
+@pytest.mark.asyncio
+async def test_status_returns_latest_latency_summary_from_workflow_run_logs():
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    session = SimpleNamespace(
+        id=123,
+        status="active",
+        phone_number_masked="+82****5678",
+        expires_at=expires_at,
+        workflow_run_id=501,
+        provider="clawops",
+        provider_call_id="call-123",
+        failure_reason=None,
+    )
+    workflow_run = SimpleNamespace(
+        id=501,
+        is_completed=False,
+        logs={
+            "realtime_feedback_events": [
+                {
+                    "type": "rtf-latency-measured",
+                    "payload": {
+                        "kind": "voice_latency_breakdown",
+                        "workflow_run_id": 501,
+                        "latency_profile": "balanced",
+                        "user_stop_to_bot_started_ms": 999.0,
+                    },
+                },
+                {
+                    "type": "rtf-latency-measured",
+                    "payload": {
+                        "kind": "voice_latency_breakdown",
+                        "workflow_run_id": 501,
+                        "latency_profile": "speed_demo",
+                        "user_stop_to_bot_started_ms": 321.0,
+                        "stt_final_ms": 120.0,
+                        "llm_ttfb_ms": 80.0,
+                        "tts_ttfb_ms": 70.0,
+                        "first_response_ms": 450.0,
+                        "bot_started_speaking_at": "2026-06-03T13:00:00+00:00",
+                        "raw_log_secret": "must-not-leak",
+                    },
+                },
+            ]
+        },
+    )
+
+    with patch("api.services.phone_preview.service.db_client") as mock_db:
+        mock_db.get_phone_preview_session = AsyncMock(return_value=session)
+        mock_db.get_workflow_run = AsyncMock(return_value=workflow_run)
+        mock_db.update_phone_preview_session_status = AsyncMock()
+
+        result = await service.status(user=user, session_id=123)
+
+    assert result.latency_summary is not None
+    assert result.latency_summary.as_dict() == {
+        "workflow_run_id": 501,
+        "latency_profile": "speed_demo",
+        "user_stop_to_bot_started_ms": 321.0,
+        "stt_final_ms": 120.0,
+        "llm_ttfb_ms": 80.0,
+        "tts_ttfb_ms": 70.0,
+        "first_response_ms": 450.0,
+        "updated_at": "2026-06-03T13:00:00+00:00",
+    }
+    assert "raw_log_secret" not in str(result.as_dict())
 
 
 @pytest.mark.asyncio

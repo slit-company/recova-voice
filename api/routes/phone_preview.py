@@ -39,6 +39,17 @@ class PhonePreviewCallRequest(BaseModel):
     session_id: int
 
 
+class PhonePreviewLatencySummary(BaseModel):
+    workflow_run_id: int
+    latency_profile: str | None = None
+    user_stop_to_bot_started_ms: float | None = None
+    stt_final_ms: float | None = None
+    llm_ttfb_ms: float | None = None
+    tts_ttfb_ms: float | None = None
+    first_response_ms: float | None = None
+    updated_at: str | None = None
+
+
 class PhonePreviewResponse(BaseModel):
     session_id: int
     status: str
@@ -49,6 +60,7 @@ class PhonePreviewResponse(BaseModel):
     failure_reason: str | None = None
     dev_otp_code: str | None = None
     inbound_phone_number: str | None = None
+    latency_summary: PhonePreviewLatencySummary | None = None
 
 
 @router.post("/start", response_model=PhonePreviewResponse)

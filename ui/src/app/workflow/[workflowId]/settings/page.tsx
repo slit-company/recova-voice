@@ -28,16 +28,20 @@ import { UnsavedChangesProvider, useUnsavedChanges, useUnsavedChangesContext } f
 import { useAudioPlayback } from "@/hooks/useAudioPlayback";
 import { useAuth } from "@/lib/auth";
 import logger from "@/lib/logger";
+import { stripLatencyTuningFields } from "@/lib/workflow-latency-config";
 import {
     type AmbientNoiseConfiguration,
+    DEFAULT_LATENCY_CONFIGURATION,
     DEFAULT_VOICEMAIL_DETECTION_CONFIGURATION,
     DEFAULT_WORKFLOW_CONFIGURATIONS,
+    type LatencyProfile,
     type TurnStopStrategy,
     type VoicemailDetectionConfiguration,
     type WorkflowConfigurations,
 } from "@/types/workflow-configurations";
 
 import { EmbedDialog } from "../components/EmbedDialog";
+import { LatencyProfileControls } from "../components/LatencyProfileControls";
 import { useWorkflowState } from "../hooks/useWorkflowState";
 
 // ---------------------------------------------------------------------------
@@ -268,6 +272,27 @@ function GeneralSection({
     const [turnStopStrategy, setTurnStopStrategy] = useState<TurnStopStrategy>(
         workflowConfigurations.turn_stop_strategy || "transcription",
     );
+    const [latencyProfile, setLatencyProfile] = useState<LatencyProfile>(
+        workflowConfigurations.latency_profile || DEFAULT_LATENCY_CONFIGURATION.latency_profile,
+    );
+    const [userSpeechTimeoutSeconds, setUserSpeechTimeoutSeconds] = useState(
+        workflowConfigurations.user_speech_timeout_seconds || DEFAULT_LATENCY_CONFIGURATION.user_speech_timeout_seconds,
+    );
+    const [ttsAggregationSilenceSeconds, setTtsAggregationSilenceSeconds] = useState(
+        workflowConfigurations.tts_aggregation_silence_seconds || DEFAULT_LATENCY_CONFIGURATION.tts_aggregation_silence_seconds,
+    );
+    const [preCallFetchTimeoutSeconds, setPreCallFetchTimeoutSeconds] = useState(
+        workflowConfigurations.pre_call_fetch_timeout_seconds || DEFAULT_LATENCY_CONFIGURATION.pre_call_fetch_timeout_seconds,
+    );
+    const [preCallFetchRequired, setPreCallFetchRequired] = useState(
+        workflowConfigurations.pre_call_fetch_required ?? DEFAULT_LATENCY_CONFIGURATION.pre_call_fetch_required,
+    );
+    const [returnzeroTtfsP99LatencySeconds, setReturnzeroTtfsP99LatencySeconds] = useState(
+        workflowConfigurations.returnzero_ttfs_p99_latency_seconds || DEFAULT_LATENCY_CONFIGURATION.returnzero_ttfs_p99_latency_seconds,
+    );
+    const [speedProfileRespectDelayedStart, setSpeedProfileRespectDelayedStart] = useState(
+        workflowConfigurations.speed_profile_respect_delayed_start ?? DEFAULT_LATENCY_CONFIGURATION.speed_profile_respect_delayed_start,
+    );
     const [contextCompactionEnabled, setContextCompactionEnabled] = useState(
         workflowConfigurations.context_compaction_enabled ?? false,
     );
@@ -286,9 +311,16 @@ function GeneralSection({
             maxUserIdleTimeout !== (workflowConfigurations.max_user_idle_timeout || 10) ||
             smartTurnStopSecs !== (workflowConfigurations.smart_turn_stop_secs || 2) ||
             turnStopStrategy !== (workflowConfigurations.turn_stop_strategy || "transcription") ||
+            latencyProfile !== (workflowConfigurations.latency_profile || DEFAULT_LATENCY_CONFIGURATION.latency_profile) ||
+            userSpeechTimeoutSeconds !== (workflowConfigurations.user_speech_timeout_seconds || DEFAULT_LATENCY_CONFIGURATION.user_speech_timeout_seconds) ||
+            ttsAggregationSilenceSeconds !== (workflowConfigurations.tts_aggregation_silence_seconds || DEFAULT_LATENCY_CONFIGURATION.tts_aggregation_silence_seconds) ||
+            preCallFetchTimeoutSeconds !== (workflowConfigurations.pre_call_fetch_timeout_seconds || DEFAULT_LATENCY_CONFIGURATION.pre_call_fetch_timeout_seconds) ||
+            preCallFetchRequired !== (workflowConfigurations.pre_call_fetch_required ?? DEFAULT_LATENCY_CONFIGURATION.pre_call_fetch_required) ||
+            returnzeroTtfsP99LatencySeconds !== (workflowConfigurations.returnzero_ttfs_p99_latency_seconds || DEFAULT_LATENCY_CONFIGURATION.returnzero_ttfs_p99_latency_seconds) ||
+            speedProfileRespectDelayedStart !== (workflowConfigurations.speed_profile_respect_delayed_start ?? DEFAULT_LATENCY_CONFIGURATION.speed_profile_respect_delayed_start) ||
             contextCompactionEnabled !== (workflowConfigurations.context_compaction_enabled ?? false)
         );
-    }, [name, workflowName, ambientNoiseConfig, maxCallDuration, maxUserIdleTimeout, smartTurnStopSecs, turnStopStrategy, contextCompactionEnabled, workflowConfigurations]);
+    }, [name, workflowName, ambientNoiseConfig, maxCallDuration, maxUserIdleTimeout, smartTurnStopSecs, turnStopStrategy, latencyProfile, userSpeechTimeoutSeconds, ttsAggregationSilenceSeconds, preCallFetchTimeoutSeconds, preCallFetchRequired, returnzeroTtfsP99LatencySeconds, speedProfileRespectDelayedStart, contextCompactionEnabled, workflowConfigurations]);
 
     useUnsavedChanges("general", isDirty);
 
@@ -355,12 +387,23 @@ function GeneralSection({
         try {
             await onSave(
                 {
-                    ...workflowConfigurations,
+                    ...stripLatencyTuningFields(workflowConfigurations),
                     ambient_noise_configuration: ambientNoiseConfig,
                     max_call_duration: maxCallDuration,
                     max_user_idle_timeout: maxUserIdleTimeout,
                     smart_turn_stop_secs: smartTurnStopSecs,
                     turn_stop_strategy: turnStopStrategy,
+                    latency_profile: latencyProfile,
+                    ...(latencyProfile === "custom" ? {
+                        user_speech_timeout_seconds: userSpeechTimeoutSeconds,
+                        tts_aggregation_silence_seconds: ttsAggregationSilenceSeconds,
+                        pre_call_fetch_timeout_seconds: preCallFetchTimeoutSeconds,
+                        pre_call_fetch_required: preCallFetchRequired,
+                        returnzero_ttfs_p99_latency_seconds: returnzeroTtfsP99LatencySeconds,
+                    } : {}),
+                    ...(latencyProfile === "speed_demo" ? {
+                        speed_profile_respect_delayed_start: speedProfileRespectDelayedStart,
+                    } : {}),
                     context_compaction_enabled: contextCompactionEnabled,
                 },
                 name,
@@ -575,6 +618,25 @@ function GeneralSection({
                         </div>
                     )}
                 </div>
+
+                <Separator />
+
+                <LatencyProfileControls
+                    latencyProfile={latencyProfile}
+                    userSpeechTimeoutSeconds={userSpeechTimeoutSeconds}
+                    ttsAggregationSilenceSeconds={ttsAggregationSilenceSeconds}
+                    preCallFetchTimeoutSeconds={preCallFetchTimeoutSeconds}
+                    preCallFetchRequired={preCallFetchRequired}
+                    returnzeroTtfsP99LatencySeconds={returnzeroTtfsP99LatencySeconds}
+                    speedProfileRespectDelayedStart={speedProfileRespectDelayedStart}
+                    onLatencyProfileChange={setLatencyProfile}
+                    onUserSpeechTimeoutSecondsChange={setUserSpeechTimeoutSeconds}
+                    onTtsAggregationSilenceSecondsChange={setTtsAggregationSilenceSeconds}
+                    onPreCallFetchTimeoutSecondsChange={setPreCallFetchTimeoutSeconds}
+                    onPreCallFetchRequiredChange={setPreCallFetchRequired}
+                    onReturnzeroTtfsP99LatencySecondsChange={setReturnzeroTtfsP99LatencySeconds}
+                    onSpeedProfileRespectDelayedStartChange={setSpeedProfileRespectDelayedStart}
+                />
 
                 <Separator />
 

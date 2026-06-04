@@ -1,5 +1,18 @@
 # Mintlify documentation
 
+## Recova migration status
+
+- The docs tree is still mostly upstream Dograh: `docs/docs.json`, page titles,
+  screenshots, public links, deployment commands, and community references are
+  not yet Recova-clean.
+- Do not rebrand a page to Recova unless the commands, domains, screenshots,
+  product names, and linked destinations are all true for Recova.
+- When documenting Korean B2B workflows, prefer concrete operator tasks:
+  campaign setup, inbound number configuration, call recordings, reports,
+  usage/cost review, API keys, and organization administration.
+- Keep Dograh wording only when describing the upstream project, compatibility,
+  package/image names, or migration history.
+
 ## Working relationship
 
 - You can push back on ideas-this can lead to better documentation. Cite sources and explain your reasoning when you do so

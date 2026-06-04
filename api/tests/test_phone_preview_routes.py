@@ -215,3 +215,60 @@ def test_status_route_delegates_to_preview_service():
     assert response.json()["status"] == "completed"
     assert "provider_call_id" not in response.json()
     status.assert_awaited_once()
+
+
+def test_phone_preview_status_returns_latency_summary_without_raw_logs():
+    app = _make_test_app()
+    client = TestClient(app)
+    expires_at = datetime.now(UTC) + timedelta(minutes=5)
+    updated_at = datetime.now(UTC).isoformat()
+
+    with patch(
+        "api.routes.phone_preview.phone_preview_service.status",
+        new=AsyncMock(
+            return_value=SimpleNamespace(
+                as_dict=lambda: {
+                    "session_id": 123,
+                    "status": "calling",
+                    "otp_required": False,
+                    "masked_phone": "+82****5678",
+                    "expires_at": expires_at,
+                    "workflow_run_id": 501,
+                    "provider_call_id": "call-123",
+                    "failure_reason": None,
+                    "logs": {
+                        "realtime_feedback_events": [
+                            {"payload": {"secret": "must-not-leak"}}
+                        ]
+                    },
+                    "latency_summary": {
+                        "workflow_run_id": 501,
+                        "latency_profile": "speed_demo",
+                        "user_stop_to_bot_started_ms": 321.0,
+                        "stt_final_ms": 120.0,
+                        "llm_ttfb_ms": 80.0,
+                        "tts_ttfb_ms": 70.0,
+                        "first_response_ms": 450.0,
+                        "updated_at": updated_at,
+                    },
+                }
+            )
+        ),
+    ):
+        response = client.get("/phone-preview/status/123")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["latency_summary"] == {
+        "workflow_run_id": 501,
+        "latency_profile": "speed_demo",
+        "user_stop_to_bot_started_ms": 321.0,
+        "stt_final_ms": 120.0,
+        "llm_ttfb_ms": 80.0,
+        "tts_ttfb_ms": 70.0,
+        "first_response_ms": 450.0,
+        "updated_at": updated_at,
+    }
+    assert "logs" not in payload
+    assert "realtime_feedback_events" not in str(payload)
+    assert "provider_call_id" not in payload

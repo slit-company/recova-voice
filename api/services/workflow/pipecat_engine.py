@@ -75,6 +75,7 @@ class PipecatEngine:
         embeddings_base_url: Optional[str] = None,
         has_recordings: bool = False,
         context_compaction_enabled: bool = False,
+        skip_start_node_delayed_start: bool = False,
     ):
         self.task = task
         self.llm = llm
@@ -146,6 +147,7 @@ class PipecatEngine:
         self._context_summarization_manager: Optional[ContextSummarizationManager] = (
             None
         )
+        self._skip_start_node_delayed_start = skip_start_node_delayed_start
 
     async def _get_organization_id(self) -> Optional[int]:
         """Get and cache the organization ID from workflow run."""
@@ -588,7 +590,7 @@ class PipecatEngine:
     async def _handle_start_node(self, node: Node) -> None:
         """Handle start node execution."""
         # Check if delayed start is enabled
-        if node.delayed_start:
+        if node.delayed_start and not self._skip_start_node_delayed_start:
             # Use configured duration or default to 3 seconds
             delay_duration = node.delayed_start_duration or 2.0
             logger.debug(

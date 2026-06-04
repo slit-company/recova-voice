@@ -1,9 +1,11 @@
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from websockets.protocol import State
 
 from api.schemas.user_configuration import UserConfiguration
 from api.routes.user import UserConfigurationRequestResponseSchema
@@ -22,6 +24,68 @@ from api.services.pipecat.returnzero_stt import (
 )
 from api.services.pipecat.service_factory import create_stt_service
 from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame
+
+
+class _FakeReturnZeroResponse:
+    def __init__(self, payload: dict[str, object], status: int = 200):
+        self._payload = payload
+        self.status = status
+        self.ok = status < 400
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def json(self):
+        return self._payload
+
+
+class _FakeReturnZeroSession:
+    def __init__(self, factory: "_FakeReturnZeroSessionFactory"):
+        self._factory = factory
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    def post(self, url: str, data: dict[str, str]):
+        self._factory.calls.append({"url": url, "data": data})
+        return _FakeReturnZeroResponse(self._factory.payload)
+
+
+class _FakeReturnZeroSessionFactory:
+    def __init__(self, payload: dict[str, object]):
+        self.payload = payload
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self):
+        return _FakeReturnZeroSession(self)
+
+
+class _FakeOpenWebSocket:
+    state = State.OPEN
+
+
+def _returnzero_user_config():
+    return SimpleNamespace(
+        stt=SimpleNamespace(
+            provider=ServiceProviders.RETURNZERO.value,
+            api_key=None,
+            model="sommers_ko",
+            language="ko",
+            client_id="client-id",
+            client_secret="client-secret",
+            domain="CALL",
+            use_itn=True,
+            use_disfluency_filter=False,
+            use_profanity_filter=False,
+            use_punctuation=True,
+        )
+    )
 
 
 def test_returnzero_stt_schema_is_registered_for_ui():
@@ -120,21 +184,7 @@ def test_user_configuration_request_schema_allows_returnzero_boolean_flags():
 
 
 def test_create_returnzero_stt_service_uses_client_credentials_and_audio_settings():
-    user_config = SimpleNamespace(
-        stt=SimpleNamespace(
-            provider=ServiceProviders.RETURNZERO.value,
-            api_key=None,
-            model="sommers_ko",
-            language="ko",
-            client_id="client-id",
-            client_secret="client-secret",
-            domain="CALL",
-            use_itn=True,
-            use_disfluency_filter=False,
-            use_profanity_filter=False,
-            use_punctuation=True,
-        )
-    )
+    user_config = _returnzero_user_config()
     audio_config = SimpleNamespace(transport_in_sample_rate=8000)
 
     with patch("api.services.pipecat.service_factory.ReturnZeroSTTService") as mock_service:
@@ -149,6 +199,182 @@ def test_create_returnzero_stt_service_uses_client_credentials_and_audio_setting
     assert kwargs["settings"].model == "sommers_ko"
     assert kwargs["settings"].language == "ko"
     assert kwargs["settings"].domain == "CALL"
+    assert kwargs["ttfs_p99_latency"] is None
+
+
+@pytest.mark.asyncio
+async def test_returnzero_service_reuses_instance_token_until_near_expiry_baseline():
+    session_factory = _FakeReturnZeroSessionFactory(
+        {"access_token": "instance-token", "expire_at": time.time() + 600}
+    )
+    service = ReturnZeroSTTService(
+        client_id="baseline-client-id",
+        client_secret="baseline-client-secret",
+    )
+
+    with patch(
+        "api.services.pipecat.returnzero_stt.aiohttp.ClientSession",
+        session_factory,
+    ):
+        first = await service._fetch_token()
+        second = await service._fetch_token()
+
+    assert first == "instance-token"
+    assert second == "instance-token"
+    assert len(session_factory.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_returnzero_token_cache_reuses_valid_token():
+    session_factory = _FakeReturnZeroSessionFactory(
+        {"access_token": "shared-token", "expire_at": time.time() + 600}
+    )
+    websocket_calls: list[dict[str, object]] = []
+
+    async def fake_websocket_connect(url: str, additional_headers: dict[str, str]):
+        websocket_calls.append({"url": url, "headers": additional_headers})
+        return _FakeOpenWebSocket()
+
+    first_service = ReturnZeroSTTService(
+        client_id="cache-client-id",
+        client_secret="cache-client-secret",
+        api_base_url="https://returnzero-cache.test",
+    )
+    second_service = ReturnZeroSTTService(
+        client_id="cache-client-id",
+        client_secret="cache-client-secret",
+        api_base_url="https://returnzero-cache.test",
+    )
+
+    with (
+        patch(
+            "api.services.pipecat.returnzero_stt.aiohttp.ClientSession",
+            session_factory,
+        ),
+        patch(
+            "api.services.pipecat.returnzero_stt.websocket_connect",
+            side_effect=fake_websocket_connect,
+        ),
+    ):
+        await first_service._connect_websocket()
+        await second_service._connect_websocket()
+
+    assert len(session_factory.calls) == 1
+    assert len(websocket_calls) == 2
+    assert websocket_calls[0]["headers"] == {"Authorization": "Bearer shared-token"}
+    assert websocket_calls[1]["headers"] == {"Authorization": "Bearer shared-token"}
+
+
+@pytest.mark.asyncio
+async def test_returnzero_token_cache_refreshes_near_expiry_token():
+    session_factory = _FakeReturnZeroSessionFactory(
+        {"access_token": "near-expiry-token", "expire_at": time.time() + 299}
+    )
+
+    async def fake_websocket_connect(url: str, additional_headers: dict[str, str]):
+        return _FakeOpenWebSocket()
+
+    first_service = ReturnZeroSTTService(
+        client_id="near-expiry-client-id",
+        client_secret="near-expiry-client-secret",
+        api_base_url="https://returnzero-near-expiry.test",
+    )
+    second_service = ReturnZeroSTTService(
+        client_id="near-expiry-client-id",
+        client_secret="near-expiry-client-secret",
+        api_base_url="https://returnzero-near-expiry.test",
+    )
+
+    with (
+        patch(
+            "api.services.pipecat.returnzero_stt.aiohttp.ClientSession",
+            session_factory,
+        ),
+        patch(
+            "api.services.pipecat.returnzero_stt.websocket_connect",
+            side_effect=fake_websocket_connect,
+        ),
+    ):
+        await first_service._connect_websocket()
+        await second_service._connect_websocket()
+
+    assert len(session_factory.calls) == 2
+
+
+def test_returnzero_service_passes_configured_ttfs_p99_latency(monkeypatch):
+    user_config = _returnzero_user_config()
+    audio_config = SimpleNamespace(transport_in_sample_rate=8000)
+
+    with patch("api.services.pipecat.service_factory.ReturnZeroSTTService") as mock_service:
+        create_stt_service(
+            user_config,
+            audio_config,
+            returnzero_ttfs_p99_latency_seconds=0.42,
+        )
+
+    assert mock_service.call_args.kwargs["ttfs_p99_latency"] == 0.42
+
+    monkeypatch.setenv("RETURNZERO_TTFS_P99_SECONDS", "0.77")
+    with patch("api.services.pipecat.service_factory.ReturnZeroSTTService") as mock_service:
+        create_stt_service(user_config, audio_config)
+
+    assert mock_service.call_args.kwargs["ttfs_p99_latency"] == 0.77
+
+
+def test_create_stt_service_does_not_forward_ttfs_without_configuration(monkeypatch):
+    user_config = _returnzero_user_config()
+    audio_config = SimpleNamespace(transport_in_sample_rate=8000)
+
+    monkeypatch.delenv("RETURNZERO_TTFS_P99_SECONDS", raising=False)
+    with patch("api.services.pipecat.service_factory.ReturnZeroSTTService") as mock_service:
+        create_stt_service(user_config, audio_config)
+
+    assert mock_service.call_args.kwargs["ttfs_p99_latency"] is None
+
+
+def test_returnzero_service_ignores_invalid_ttfs_env(monkeypatch):
+    user_config = _returnzero_user_config()
+    audio_config = SimpleNamespace(transport_in_sample_rate=8000)
+
+    monkeypatch.setenv("RETURNZERO_TTFS_P99_SECONDS", "not-a-float")
+    with patch("api.services.pipecat.service_factory.ReturnZeroSTTService") as mock_service:
+        create_stt_service(user_config, audio_config)
+
+    assert mock_service.call_args.kwargs["ttfs_p99_latency"] is None
+
+
+@pytest.mark.asyncio
+async def test_returnzero_connect_records_auth_and_websocket_timings():
+    session_factory = _FakeReturnZeroSessionFactory(
+        {"access_token": "timing-token", "expire_at": time.time() + 600}
+    )
+    latency_timings: dict[str, float] = {}
+
+    async def fake_websocket_connect(url: str, additional_headers: dict[str, str]):
+        return _FakeOpenWebSocket()
+
+    service = ReturnZeroSTTService(
+        client_id="timing-client-id",
+        client_secret="timing-client-secret",
+        api_base_url="https://returnzero-timing.test",
+        latency_timings=latency_timings,
+    )
+
+    with (
+        patch(
+            "api.services.pipecat.returnzero_stt.aiohttp.ClientSession",
+            session_factory,
+        ),
+        patch(
+            "api.services.pipecat.returnzero_stt.websocket_connect",
+            side_effect=fake_websocket_connect,
+        ),
+    ):
+        await service._connect_websocket()
+
+    assert latency_timings["returnzero_auth_ms"] >= 0
+    assert latency_timings["returnzero_ws_connect_ms"] >= 0
+    assert "timing-client-secret" not in json.dumps(latency_timings)
 
 
 def test_returnzero_streaming_url_uses_rtzr_websocket_parameters():

@@ -1,6 +1,9 @@
 # API - Backend Service
 
-FastAPI backend for the Dograh voice AI platform.
+FastAPI backend for Recova, built on the Dograh voice AI platform. The backend
+already exposes Recova-facing OpenAPI metadata, but many internal modules,
+routes, and docs still use Dograh-era names. Preserve stable identifiers unless
+the task is an explicit migration.
 
 ## Project Structure
 
@@ -40,6 +43,20 @@ api/
 - Workflow execution spans `services/workflow/`, `services/pipecat/`, and `tasks/`
 - Telephony is a full subsystem under `services/telephony/`, with provider-specific packages under `services/telephony/providers/`
 - Integrations extend through `services/integrations/`; package-specific rules should live in that subtree's own `AGENTS.md`
+
+## Recova Backend Priorities
+
+- Treat organization and tenant boundaries as product-critical. Korean B2B
+  customers must never see or mutate another organization's workflows,
+  telephony configs, campaigns, recordings, usage, or reports.
+- Campaign, reports, pricing, usage, superuser, and organization routes are
+  core Recova B2B surfaces. Avoid demo-only shortcuts in these areas.
+- Keep Korean business use cases in mind when changing defaults: phone-number
+  normalization, time windows, call retries, reporting labels, and prompt
+  language should not assume US-only workflows.
+- User-facing API metadata and docs may say Recova. Internal names tied to DB
+  columns, enum values, SDK compatibility, or upstream Dograh migrations should
+  change only with a migration plan.
 
 ## Routes vs Service Layer
 

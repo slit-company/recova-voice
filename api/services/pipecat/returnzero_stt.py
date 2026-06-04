@@ -1,3 +1,5 @@
+import asyncio
+import hashlib
 import json
 import time
 from collections.abc import AsyncGenerator
@@ -21,6 +23,8 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
+from api.services.pipecat.latency_events import milliseconds_from_seconds
+
 try:
     from websockets.asyncio.client import connect as websocket_connect
     from websockets.protocol import State
@@ -33,6 +37,10 @@ DEFAULT_RETURNZERO_API_BASE_URL = "https://openapi.vito.ai"
 DEFAULT_RETURNZERO_STREAM_PATH = "/v1/transcribe:streaming"
 RETURNZERO_AUTH_PATH = "/v1/authenticate"
 RETURNZERO_EOS_MESSAGE = "EOS"
+RETURNZERO_TOKEN_REFRESH_MARGIN_SECONDS = 300
+
+_RETURNZERO_TOKEN_CACHE: dict[tuple[str, str, str], "ReturnZeroToken"] = {}
+_RETURNZERO_TOKEN_CACHE_LOCK = asyncio.Lock()
 
 
 @dataclass
@@ -68,6 +76,8 @@ class ReturnZeroSTTService(WebsocketSTTService):
         keyterms: list[str] | None = None,
         encoding: str = "LINEAR16",
         settings: Settings | None = None,
+        ttfs_p99_latency: float | None = None,
+        latency_timings: dict[str, float] | None = None,
         **kwargs,
     ):
         default_settings = self.Settings(
@@ -86,6 +96,7 @@ class ReturnZeroSTTService(WebsocketSTTService):
             sample_rate=sample_rate,
             keepalive_timeout=1,
             keepalive_interval=5,
+            ttfs_p99_latency=ttfs_p99_latency,
             settings=default_settings,
             **kwargs,
         )
@@ -96,6 +107,7 @@ class ReturnZeroSTTService(WebsocketSTTService):
         self._encoding = encoding
         self._keyterms = keyterms or []
         self._token: ReturnZeroToken | None = None
+        self._latency_timings = latency_timings
         self._receive_task = None
 
     def can_generate_metrics(self) -> bool:
@@ -141,10 +153,16 @@ class ReturnZeroSTTService(WebsocketSTTService):
                 return
 
             access_token = await self._fetch_token()
-            self._websocket = await websocket_connect(
-                self.build_streaming_url(),
-                additional_headers={"Authorization": f"Bearer {access_token}"},
-            )
+            websocket_started_at = time.perf_counter()
+            try:
+                self._websocket = await websocket_connect(
+                    self.build_streaming_url(),
+                    additional_headers={"Authorization": f"Bearer {access_token}"},
+                )
+            finally:
+                self._record_latency_elapsed(
+                    "returnzero_ws_connect_ms", websocket_started_at
+                )
             if not self._websocket:
                 await self.push_error(error_msg="Unable to connect to ReturnZero STT")
                 raise RuntimeError("Unable to connect to ReturnZero STT")
@@ -204,23 +222,47 @@ class ReturnZeroSTTService(WebsocketSTTService):
         return f"wss://{self._api_base_url}"
 
     async def _fetch_token(self) -> str:
-        if self._token and self._token.expire_at > time.time() + 60:
+        if self._token and self._token.expire_at > (
+            time.time() + RETURNZERO_TOKEN_REFRESH_MARGIN_SECONDS
+        ):
+            self._record_latency_value("returnzero_auth_ms", 0.0)
             return self._token.access_token
 
+        cache_key = self._token_cache_key()
+        async with _RETURNZERO_TOKEN_CACHE_LOCK:
+            cached_token = _RETURNZERO_TOKEN_CACHE.get(cache_key)
+            if cached_token and cached_token.expire_at > (
+                time.time() + RETURNZERO_TOKEN_REFRESH_MARGIN_SECONDS
+            ):
+                self._token = cached_token
+                self._record_latency_value("returnzero_auth_ms", 0.0)
+                return cached_token.access_token
+
+            token = await self._fetch_token_from_returnzero()
+            _RETURNZERO_TOKEN_CACHE[cache_key] = token
+            self._token = token
+            return token.access_token
+
+    async def _fetch_token_from_returnzero(self) -> ReturnZeroToken:
         auth_url = f"{self._api_base_url}{RETURNZERO_AUTH_PATH}"
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                auth_url,
-                data={
-                    "client_id": self._client_id,
-                    "client_secret": self._client_secret,
-                },
-            ) as response:
-                if not response.ok:
-                    raise RuntimeError(
-                        f"ReturnZero authentication failed with HTTP {response.status}"
-                    )
-                payload_object = await response.json()
+        auth_started_at = time.perf_counter()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    auth_url,
+                    data={
+                        "client_id": self._client_id,
+                        "client_secret": self._client_secret,
+                    },
+                ) as response:
+                    if not response.ok:
+                        raise RuntimeError(
+                            "ReturnZero authentication failed with HTTP "
+                            f"{response.status}"
+                        )
+                    payload_object = await response.json()
+        finally:
+            self._record_latency_elapsed("returnzero_auth_ms", auth_started_at)
 
         if not isinstance(payload_object, dict):
             raise RuntimeError("ReturnZero authentication returned an invalid payload")
@@ -231,11 +273,31 @@ class ReturnZeroSTTService(WebsocketSTTService):
         ):
             raise RuntimeError("ReturnZero authentication response is missing token data")
 
-        self._token = ReturnZeroToken(
+        return ReturnZeroToken(
             access_token=access_token_object,
             expire_at=float(expire_at_object),
         )
-        return self._token.access_token
+
+    def _token_cache_key(self) -> tuple[str, str, str]:
+        return (
+            self._api_base_url,
+            self._credential_digest(self._client_id),
+            self._credential_digest(self._client_secret),
+        )
+
+    @staticmethod
+    def _credential_digest(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    def _record_latency_elapsed(self, key: str, started_at: float) -> None:
+        self._record_latency_value(
+            key, milliseconds_from_seconds(time.perf_counter() - started_at) or 0.0
+        )
+
+    def _record_latency_value(self, key: str, value: float) -> None:
+        if self._latency_timings is None:
+            return
+        self._latency_timings[key] = value
 
     async def _send_stop_recording(self):
         if self._websocket and self._websocket.state is State.OPEN:

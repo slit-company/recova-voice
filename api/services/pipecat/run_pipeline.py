@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime
 from typing import Optional
 
 from fastapi import HTTPException
@@ -17,6 +18,18 @@ from api.services.pipecat.event_handlers import (
     register_event_handlers,
 )
 from api.services.pipecat.in_memory_buffers import InMemoryLogsBuffer
+from api.services.pipecat.latency_events import (
+    build_speed_demo_startup_warning_event,
+    build_voice_latency_breakdown_event,
+    milliseconds_from_seconds,
+    serialize_latency_breakdown,
+)
+from api.services.pipecat.latency_config import (
+    RuntimeLatencyContext,
+    WorkflowLatencyConfiguration,
+    apply_speed_demo_node_overrides,
+    resolve_voice_latency_config,
+)
 from api.services.pipecat.pipeline_builder import (
     build_pipeline,
     build_realtime_pipeline,
@@ -86,14 +99,18 @@ from pipecat.turns.user_stop import (
     TurnAnalyzerUserTurnStopStrategy,
 )
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
-from pipecat.utils.enums import EndTaskReason, RealtimeFeedbackType
+from pipecat.utils.enums import EndTaskReason
 from pipecat.utils.run_context import set_current_org_id, set_current_run_id
 
 # Setup tracing if enabled
 ensure_tracing()
 
 
-def _create_realtime_user_turn_config(provider: str):
+def _create_realtime_user_turn_config(
+    provider: str,
+    *,
+    user_speech_timeout_seconds: float = 0.6,
+) -> tuple[UserTurnStrategies, SileroVADAnalyzer | None]:
     """Return user turn strategies and optional local VAD for realtime providers."""
     if provider in {
         ServiceProviders.GOOGLE_REALTIME.value,
@@ -104,7 +121,11 @@ def _create_realtime_user_turn_config(provider: str):
         return (
             UserTurnStrategies(
                 start=[VADUserTurnStartStrategy(enable_interruptions=False)],
-                stop=[SpeechTimeoutUserTurnStopStrategy()],
+                stop=[
+                    SpeechTimeoutUserTurnStopStrategy(
+                        user_speech_timeout=user_speech_timeout_seconds
+                    )
+                ],
             ),
             SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
         )
@@ -134,9 +155,79 @@ def _create_realtime_user_turn_config(provider: str):
     return (
         UserTurnStrategies(
             start=[VADUserTurnStartStrategy()],
-            stop=[SpeechTimeoutUserTurnStopStrategy()],
+            stop=[
+                SpeechTimeoutUserTurnStopStrategy(
+                    user_speech_timeout=user_speech_timeout_seconds
+                )
+            ],
         ),
         SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+    )
+
+
+def _create_standard_user_turn_config(
+    *,
+    stt_provider: str,
+    stt_model: str,
+    turn_stop_strategy: str,
+    smart_turn_stop_secs: float,
+    user_speech_timeout_seconds: float,
+) -> UserTurnStrategies:
+    is_deepgram_flux = (
+        stt_provider == ServiceProviders.DEEPGRAM.value
+        and stt_model == "flux-general-en"
+    )
+
+    if is_deepgram_flux:
+        return UserTurnStrategies(
+            start=[
+                VADUserTurnStartStrategy(),
+                ExternalUserTurnStartStrategy(enable_interruptions=True),
+            ],
+            stop=[ExternalUserTurnStopStrategy()],
+        )
+
+    if turn_stop_strategy == "turn_analyzer":
+        smart_turn_params = SmartTurnParams(stop_secs=smart_turn_stop_secs)
+        return UserTurnStrategies(
+            start=[
+                VADUserTurnStartStrategy(),
+                TranscriptionUserTurnStartStrategy(),
+            ],
+            stop=[
+                TurnAnalyzerUserTurnStopStrategy(
+                    turn_analyzer=LocalSmartTurnAnalyzerV3(params=smart_turn_params)
+                )
+            ],
+        )
+
+    return UserTurnStrategies(
+        start=[
+            VADUserTurnStartStrategy(),
+            TranscriptionUserTurnStartStrategy(),
+        ],
+        stop=[
+            SpeechTimeoutUserTurnStopStrategy(
+                user_speech_timeout=user_speech_timeout_seconds
+            )
+        ],
+    )
+
+
+def _log_resolved_latency_profile(
+    *,
+    workflow_run_id: int,
+    latency_profile: str,
+    is_phone_preview_run: bool,
+    runtime_latency_profile: str | None,
+) -> None:
+    runtime_profile = runtime_latency_profile or "none"
+    logger.info(
+        "Resolved voice latency profile "
+        f"workflow_run_id={workflow_run_id} "
+        f"latency_profile={latency_profile} "
+        f"phone_preview={is_phone_preview_run} "
+        f"runtime_latency_profile={runtime_profile}"
     )
 
 
@@ -363,6 +454,28 @@ async def _run_pipeline(
     run_definition = workflow_run.definition
     run_workflow_json = run_definition.workflow_json
     run_configs = run_definition.workflow_configurations or {}
+    is_phone_preview_run = bool(
+        (merged_call_context_vars or {}).get("telephony_preview")
+        or (merged_call_context_vars or {}).get("preview_session_id")
+    )
+    runtime_latency_context = RuntimeLatencyContext.model_validate(
+        merged_call_context_vars or {}
+    )
+    resolved_latency_config = resolve_voice_latency_config(
+        workflow_configurations=WorkflowLatencyConfiguration.model_validate(
+            run_configs
+        ),
+        runtime_context=runtime_latency_context,
+        allow_runtime_profile_override=is_phone_preview_run,
+    )
+    latency_profile = resolved_latency_config.latency_profile
+    _log_resolved_latency_profile(
+        workflow_run_id=workflow_run_id,
+        latency_profile=latency_profile,
+        is_phone_preview_run=is_phone_preview_run,
+        runtime_latency_profile=runtime_latency_context.runtime_latency_profile,
+    )
+    latency_timings: dict[str, float] = {}
 
     # Extract configurations from the version's workflow_configurations
     max_call_duration_seconds = 300  # Default 5 minutes
@@ -416,8 +529,22 @@ async def _run_pipeline(
         # inference calls.
         inference_llm = create_llm_service(user_config)
     else:
-        stt = create_stt_service(user_config, audio_config, keyterms=keyterms)
-        tts = create_tts_service(user_config, audio_config)
+        stt = create_stt_service(
+            user_config,
+            audio_config,
+            keyterms=keyterms,
+            latency_timings=latency_timings,
+            returnzero_ttfs_p99_latency_seconds=(
+                resolved_latency_config.returnzero_ttfs_p99_latency_seconds
+            ),
+        )
+        tts = create_tts_service(
+            user_config,
+            audio_config,
+            aggregation_silence_seconds=(
+                resolved_latency_config.tts_aggregation_silence_seconds
+            ),
+        )
         llm = create_llm_service(user_config)
         inference_llm = None
 
@@ -452,6 +579,9 @@ async def _run_pipeline(
     )
 
     workflow_graph = WorkflowGraph(ReactFlowDTO.model_validate(run_workflow_json))
+    speed_demo_warnings = ()
+    if latency_profile == "speed_demo" and is_phone_preview_run:
+        speed_demo_warnings = apply_speed_demo_node_overrides(workflow_graph)
 
     # Pre-call fetch: fire early so it runs concurrently with remaining setup
     pre_call_fetch_task = None
@@ -477,6 +607,22 @@ async def _run_pipeline(
 
     # Create in-memory logs buffer early so it can be used by engine callbacks
     in_memory_logs_buffer = InMemoryLogsBuffer(workflow_run_id)
+    for warning in speed_demo_warnings:
+        logger.warning(
+            f"Speed demo startup warning for workflow run {workflow_run_id}: "
+            f"{warning.code} on node {warning.node_id}"
+        )
+        try:
+            await in_memory_logs_buffer.append(
+                build_speed_demo_startup_warning_event(
+                    workflow_run_id=workflow_run_id,
+                    warning_code=warning.code,
+                    node_id=warning.node_id,
+                    node_name=warning.node_name,
+                )
+            )
+        except Exception as e:
+            logger.debug(f"Failed to append speed demo startup warning: {e}")
 
     # Create node transition callback (always logs to buffer, optionally streams to WS)
     ws_sender = get_ws_sender(workflow_run_id)
@@ -548,6 +694,10 @@ async def _run_pipeline(
         embeddings_base_url=embeddings_base_url,
         has_recordings=has_recordings,
         context_compaction_enabled=context_compaction_enabled,
+        skip_start_node_delayed_start=(
+            resolved_latency_config.latency_profile == "speed_demo"
+            and not resolved_latency_config.speed_profile_respect_delayed_start
+        ),
     )
 
     # Create pipeline components
@@ -585,47 +735,21 @@ async def _run_pipeline(
         # Realtime services still need user-turn tracking even when the model
         # itself owns speech generation and interruption behavior.
         user_turn_strategies, user_vad_analyzer = _create_realtime_user_turn_config(
-            user_config.realtime.provider
+            user_config.realtime.provider,
+            user_speech_timeout_seconds=(
+                resolved_latency_config.user_speech_timeout_seconds
+            ),
         )
     else:
-        # Deepgram Flux uses external turn detection (VAD + External start/stop)
-        # Other models use configurable turn detection strategy
-        is_deepgram_flux = (
-            user_config.stt.provider == ServiceProviders.DEEPGRAM.value
-            and user_config.stt.model == "flux-general-en"
+        user_turn_strategies = _create_standard_user_turn_config(
+            stt_provider=user_config.stt.provider,
+            stt_model=user_config.stt.model,
+            turn_stop_strategy=turn_stop_strategy,
+            smart_turn_stop_secs=smart_turn_stop_secs,
+            user_speech_timeout_seconds=(
+                resolved_latency_config.user_speech_timeout_seconds
+            ),
         )
-
-        if is_deepgram_flux:
-            user_turn_strategies = UserTurnStrategies(
-                start=[
-                    VADUserTurnStartStrategy(),
-                    ExternalUserTurnStartStrategy(enable_interruptions=True),
-                ],
-                stop=[ExternalUserTurnStopStrategy()],
-            )
-        elif turn_stop_strategy == "turn_analyzer":
-            # Smart Turn Analyzer: best for longer responses with natural pauses
-            smart_turn_params = SmartTurnParams(stop_secs=smart_turn_stop_secs)
-            user_turn_strategies = UserTurnStrategies(
-                start=[
-                    VADUserTurnStartStrategy(),
-                    TranscriptionUserTurnStartStrategy(),
-                ],
-                stop=[
-                    TurnAnalyzerUserTurnStopStrategy(
-                        turn_analyzer=LocalSmartTurnAnalyzerV3(params=smart_turn_params)
-                    )
-                ],
-            )
-        else:
-            # Transcription-based (default): best for short 1-2 word responses
-            user_turn_strategies = UserTurnStrategies(
-                start=[
-                    VADUserTurnStartStrategy(),
-                    TranscriptionUserTurnStartStrategy(),
-                ],
-                stop=[SpeechTimeoutUserTurnStopStrategy()],
-            )
 
     user_params = LLMUserAggregatorParams(
         user_turn_strategies=user_turn_strategies,
@@ -780,17 +904,28 @@ async def _run_pipeline(
     )
     task.add_observer(feedback_observer)
 
+    def returnzero_latency_fields() -> dict[str, float | None]:
+        return {
+            "returnzero_auth_ms": latency_timings.get("returnzero_auth_ms"),
+            "returnzero_ws_connect_ms": latency_timings.get(
+                "returnzero_ws_connect_ms"
+            ),
+        }
+
     # Register latency observer to log user-to-bot response latency
     if task.user_bot_latency_observer:
 
         @task.user_bot_latency_observer.event_handler("on_latency_measured")
         async def on_latency_measured(observer, latency_seconds):
-            message = {
-                "type": RealtimeFeedbackType.LATENCY_MEASURED.value,
-                "payload": {
-                    "latency_seconds": latency_seconds,
-                },
-            }
+            message = build_voice_latency_breakdown_event(
+                workflow_run_id=workflow_run_id,
+                latency_profile=latency_profile,
+                **returnzero_latency_fields(),
+                user_stop_to_bot_started_ms=milliseconds_from_seconds(
+                    latency_seconds
+                ),
+                extra_payload={"latency_seconds": latency_seconds},
+            )
             if ws_sender:
                 try:
                     ws_message = message
@@ -807,6 +942,47 @@ async def _run_pipeline(
                 await in_memory_logs_buffer.append(message)
             except Exception as e:
                 logger.error(f"Failed to append latency to logs buffer: {e}")
+
+        @task.user_bot_latency_observer.event_handler("on_first_bot_speech_latency")
+        async def on_first_bot_speech_latency(observer, latency_seconds):
+            message = build_voice_latency_breakdown_event(
+                workflow_run_id=workflow_run_id,
+                latency_profile=latency_profile,
+                **returnzero_latency_fields(),
+                bot_started_speaking_at=datetime.now(UTC).isoformat(),
+                first_response_ms=milliseconds_from_seconds(latency_seconds),
+            )
+            if ws_sender:
+                try:
+                    await ws_sender(message)
+                except Exception as e:
+                    logger.debug(
+                        f"Failed to send first response latency via WebSocket: {e}"
+                    )
+            try:
+                await in_memory_logs_buffer.append(message)
+            except Exception as e:
+                logger.error(
+                    f"Failed to append first response latency to logs buffer: {e}"
+                )
+
+        @task.user_bot_latency_observer.event_handler("on_latency_breakdown")
+        async def on_latency_breakdown(observer, breakdown):
+            message = build_voice_latency_breakdown_event(
+                workflow_run_id=workflow_run_id,
+                latency_profile=latency_profile,
+                **returnzero_latency_fields(),
+                pipecat_latency_breakdown=serialize_latency_breakdown(breakdown),
+            )
+            if ws_sender:
+                try:
+                    await ws_sender(message)
+                except Exception as e:
+                    logger.debug(f"Failed to send latency breakdown via WebSocket: {e}")
+            try:
+                await in_memory_logs_buffer.append(message)
+            except Exception as e:
+                logger.error(f"Failed to append latency breakdown to logs buffer: {e}")
 
     # Register turn log handlers for all call types (WebRTC and telephony)
     register_turn_log_handlers(
@@ -827,6 +1003,11 @@ async def _run_pipeline(
         pipeline_metrics_aggregator=pipeline_metrics_aggregator,
         audio_config=audio_config,
         pre_call_fetch_task=pre_call_fetch_task,
+        pre_call_fetch_timeout_seconds=(
+            resolved_latency_config.pre_call_fetch_timeout_seconds
+        ),
+        pre_call_fetch_required=resolved_latency_config.pre_call_fetch_required,
+        latency_profile=resolved_latency_config.latency_profile,
         user_provider_id=user_provider_id,
         integration_runtime_sessions=integration_runtime_sessions,
     )

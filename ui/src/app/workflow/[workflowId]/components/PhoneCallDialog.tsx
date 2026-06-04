@@ -32,9 +32,20 @@ import { useLocale } from "@/context/LocaleContext";
 type PreviewStep = "entry" | "otp" | "calling" | "complete";
 type PreviewMode = "outbound" | "inbound";
 type BusyState = "saving" | "starting" | "verifying" | "calling" | "waiting" | null;
+type PhonePreviewLatencySummary = {
+    readonly workflow_run_id: number;
+    readonly latency_profile?: string | null;
+    readonly user_stop_to_bot_started_ms?: number | null;
+    readonly stt_final_ms?: number | null;
+    readonly llm_ttfb_ms?: number | null;
+    readonly tts_ttfb_ms?: number | null;
+    readonly first_response_ms?: number | null;
+    readonly updated_at?: string | null;
+};
 type ExtendedPhonePreviewResponse = PhonePreviewResponse & {
-    inbound_phone_number?: string | null;
-    dev_otp_code?: string | null;
+    readonly inbound_phone_number?: string | null;
+    readonly dev_otp_code?: string | null;
+    readonly latency_summary?: PhonePreviewLatencySummary | null;
 };
 
 interface PhoneCallDialogProps {
@@ -78,8 +89,14 @@ const workflowRunIdFrom = (data: PhonePreviewResponse) => data.workflow_run_id ?
 const failureReasonFrom = (data: PhonePreviewResponse) => data.failure_reason ?? null;
 const inboundPhoneNumberFrom = (data: ExtendedPhonePreviewResponse) => data.inbound_phone_number ?? "";
 const devOtpCodeFrom = (data: ExtendedPhonePreviewResponse) => data.dev_otp_code ?? "";
+const latencySummaryFrom = (data: ExtendedPhonePreviewResponse) => data.latency_summary ?? null;
+const formatLatencyMs = (value: number | null | undefined) => {
+    if (value === undefined || value === null) return "-";
+    return `${Math.round(value)} ms`;
+};
 
 const PHONE_NUMBER_FORMAT_CHARS = /[\s\-().]/g;
+const PHONE_PREVIEW_CALLING_POLL_INTERVAL_MS = 1000;
 
 const normalizeKoreanPreviewPhoneInput = (value: string) => {
     const compact = value.trim().replace(PHONE_NUMBER_FORMAT_CHARS, "");
@@ -131,6 +148,7 @@ export const PhoneCallDialog = ({
     const [inboundPhoneNumber, setInboundPhoneNumber] = useState("");
     const [expiresAt, setExpiresAt] = useState("");
     const [workflowRunId, setWorkflowRunId] = useState<number | string | null>(null);
+    const [latencySummary, setLatencySummary] = useState<PhonePreviewLatencySummary | null>(null);
     const [status, setStatus] = useState<string>("idle");
     const [step, setStep] = useState<PreviewStep>("entry");
     const [busy, setBusy] = useState<BusyState>(null);
@@ -156,6 +174,7 @@ export const PhoneCallDialog = ({
         setInboundPhoneNumber("");
         setExpiresAt("");
         setWorkflowRunId(null);
+        setLatencySummary(null);
         setStatus("idle");
         setStep("entry");
         setBusy(null);
@@ -182,6 +201,7 @@ export const PhoneCallDialog = ({
         const failureReason = failureReasonFrom(data);
         const nextInboundPhoneNumber = inboundPhoneNumberFrom(data);
         const nextDevOtpCode = devOtpCodeFrom(data);
+        const nextLatencySummary = latencySummaryFrom(data);
 
         if (nextSessionId) setSessionId(nextSessionId);
         if (nextMaskedPhone) setMaskedPhone(nextMaskedPhone);
@@ -193,6 +213,7 @@ export const PhoneCallDialog = ({
         }
         setStatus((current) => data.status ?? current);
         setWorkflowRunId(nextWorkflowRunId);
+        setLatencySummary(nextLatencySummary);
         if (failureReason) {
             setError(formatError(failureReason));
             setSuccess(null);
@@ -278,7 +299,7 @@ export const PhoneCallDialog = ({
                         setError(err instanceof Error ? err.message : formatError(err));
                     }
                 });
-        }, 3000);
+        }, PHONE_PREVIEW_CALLING_POLL_INTERVAL_MS);
 
         return () => {
             cancelled = true;
@@ -302,6 +323,7 @@ export const PhoneCallDialog = ({
 
         setStatus(nextStatus);
         setWorkflowRunId(nextWorkflowRunId);
+        setLatencySummary(latencySummaryFrom(data));
         setStep(nextStatus === "failed" ? "complete" : "calling");
         if (failureReason) {
             setError(formatError(failureReason));
@@ -326,6 +348,7 @@ export const PhoneCallDialog = ({
         const failureReason = failureReasonFrom(data);
 
         setStatus(nextStatus);
+        setLatencySummary(latencySummaryFrom(data));
         if (nextInboundPhoneNumber) setInboundPhoneNumber(nextInboundPhoneNumber);
         setStep(nextStatus === "failed" ? "complete" : "calling");
         if (failureReason) {
@@ -435,6 +458,7 @@ export const PhoneCallDialog = ({
         setInboundPhoneNumber("");
         setExpiresAt("");
         setWorkflowRunId(null);
+        setLatencySummary(null);
         setStatus("idle");
         setStep("entry");
         setError(null);
@@ -461,6 +485,29 @@ export const PhoneCallDialog = ({
         if (status === "calling" || step === "calling") return t("phoneCall.statusCalling");
         return t("phoneCall.statusReady");
     })();
+    const latencyRows = latencySummary
+        ? [
+            {
+                label: t("phoneCall.latencyResponse"),
+                value: formatLatencyMs(
+                    latencySummary.user_stop_to_bot_started_ms ?? latencySummary.first_response_ms,
+                ),
+            },
+            {
+                label: t("phoneCall.latencyStt"),
+                value: formatLatencyMs(latencySummary.stt_final_ms),
+            },
+            {
+                label: t("phoneCall.latencyLlm"),
+                value: formatLatencyMs(latencySummary.llm_ttfb_ms),
+            },
+            {
+                label: t("phoneCall.latencyTts"),
+                value: formatLatencyMs(latencySummary.tts_ttfb_ms),
+            },
+        ]
+        : [];
+    const hasLatencyMeasurements = latencyRows.some((row) => row.value !== "-");
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -620,6 +667,42 @@ export const PhoneCallDialog = ({
                                         <p className="mt-1 text-xs text-muted-foreground">
                                             {t("phoneCall.workflowRun")} {workflowRunId}
                                         </p>
+                                    )}
+                                    {latencySummary && (
+                                        <div className="mt-3 border-t border-teal-500/20 pt-3 text-xs">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <p className="font-medium text-foreground">
+                                                    {t("phoneCall.latencyTitle")}
+                                                </p>
+                                                <p className="text-muted-foreground">
+                                                    {t("phoneCall.latencyProfile")}{" "}
+                                                    <span className="font-mono">
+                                                        {latencySummary.latency_profile ?? "-"}
+                                                    </span>
+                                                </p>
+                                            </div>
+                                            {hasLatencyMeasurements ? (
+                                                <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+                                                    {latencyRows.map((row) => (
+                                                        <div
+                                                            key={row.label}
+                                                            className="contents"
+                                                        >
+                                                            <span className="text-muted-foreground">
+                                                                {row.label}
+                                                            </span>
+                                                            <span className="text-right font-mono text-foreground">
+                                                                {row.value}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="mt-2 text-muted-foreground">
+                                                    {t("phoneCall.latencyPending")}
+                                                </p>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
                             </div>

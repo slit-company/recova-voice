@@ -1,6 +1,47 @@
-# Dograh - Project Overview
+# Recova / Dograh Fork - Project Overview
 
-Dograh is a voice AI platform for building and deploying conversational AI agents with telephony and WebRTC support.
+Recova is a Korean B2B voice AI product built from a fork of Dograh. Dograh's
+core platform remains the technical base: workflow-based voice agents,
+telephony/WebRTC runtime, campaigns, reporting, generated SDKs, and OSS
+deployment scripts. New product work should be Recova-first while preserving
+Dograh compatibility where names are tied to upstream packages, image names,
+protocols, or unfinished migration work.
+
+Current state: this repo is mid-migration. `api/app.py` and the Next.js metadata
+already identify the product as Recova, while most docs, setup scripts,
+screenshots, public links, package names, and deployment images still say
+Dograh. Do not perform a blind search-and-replace; rebrand only when the
+corresponding runtime, docs, links, screenshots, and deployment artifacts are
+true.
+
+## Product Priorities
+
+- Korean B2B operators are the target users: sales/support teams, call-center
+  style operations, admin/superadmin workflows, organization-level controls,
+  Korean-language call behavior, and measurable call outcomes.
+- Recova's near-term sales motion is a self-serve B2B demo funnel. Prospects
+  should be able to enter the product, create their own voice agent, input their
+  own phone number for a test call, experience inbound and outbound calling, and
+  then evaluate adopting Recova for their company. Treat this as a product
+  direction, not a one-off demo script.
+- Current demo-call method recommendation: default the self-serve B2B
+  demo/test-call path to the standard STT + LLM + TTS pipeline, not Realtime.
+  The reason is adoption evaluation: prospects need dependable transcripts,
+  reports, tool-call traces, provider flexibility, cost-per-minute visibility,
+  and debuggable failures more than the lowest possible first-turn latency.
+  Keep Realtime available as an opt-in low-latency/premium showcase path, but
+  do not make it the default until measured call data shows it wins on latency,
+  interruption quality, drop rate, tool-call correctness, transcript/report
+  quality, and cost per minute for Korean B2B scenarios. See
+  `docs/product/realtime-development-direction.md` for the current Realtime
+  implementation analysis and development roadmap. See
+  `docs/product/returnzero-latency-optimization.md` for the current ReturnZero
+  STT + LLM + TTS latency rollout, `speed_demo` defaults, benchmark command,
+  and rollback guidance.
+- Treat campaigns, telephony configuration, reports, usage/cost, recordings,
+  API keys, organizations, and superadmin as production surfaces.
+- Keep tenant isolation as a hard security invariant. Any organization-scoped
+  resource read/write must filter or validate by `organization_id`.
 
 ## Project Structure
 
@@ -22,6 +63,33 @@ dograh/
 - **Database**: PostgreSQL with SQLAlchemy (async)
 - **Cache/Queue**: Redis with ARQ for background tasks
 - **Storage**: MinIO (S3-compatible) for audio files
+
+## Current Migration Map
+
+| Area | Current state | Agent guidance |
+| ---- | ------------- | -------------- |
+| Backend API | FastAPI app metadata says Recova; many modules still Dograh-named | Prefer Recova in user-facing metadata, preserve stable internal identifiers unless migration is explicit |
+| Frontend | Next.js metadata says Recova; UI copy is mixed | New B2B product copy should say Recova; keep generated client files untouched |
+| Docs | Mintlify docs are mostly upstream Dograh | Keep docs truthful; do not publish Recova claims before screenshots, domains, and commands are valid |
+| Deployment | Compose/scripts/images are Dograh-oriented | Read `scripts/AGENTS.md`; image/registry naming changes must be coordinated |
+| Telephony | Registry-driven multi-provider subsystem | Read nested telephony `AGENTS.md` files before edits |
+| Pipecat | Submodule/vendor framework | Avoid modifying unless the task is explicitly Pipecat-level |
+
+## Where To Look
+
+| Task | Location | Notes |
+| ---- | -------- | ----- |
+| API entrypoint | `api/app.py` | App metadata, `/api/v1`, MCP mount, worker sync startup |
+| Route composition | `api/routes/main.py` | Main router aggregation and health response |
+| Workflow builder/runtime | `api/services/workflow/` | Graph, node data/specs, tools, QA, text chat |
+| Live voice pipeline | `api/services/pipecat/` | Pipeline, audio, realtime adapters, event handling |
+| Telephony providers | `api/services/telephony/` | Provider registry; nested instructions apply |
+| Campaigns | `api/services/campaign/`, `ui/src/app/campaigns/` | B2B outbound calling and scheduling |
+| Reports/usage/cost | `api/services/reports/`, `api/services/pricing/`, `ui/src/app/reports/`, `ui/src/app/usage/` | B2B analytics and billing-adjacent surfaces |
+| Frontend shell/pages | `ui/src/app/`, `ui/src/components/` | Next.js App Router and dashboard UI |
+| API client | `ui/src/client/` | Generated; use `npm run generate-client` |
+| Docs navigation | `docs/docs.json` | Mintlify structure and navigation |
+| Startup/deployment | `scripts/`, `docker-compose*.yaml` | Scripts are coupled; read `scripts/AGENTS.md` |
 
 ## Local Development
 

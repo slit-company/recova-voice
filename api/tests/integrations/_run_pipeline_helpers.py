@@ -82,6 +82,7 @@ def patch_run_pipeline_externals(
     *,
     llm: MockLLMService | None = None,
     tts: MockTTSService | None = None,
+    stt_factory=None,
 ):
     """Patch the externally-talking pieces of ``_run_pipeline`` and capture
     the constructed ``PipelineTask`` so tests can drive it from outside.
@@ -97,6 +98,9 @@ def patch_run_pipeline_externals(
         tts: Optional pre-built ``MockTTSService``. Same semantics as
             ``llm``: pass an instance to share state with the test, or
             ``None`` to use a fresh one.
+        stt_factory: Optional callback invoked with the patched
+            ``create_stt_service`` args/kwargs. When omitted, a passthrough
+            processor is returned.
     """
     from api.services.pipecat import pipeline_builder as _pipeline_builder
 
@@ -113,6 +117,11 @@ def patch_run_pipeline_externals(
     def _tts_factory(*_args, **_kwargs):
         return tts if tts is not None else MockTTSService()
 
+    def _stt_factory(*_args, **_kwargs):
+        if stt_factory is not None:
+            return stt_factory(*_args, **_kwargs)
+        return PassthroughProcessor()
+
     with ExitStack() as stack:
         # Replace service factories with in-process test doubles.
         stack.enter_context(
@@ -124,7 +133,7 @@ def patch_run_pipeline_externals(
         stack.enter_context(
             patch(
                 "api.services.pipecat.run_pipeline.create_stt_service",
-                lambda *_args, **_kwargs: PassthroughProcessor(),
+                _stt_factory,
             )
         )
         stack.enter_context(
@@ -183,6 +192,7 @@ async def create_workflow_run_rows(
     async_session,
     *,
     workflow_definition: dict,
+    workflow_configurations: dict | None = None,
     name_prefix: str,
     provider_id_suffix: str,
 ):
@@ -227,6 +237,13 @@ async def create_workflow_run_rows(
         user_id=user.id,
         organization_id=org.id,
     )
+    if workflow_configurations is not None:
+        await db_session.save_workflow_draft(
+            workflow_id=workflow.id,
+            workflow_definition=workflow_definition,
+            workflow_configurations=workflow_configurations,
+        )
+        await db_session.publish_workflow_draft(workflow.id)
 
     workflow_run = await db_session.create_workflow_run(
         name=f"{name_prefix} Run",

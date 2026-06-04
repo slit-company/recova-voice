@@ -6,7 +6,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { AmbientNoiseConfiguration, TurnStopStrategy, WorkflowConfigurations } from "@/types/workflow-configurations";
+import { stripLatencyTuningFields } from "@/lib/workflow-latency-config";
+import {
+    AmbientNoiseConfiguration,
+    DEFAULT_LATENCY_CONFIGURATION,
+    LatencyProfile,
+    TurnStopStrategy,
+    WorkflowConfigurations,
+} from "@/types/workflow-configurations";
+
+import { LatencyProfileControls } from "./LatencyProfileControls";
 
 interface ConfigurationsDialogProps {
     open: boolean;
@@ -44,6 +53,27 @@ export const ConfigurationsDialog = ({
     const [turnStopStrategy, setTurnStopStrategy] = useState<TurnStopStrategy>(
         workflowConfigurations?.turn_stop_strategy || 'transcription'
     );
+    const [latencyProfile, setLatencyProfile] = useState<LatencyProfile>(
+        workflowConfigurations?.latency_profile || DEFAULT_LATENCY_CONFIGURATION.latency_profile
+    );
+    const [userSpeechTimeoutSeconds, setUserSpeechTimeoutSeconds] = useState<number>(
+        workflowConfigurations?.user_speech_timeout_seconds || DEFAULT_LATENCY_CONFIGURATION.user_speech_timeout_seconds
+    );
+    const [ttsAggregationSilenceSeconds, setTtsAggregationSilenceSeconds] = useState<number>(
+        workflowConfigurations?.tts_aggregation_silence_seconds || DEFAULT_LATENCY_CONFIGURATION.tts_aggregation_silence_seconds
+    );
+    const [preCallFetchTimeoutSeconds, setPreCallFetchTimeoutSeconds] = useState<number>(
+        workflowConfigurations?.pre_call_fetch_timeout_seconds || DEFAULT_LATENCY_CONFIGURATION.pre_call_fetch_timeout_seconds
+    );
+    const [preCallFetchRequired, setPreCallFetchRequired] = useState<boolean>(
+        workflowConfigurations?.pre_call_fetch_required ?? DEFAULT_LATENCY_CONFIGURATION.pre_call_fetch_required
+    );
+    const [returnzeroTtfsP99LatencySeconds, setReturnzeroTtfsP99LatencySeconds] = useState<number>(
+        workflowConfigurations?.returnzero_ttfs_p99_latency_seconds || DEFAULT_LATENCY_CONFIGURATION.returnzero_ttfs_p99_latency_seconds
+    );
+    const [speedProfileRespectDelayedStart, setSpeedProfileRespectDelayedStart] = useState<boolean>(
+        workflowConfigurations?.speed_profile_respect_delayed_start ?? DEFAULT_LATENCY_CONFIGURATION.speed_profile_respect_delayed_start
+    );
     const [contextCompactionEnabled, setContextCompactionEnabled] = useState<boolean>(
         workflowConfigurations?.context_compaction_enabled ?? false
     );
@@ -53,11 +83,23 @@ export const ConfigurationsDialog = ({
         setIsSaving(true);
         try {
             await onSave({
+                ...stripLatencyTuningFields(workflowConfigurations),
                 ambient_noise_configuration: ambientNoiseConfig,
                 max_call_duration: maxCallDuration,
                 max_user_idle_timeout: maxUserIdleTimeout,
                 smart_turn_stop_secs: smartTurnStopSecs,
                 turn_stop_strategy: turnStopStrategy,
+                latency_profile: latencyProfile,
+                ...(latencyProfile === "custom" ? {
+                    user_speech_timeout_seconds: userSpeechTimeoutSeconds,
+                    tts_aggregation_silence_seconds: ttsAggregationSilenceSeconds,
+                    pre_call_fetch_timeout_seconds: preCallFetchTimeoutSeconds,
+                    pre_call_fetch_required: preCallFetchRequired,
+                    returnzero_ttfs_p99_latency_seconds: returnzeroTtfsP99LatencySeconds,
+                } : {}),
+                ...(latencyProfile === "speed_demo" ? {
+                    speed_profile_respect_delayed_start: speedProfileRespectDelayedStart,
+                } : {}),
                 context_compaction_enabled: contextCompactionEnabled,
             }, name);
             onOpenChange(false);
@@ -77,6 +119,13 @@ export const ConfigurationsDialog = ({
             setMaxUserIdleTimeout(workflowConfigurations?.max_user_idle_timeout || 10);
             setSmartTurnStopSecs(workflowConfigurations?.smart_turn_stop_secs || 2);
             setTurnStopStrategy(workflowConfigurations?.turn_stop_strategy || 'transcription');
+            setLatencyProfile(workflowConfigurations?.latency_profile || DEFAULT_LATENCY_CONFIGURATION.latency_profile);
+            setUserSpeechTimeoutSeconds(workflowConfigurations?.user_speech_timeout_seconds || DEFAULT_LATENCY_CONFIGURATION.user_speech_timeout_seconds);
+            setTtsAggregationSilenceSeconds(workflowConfigurations?.tts_aggregation_silence_seconds || DEFAULT_LATENCY_CONFIGURATION.tts_aggregation_silence_seconds);
+            setPreCallFetchTimeoutSeconds(workflowConfigurations?.pre_call_fetch_timeout_seconds || DEFAULT_LATENCY_CONFIGURATION.pre_call_fetch_timeout_seconds);
+            setPreCallFetchRequired(workflowConfigurations?.pre_call_fetch_required ?? DEFAULT_LATENCY_CONFIGURATION.pre_call_fetch_required);
+            setReturnzeroTtfsP99LatencySeconds(workflowConfigurations?.returnzero_ttfs_p99_latency_seconds || DEFAULT_LATENCY_CONFIGURATION.returnzero_ttfs_p99_latency_seconds);
+            setSpeedProfileRespectDelayedStart(workflowConfigurations?.speed_profile_respect_delayed_start ?? DEFAULT_LATENCY_CONFIGURATION.speed_profile_respect_delayed_start);
             setContextCompactionEnabled(workflowConfigurations?.context_compaction_enabled ?? false);
         }
     }, [open, workflowName, workflowConfigurations]);
@@ -220,6 +269,23 @@ export const ConfigurationsDialog = ({
                         )}
                     </div>
 
+                    <LatencyProfileControls
+                        latencyProfile={latencyProfile}
+                        userSpeechTimeoutSeconds={userSpeechTimeoutSeconds}
+                        ttsAggregationSilenceSeconds={ttsAggregationSilenceSeconds}
+                        preCallFetchTimeoutSeconds={preCallFetchTimeoutSeconds}
+                        preCallFetchRequired={preCallFetchRequired}
+                        returnzeroTtfsP99LatencySeconds={returnzeroTtfsP99LatencySeconds}
+                        speedProfileRespectDelayedStart={speedProfileRespectDelayedStart}
+                        onLatencyProfileChange={setLatencyProfile}
+                        onUserSpeechTimeoutSecondsChange={setUserSpeechTimeoutSeconds}
+                        onTtsAggregationSilenceSecondsChange={setTtsAggregationSilenceSeconds}
+                        onPreCallFetchTimeoutSecondsChange={setPreCallFetchTimeoutSeconds}
+                        onPreCallFetchRequiredChange={setPreCallFetchRequired}
+                        onReturnzeroTtfsP99LatencySecondsChange={setReturnzeroTtfsP99LatencySeconds}
+                        onSpeedProfileRespectDelayedStartChange={setSpeedProfileRespectDelayedStart}
+                    />
+
                     {/* Context Management Section */}
                     <div className="space-y-4">
                         <div>
@@ -306,4 +372,3 @@ export const ConfigurationsDialog = ({
         </Dialog>
     );
 };
-

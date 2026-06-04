@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from loguru import logger
+from pipecat.utils.enums import RealtimeFeedbackType
 
 from api.db import db_client
 from api.db.models import UserModel
@@ -52,6 +53,24 @@ _PREVIEW_METADATA_SENSITIVE_FRAGMENTS = (
     "api_key",
     "credential",
 )
+_PREVIEW_RUNTIME_LATENCY_PROFILE = "speed_demo"
+_PREVIEW_LATENCY_EVENT_TYPE = RealtimeFeedbackType.LATENCY_MEASURED.value
+_PREVIEW_LATENCY_EVENT_KIND = "voice_latency_breakdown"
+
+
+def _log_preview_latency_profile(
+    *,
+    session_id: int,
+    workflow_run_id: int,
+    direction: str,
+) -> None:
+    logger.info(
+        "Phone preview latency profile "
+        f"phone_preview_session_id={session_id} "
+        f"workflow_run_id={workflow_run_id} "
+        f"direction={direction} "
+        f"latency_profile={_PREVIEW_RUNTIME_LATENCY_PROFILE}"
+    )
 
 
 async def _get_preview_telephony_provider_by_id(config_id: int, organization_id: int):
@@ -93,6 +112,30 @@ def _preview_config_has_service(config: Any, field_name: str) -> bool:
 
 
 @dataclass
+class PhonePreviewLatencySummaryData:
+    workflow_run_id: int
+    latency_profile: str | None
+    user_stop_to_bot_started_ms: float | None
+    stt_final_ms: float | None
+    llm_ttfb_ms: float | None
+    tts_ttfb_ms: float | None
+    first_response_ms: float | None
+    updated_at: str | None
+
+    def as_dict(self) -> dict[str, int | float | str | None]:
+        return {
+            "workflow_run_id": self.workflow_run_id,
+            "latency_profile": self.latency_profile,
+            "user_stop_to_bot_started_ms": self.user_stop_to_bot_started_ms,
+            "stt_final_ms": self.stt_final_ms,
+            "llm_ttfb_ms": self.llm_ttfb_ms,
+            "tts_ttfb_ms": self.tts_ttfb_ms,
+            "first_response_ms": self.first_response_ms,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass
 class PhonePreviewResult:
     session_id: int
     status: str
@@ -104,6 +147,7 @@ class PhonePreviewResult:
     failure_reason: str | None = None
     dev_otp_code: str | None = None
     inbound_phone_number: str | None = None
+    latency_summary: PhonePreviewLatencySummaryData | None = None
 
     def as_dict(self) -> dict[str, Any]:
         data = {
@@ -119,6 +163,8 @@ class PhonePreviewResult:
             data["dev_otp_code"] = self.dev_otp_code
         if self.inbound_phone_number:
             data["inbound_phone_number"] = self.inbound_phone_number
+        if self.latency_summary is not None:
+            data["latency_summary"] = self.latency_summary.as_dict()
         return data
 
 
@@ -481,6 +527,7 @@ class PhonePreviewService:
                 "active",
             },
         )
+        workflow_run = None
         if session.workflow_run_id and session.status in {"calling", "active"}:
             workflow_run = await db_client.get_workflow_run(
                 session.workflow_run_id, organization_id=organization_id
@@ -503,6 +550,7 @@ class PhonePreviewService:
             session,
             otp_required=session.status == "pending_verification",
             inbound_phone_number=inbound_phone_number,
+            latency_summary=self._latency_summary_from_workflow_run(workflow_run),
         )
 
     async def _start_inbound_preview_stream(
@@ -544,6 +592,7 @@ class PhonePreviewService:
             "called_number_masked": mask_phone(normalized_data.to_number),
             "direction": "inbound",
             "telephony_preview": True,
+            "runtime_latency_profile": _PREVIEW_RUNTIME_LATENCY_PROFILE,
             "preview_session_id": session.id,
             "max_duration_seconds": session.max_duration_seconds,
         }
@@ -564,6 +613,11 @@ class PhonePreviewService:
             },
             use_draft=True,
             organization_id=session.organization_id,
+        )
+        _log_preview_latency_profile(
+            session_id=session.id,
+            workflow_run_id=workflow_run.id,
+            direction="inbound",
         )
 
         session = await db_client.attach_phone_preview_call(
@@ -766,6 +820,7 @@ class PhonePreviewService:
             "phone_number_masked": session.phone_number_masked,
             "called_number_masked": session.phone_number_masked,
             "telephony_preview": True,
+            "runtime_latency_profile": _PREVIEW_RUNTIME_LATENCY_PROFILE,
             "preview_session_id": session.id,
             "max_duration_seconds": session.max_duration_seconds,
         }
@@ -781,6 +836,11 @@ class PhonePreviewService:
             initial_context=initial_context,
             use_draft=True,
             organization_id=session.organization_id,
+        )
+        _log_preview_latency_profile(
+            session_id=session.id,
+            workflow_run_id=workflow_run.id,
+            direction="outbound",
         )
 
         session = await db_client.attach_phone_preview_call(
@@ -851,6 +911,7 @@ class PhonePreviewService:
             "phone_number_masked": session.phone_number_masked,
             "called_number_masked": session.phone_number_masked,
             "telephony_preview": True,
+            "runtime_latency_profile": _PREVIEW_RUNTIME_LATENCY_PROFILE,
             "preview_session_id": session.id,
         }
         caller_number = getattr(call_result, "caller_number", None)
@@ -935,6 +996,74 @@ class PhonePreviewService:
                 detail="telephony_provider_not_supported_for_inbound_preview",
             )
 
+    def _latency_summary_from_workflow_run(
+        self, workflow_run
+    ) -> PhonePreviewLatencySummaryData | None:
+        if workflow_run is None:
+            return None
+        logs = getattr(workflow_run, "logs", None)
+        if not isinstance(logs, dict):
+            return None
+        events = logs.get("realtime_feedback_events")
+        if not isinstance(events, list):
+            return None
+
+        workflow_run_id = self._workflow_run_id_from(workflow_run)
+        if workflow_run_id is None:
+            return None
+
+        for event in reversed(events):
+            if not isinstance(event, dict):
+                continue
+            if event.get("type") != _PREVIEW_LATENCY_EVENT_TYPE:
+                continue
+            payload = event.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            if payload.get("kind") != _PREVIEW_LATENCY_EVENT_KIND:
+                continue
+            return PhonePreviewLatencySummaryData(
+                workflow_run_id=workflow_run_id,
+                latency_profile=self._optional_string(payload.get("latency_profile")),
+                user_stop_to_bot_started_ms=self._optional_float(
+                    payload.get("user_stop_to_bot_started_ms")
+                ),
+                stt_final_ms=self._optional_float(payload.get("stt_final_ms")),
+                llm_ttfb_ms=self._optional_float(payload.get("llm_ttfb_ms")),
+                tts_ttfb_ms=self._optional_float(payload.get("tts_ttfb_ms")),
+                first_response_ms=self._optional_float(
+                    payload.get("first_response_ms")
+                ),
+                updated_at=self._optional_string(
+                    event.get("updated_at")
+                    or payload.get("updated_at")
+                    or payload.get("bot_started_speaking_at")
+                    or payload.get("initial_response_triggered_at")
+                    or payload.get("user_turn_stopped_at")
+                ),
+            )
+        return None
+
+    def _workflow_run_id_from(self, workflow_run) -> int | None:
+        workflow_run_id = getattr(workflow_run, "id", None)
+        if isinstance(workflow_run_id, int) and not isinstance(workflow_run_id, bool):
+            return workflow_run_id
+        return None
+
+    def _optional_float(self, value: Any) -> float | None:
+        if isinstance(value, bool) or value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        return None
+
+    def _optional_string(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        return str(value)
+
     async def _preview_inbound_phone_number(self, session) -> str | None:
         configuration_id = getattr(session, "preview_telephony_configuration_id", None)
         phone_number_id = getattr(session, "preview_from_phone_number_id", None)
@@ -1007,6 +1136,7 @@ class PhonePreviewService:
         *,
         otp_required: bool,
         inbound_phone_number: str | None = None,
+        latency_summary: PhonePreviewLatencySummaryData | None = None,
     ) -> PhonePreviewResult:
         return PhonePreviewResult(
             session_id=session.id,
@@ -1018,6 +1148,7 @@ class PhonePreviewService:
             provider_call_id=session.provider_call_id,
             failure_reason=session.failure_reason,
             inbound_phone_number=inbound_phone_number,
+            latency_summary=latency_summary,
         )
 
 

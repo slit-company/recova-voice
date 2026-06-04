@@ -1,6 +1,9 @@
 # UI - Frontend Application
 
-Next.js 15 frontend for the Dograh voice AI platform.
+Next.js 15 frontend for Recova, currently built on Dograh's workflow-builder UI.
+The shell metadata says Recova, while many labels, screenshots, docs links, and
+mental models still come from Dograh. New product-facing UI should use Recova
+unless it is intentionally preserving an upstream or compatibility name.
 
 ## Project Structure
 
@@ -38,6 +41,23 @@ ui/
 - Tailwind CSS with shadcn/ui components
 - Zustand for state management
 - @xyflow/react for workflow builder
+
+## Recova UI Priorities
+
+- Design for Korean B2B operators who repeatedly manage campaigns, workflows,
+  recordings, reports, usage, API keys, and telephony configs. Favor dense,
+  scan-friendly operational screens over marketing-style pages.
+- The primary demo funnel is self-serve: prospects should create an agent,
+  enter their own phone number, run a test call, and understand both inbound and
+  outbound call value before adopting Recova at a company level. Keep onboarding,
+  empty states, test-call flows, and telephony setup optimized for this path.
+- Do not introduce Recova branding into docs links, deployment copy, or support
+  links unless the destination is actually Recova-ready.
+- Keep auth, selected organization/team, and API-token readiness explicit before
+  fetching tenant data.
+- Campaigns, reports, usage, settings, telephony configurations, and superadmin
+  are high-risk B2B surfaces. Check empty, loading, error, and permission states
+  when editing them.
 
 ## API Client
 
