@@ -31,6 +31,22 @@ RECOVA_INVENTORY_STATE_KEY = "recova_inventory_state"
 INVENTORY_ID_METADATA_KEY = "inventory_id"
 MANAGED_BY_METADATA_KEY = "managed_by"
 TELEPHONY_PHONE_NUMBER_ID_METADATA_KEY = "telephony_phone_number_id"
+CONTRACT_VERSION_METADATA_KEY = "contract_version"
+IS_CONTRACT_FIXTURE_METADATA_KEY = "is_contract_fixture"
+LIVE_TRUNK_VALIDATED_METADATA_KEY = "live_trunk_validated"
+LIVE_VALIDATION_SOURCE_METADATA_KEY = "live_validation_source"
+LIVE_VALIDATION_EVIDENCE_ID_METADATA_KEY = "live_validation_evidence_id"
+PROVIDER_METADATA_KEY = "provider"
+PROVIDER_CONFIG_ID_METADATA_KEY = "provider_config_id"
+TELEPHONY_CONFIGURATION_ID_METADATA_KEY = "telephony_configuration_id"
+PHONE_NUMBER_ID_METADATA_KEY = "phone_number_id"
+CALL_ATTEMPT_ID_METADATA_KEY = "call_attempt_id"
+LIVE_VALIDATION_TRUSTED_WRITER_METADATA_KEY = "live_validation_trusted_writer"
+LIVE_VALIDATION_TRUSTED_WRITER = "recova_operator_live_validation_v1"
+JAMBONZ_CONTRACT_VERSION = "jambonz_contract_v1"
+APPROVED_LIVE_VALIDATION_SOURCES = frozenset(
+    {"live_validation_tool", "operator_attestation"}
+)
 
 
 class TelephonyNumberInventoryError(Exception):
@@ -101,7 +117,9 @@ class TelephonyNumberInventoryClient(BaseDBClient):
                     country_code=country_code or normalized.country_code,
                     label=item.get("label"),
                     status=INVENTORY_STATUS_AVAILABLE,
-                    extra_metadata=item.get("extra_metadata") or {},
+                    extra_metadata=_strip_live_validation_metadata(
+                        item.get("extra_metadata") or {}
+                    ),
                 )
                 session.add(row)
                 await session.flush()
@@ -287,7 +305,7 @@ class TelephonyNumberInventoryClient(BaseDBClient):
             row.quarantined_reason = None
             row.retired_reason = None
             row.extra_metadata = _with_assigned_inventory_metadata(
-                row.extra_metadata,
+                _strip_live_validation_metadata(row.extra_metadata),
                 inventory_id=row.id,
                 telephony_phone_number_id=phone.id,
             )
@@ -449,6 +467,102 @@ class TelephonyNumberInventoryClient(BaseDBClient):
             await session.refresh(phone)
             return row, phone, workflow_name
 
+    async def attest_telephony_number_inventory_live_validation(
+        self,
+        inventory_id: int,
+        *,
+        actor_user_id: int | None,
+        live_validation_source: str,
+        live_validation_evidence_id: str,
+        contract_version: str | None = None,
+        call_attempt_id: str | None = None,
+        note: str | None = None,
+    ) -> TelephonyNumberInventoryModel:
+        source = str(live_validation_source or "").strip()
+        evidence_id = str(live_validation_evidence_id or "").strip()
+        if source not in APPROVED_LIVE_VALIDATION_SOURCES or not evidence_id:
+            raise TelephonyNumberInventoryConflictError(
+                "telephony_number_inventory_invalid_live_validation_evidence"
+            )
+
+        async with self.async_session() as session:
+            row = await self._get_inventory_for_update(session, inventory_id)
+            if not row:
+                raise TelephonyNumberInventoryNotFoundError(
+                    "telephony_number_inventory_not_found"
+                )
+            if row.provider != "jambonz":
+                raise TelephonyNumberInventoryConflictError(
+                    "telephony_number_inventory_live_validation_provider_unsupported"
+                )
+            if (
+                row.status != INVENTORY_STATUS_ASSIGNED
+                or row.organization_id is None
+                or row.telephony_configuration_id is None
+                or row.telephony_phone_number_id is None
+            ):
+                raise TelephonyNumberInventoryConflictError(
+                    "telephony_number_inventory_not_live_validation_ready"
+                )
+
+            phone = await session.get(
+                TelephonyPhoneNumberModel, row.telephony_phone_number_id
+            )
+            if not phone or phone.organization_id != row.organization_id:
+                raise TelephonyNumberInventoryConflictError(
+                    "telephony_number_inventory_phone_number_mismatch"
+                )
+            if not phone.is_active:
+                raise TelephonyNumberInventoryConflictError(
+                    "telephony_number_inventory_phone_number_inactive"
+                )
+
+            contract = contract_version or JAMBONZ_CONTRACT_VERSION
+            row.extra_metadata = _with_live_validation_metadata(
+                _with_assigned_inventory_metadata(
+                    _strip_live_validation_metadata(row.extra_metadata),
+                    inventory_id=row.id,
+                    telephony_phone_number_id=phone.id,
+                ),
+                row=row,
+                live_validation_source=source,
+                live_validation_evidence_id=evidence_id,
+                contract_version=contract,
+                call_attempt_id=call_attempt_id,
+            )
+            phone.extra_metadata = _with_live_validation_metadata(
+                _with_assigned_inventory_metadata(
+                    _strip_live_validation_metadata(phone.extra_metadata),
+                    inventory_id=row.id,
+                ),
+                row=row,
+                live_validation_source=source,
+                live_validation_evidence_id=evidence_id,
+                contract_version=contract,
+                call_attempt_id=call_attempt_id,
+            )
+            await self._write_inventory_audit(
+                session,
+                inventory_id=row.id,
+                actor_user_id=actor_user_id,
+                organization_id=row.organization_id,
+                action="live_validation_attested",
+                from_status=row.status,
+                to_status=row.status,
+                details={
+                    "live_validation_source": source,
+                    "live_validation_evidence_id": evidence_id,
+                    "contract_version": contract,
+                    "call_attempt_id": call_attempt_id,
+                    "telephony_configuration_id": row.telephony_configuration_id,
+                    "telephony_phone_number_id": phone.id,
+                    "note": note,
+                },
+            )
+            await session.commit()
+            await session.refresh(row)
+            return row
+
     async def get_assigned_inventory_for_phone_number(
         self,
         *,
@@ -566,12 +680,14 @@ class TelephonyNumberInventoryClient(BaseDBClient):
                     phone.is_active = False
                     phone.is_default_caller_id = False
                     phone.inbound_workflow_id = None
-                    phone.extra_metadata = _strip_assigned_inventory_metadata(
-                        phone.extra_metadata
+                    phone.extra_metadata = _strip_live_validation_metadata(
+                        _strip_assigned_inventory_metadata(phone.extra_metadata)
                     )
             row.telephony_phone_number_id = None
             row.telephony_configuration_id = None
-            row.extra_metadata = _strip_assigned_inventory_metadata(row.extra_metadata)
+            row.extra_metadata = _strip_live_validation_metadata(
+                _strip_assigned_inventory_metadata(row.extra_metadata)
+            )
             await self._write_inventory_audit(
                 session,
                 inventory_id=row.id,
@@ -707,7 +823,7 @@ class TelephonyNumberInventoryClient(BaseDBClient):
             phone.inbound_workflow_id = inbound_workflow_id
         phone.is_active = True
         phone.extra_metadata = _with_assigned_inventory_metadata(
-            phone.extra_metadata,
+            _strip_live_validation_metadata(phone.extra_metadata),
             inventory_id=row.id,
         )
         if set_default_caller_id:
@@ -799,6 +915,35 @@ def _with_assigned_inventory_metadata(
     return metadata
 
 
+def _with_live_validation_metadata(
+    extra_metadata: dict[str, Any] | None,
+    *,
+    row: TelephonyNumberInventoryModel,
+    live_validation_source: str,
+    live_validation_evidence_id: str,
+    contract_version: str,
+    call_attempt_id: str | None,
+) -> dict[str, Any]:
+    metadata = dict(extra_metadata or {})
+    metadata[CONTRACT_VERSION_METADATA_KEY] = contract_version
+    metadata[IS_CONTRACT_FIXTURE_METADATA_KEY] = False
+    metadata[LIVE_TRUNK_VALIDATED_METADATA_KEY] = True
+    metadata[LIVE_VALIDATION_SOURCE_METADATA_KEY] = live_validation_source
+    metadata[LIVE_VALIDATION_EVIDENCE_ID_METADATA_KEY] = live_validation_evidence_id
+    metadata[LIVE_VALIDATION_TRUSTED_WRITER_METADATA_KEY] = (
+        LIVE_VALIDATION_TRUSTED_WRITER
+    )
+    metadata[PROVIDER_METADATA_KEY] = row.provider
+    metadata[PROVIDER_CONFIG_ID_METADATA_KEY] = str(row.telephony_configuration_id)
+    metadata[TELEPHONY_CONFIGURATION_ID_METADATA_KEY] = row.telephony_configuration_id
+    metadata[PHONE_NUMBER_ID_METADATA_KEY] = row.telephony_phone_number_id
+    metadata[TELEPHONY_PHONE_NUMBER_ID_METADATA_KEY] = row.telephony_phone_number_id
+    metadata[INVENTORY_ID_METADATA_KEY] = row.id
+    if call_attempt_id:
+        metadata[CALL_ATTEMPT_ID_METADATA_KEY] = call_attempt_id
+    return metadata
+
+
 def _strip_assigned_inventory_metadata(
     extra_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
@@ -808,6 +953,26 @@ def _strip_assigned_inventory_metadata(
     metadata.pop(TELEPHONY_PHONE_NUMBER_ID_METADATA_KEY, None)
     if metadata.get(MANAGED_BY_METADATA_KEY) == MANAGED_INVENTORY_CREDENTIAL:
         metadata.pop(MANAGED_BY_METADATA_KEY, None)
+    return metadata
+
+
+def _strip_live_validation_metadata(
+    extra_metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    metadata = dict(extra_metadata or {})
+    for key in (
+        CONTRACT_VERSION_METADATA_KEY,
+        IS_CONTRACT_FIXTURE_METADATA_KEY,
+        LIVE_TRUNK_VALIDATED_METADATA_KEY,
+        LIVE_VALIDATION_SOURCE_METADATA_KEY,
+        LIVE_VALIDATION_EVIDENCE_ID_METADATA_KEY,
+        LIVE_VALIDATION_TRUSTED_WRITER_METADATA_KEY,
+        PROVIDER_CONFIG_ID_METADATA_KEY,
+        TELEPHONY_CONFIGURATION_ID_METADATA_KEY,
+        PHONE_NUMBER_ID_METADATA_KEY,
+        CALL_ATTEMPT_ID_METADATA_KEY,
+    ):
+        metadata.pop(key, None)
     return metadata
 
 def _iso(value: datetime | None) -> str | None:

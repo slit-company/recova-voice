@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -62,6 +62,8 @@ class TelephonyNumberInventoryReadinessMetadata(BaseModel):
     live_validation_evidence_id: str | None = None
     provider_config_id: str | None = None
     phone_number_id: int | None = None
+    telephony_configuration_id: int | None = None
+    telephony_phone_number_id: int | None = None
     inventory_id: int | None = None
     call_attempt_id: str | None = None
 
@@ -123,6 +125,16 @@ class TelephonyNumberInventoryAssignRequest(BaseModel):
 
 class TelephonyNumberInventoryStateChangeRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=500)
+
+
+class TelephonyNumberInventoryLiveValidationRequest(BaseModel):
+    live_validation_source: Literal[
+        "operator_attestation", "live_validation_tool"
+    ] = "operator_attestation"
+    live_validation_evidence_id: str = Field(..., min_length=1, max_length=128)
+    contract_version: str | None = Field(default=None, max_length=64)
+    call_attempt_id: str | None = Field(default=None, max_length=128)
+    note: str | None = Field(default=None, max_length=500)
 
 
 class TelephonyNumberInventoryAuditResponse(BaseModel):

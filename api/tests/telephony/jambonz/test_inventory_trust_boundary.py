@@ -121,6 +121,50 @@ async def test_assignment_stamps_full_trust_tuple_and_policy_requires_inventory_
 
 
 @pytest.mark.asyncio
+async def test_live_validation_attestation_stamps_trusted_evidence_only_on_assigned_pair(
+    db_session,
+):
+    async with db_session.async_session() as session:
+        org = await _create_org(session)
+        inventory = await _create_available_inventory(session, address="+827055556666")
+        organization_id = org.id
+        inventory_id = inventory.id
+
+    assigned = await db_session.assign_telephony_number_inventory(
+        inventory_id,
+        organization_id=organization_id,
+        actor_user_id=None,
+        label="Validated Recova 070",
+        set_default_caller_id=True,
+    )
+    phone_id = assigned.telephony_phone_number_id
+
+    attested = await db_session.attest_telephony_number_inventory_live_validation(
+        inventory_id,
+        actor_user_id=None,
+        live_validation_source="operator_attestation",
+        live_validation_evidence_id="real-route-cdr-001",
+        call_attempt_id="outbound:jambonz:real-route-001",
+        note="staging proof",
+    )
+
+    async with db_session.async_session() as session:
+        phone = await session.get(TelephonyPhoneNumberModel, phone_id)
+        inventory_row = await session.get(TelephonyNumberInventoryModel, inventory_id)
+
+    assert attested.id == inventory_id
+    assert inventory_row.extra_metadata["live_trunk_validated"] is True
+    assert inventory_row.extra_metadata["live_validation_source"] == "operator_attestation"
+    assert inventory_row.extra_metadata["live_validation_evidence_id"] == "real-route-cdr-001"
+    assert inventory_row.extra_metadata["contract_version"] == "jambonz_contract_v1"
+    assert inventory_row.extra_metadata["is_contract_fixture"] is False
+    assert inventory_row.extra_metadata["call_attempt_id"] == "outbound:jambonz:real-route-001"
+    assert phone.extra_metadata["live_trunk_validated"] is True
+    assert phone.extra_metadata[INVENTORY_ID_METADATA_KEY] == inventory_id
+    assert await is_assigned_recova_jambonz_070(phone)
+
+
+@pytest.mark.asyncio
 async def test_backfill_is_idempotent_and_restores_policy_recognition(db_session):
     async with db_session.async_session() as session:
         org = await _create_org(session)

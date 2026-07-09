@@ -15,6 +15,8 @@ from api.schemas.telephony_number_inventory import (
 )
 
 _MANAGED_INVENTORY_CREDENTIAL = "recova_number_inventory"
+_LIVE_VALIDATION_TRUSTED_WRITER_METADATA_KEY = "live_validation_trusted_writer"
+_LIVE_VALIDATION_TRUSTED_WRITER = "recova_operator_live_validation_v1"
 _ASSIGNMENT_STATE_KEYS = (
     "recova_inventory_state",
     "inventory_state",
@@ -34,6 +36,8 @@ _SAFE_METADATA_KEYS = {
     "managed_by",
     "operator_note",
     "phone_number_id",
+    "telephony_configuration_id",
+    "telephony_phone_number_id",
     "provider",
     "provider_config_id",
     "readiness_state",
@@ -127,6 +131,8 @@ def _normalize_readiness_claims(metadata: dict[str, Any]) -> dict[str, Any]:
         return metadata
     if (
         _metadata_bool(metadata, "is_contract_fixture")
+        or _metadata_string(metadata, _LIVE_VALIDATION_TRUSTED_WRITER_METADATA_KEY)
+        != _LIVE_VALIDATION_TRUSTED_WRITER
         or not _metadata_string(metadata, "live_validation_source")
         or not _metadata_string(metadata, "live_validation_evidence_id")
     ):
@@ -182,17 +188,22 @@ def _readiness_metadata(
         live_trunk_validated=live_trunk_validated,
         live_validation_source=live_validation_source,
         live_validation_evidence_id=live_validation_evidence_id,
-        provider_config_id=_metadata_string(metadata, "provider_config_id"),
-        phone_number_id=_metadata_int(metadata, "phone_number_id"),
+        provider_config_id=_metadata_string(metadata, "provider_config_id")
+        or _metadata_string(metadata, "telephony_configuration_id"),
+        phone_number_id=_metadata_int(metadata, "phone_number_id")
+        or _metadata_int(metadata, "telephony_phone_number_id"),
+        telephony_configuration_id=_metadata_int(metadata, "telephony_configuration_id"),
+        telephony_phone_number_id=_metadata_int(metadata, "telephony_phone_number_id"),
         inventory_id=_metadata_int(metadata, "inventory_id"),
         call_attempt_id=_metadata_string(metadata, "call_attempt_id"),
     )
 
 def inventory_to_response(row) -> TelephonyNumberInventoryResponse:
     response = TelephonyNumberInventoryResponse.model_validate(row)
-    safe_metadata = _normalize_readiness_claims(
-        _safe_metadata(getattr(row, "extra_metadata", {}) or {})
+    normalized_metadata = _normalize_readiness_claims(
+        getattr(row, "extra_metadata", {}) or {}
     )
+    safe_metadata = _safe_metadata(normalized_metadata)
     response.extra_metadata = safe_metadata
     response.assignment_metadata = _assignment_metadata(row, safe_metadata)
     response.readiness_metadata = _readiness_metadata(safe_metadata)
@@ -342,9 +353,31 @@ async def bind_customer_assigned_number(
     )
 
 
+async def attest_inventory_live_validation(
+    inventory_id: int,
+    *,
+    actor_user_id: int | None,
+    live_validation_source: str,
+    live_validation_evidence_id: str,
+    contract_version: str | None,
+    call_attempt_id: str | None,
+    note: str | None,
+):
+    return await db_client.attest_telephony_number_inventory_live_validation(
+        inventory_id,
+        actor_user_id=actor_user_id,
+        live_validation_source=live_validation_source,
+        live_validation_evidence_id=live_validation_evidence_id,
+        contract_version=contract_version,
+        call_attempt_id=call_attempt_id,
+        note=note,
+    )
+
+
 __all__ = [
     "TelephonyNumberInventoryError",
     "assigned_number_to_response",
+    "attest_inventory_live_validation",
     "assign_inventory_number",
     "audit_to_response",
     "bind_customer_assigned_number",

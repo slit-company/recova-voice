@@ -14,6 +14,7 @@ from api.schemas.telephony_number_inventory import (
     TelephonyNumberInventoryImportRequest,
     TelephonyNumberInventoryImportResponse,
     TelephonyNumberInventoryListResponse,
+    TelephonyNumberInventoryLiveValidationRequest,
     TelephonyNumberInventoryReserveRequest,
     TelephonyNumberInventoryResponse,
     TelephonyNumberInventorySkippedItem,
@@ -25,6 +26,7 @@ from api.services.feature_gates import require_self_serve_telephony
 from api.services.telephony_number_inventory import (
     TelephonyNumberInventoryError,
     assigned_number_to_response,
+    attest_inventory_live_validation,
     assign_inventory_number,
     audit_to_response,
     bind_customer_assigned_number,
@@ -179,6 +181,30 @@ async def retire_telephony_number_inventory(
             inventory_id,
             actor_user_id=user.id,
             reason=request.reason,
+        )
+    except TelephonyNumberInventoryError as error:
+        _raise_inventory_error(error)
+    return inventory_to_response(row)
+
+
+@operator_router.post(
+    "/{inventory_id}/live-validation",
+    response_model=TelephonyNumberInventoryResponse,
+)
+async def attest_telephony_number_inventory_live_validation(
+    inventory_id: int,
+    request: TelephonyNumberInventoryLiveValidationRequest,
+    user: UserModel = Depends(get_superuser),
+):
+    try:
+        row = await attest_inventory_live_validation(
+            inventory_id,
+            actor_user_id=user.id,
+            live_validation_source=request.live_validation_source,
+            live_validation_evidence_id=request.live_validation_evidence_id,
+            contract_version=request.contract_version,
+            call_attempt_id=request.call_attempt_id,
+            note=request.note,
         )
     except TelephonyNumberInventoryError as error:
         _raise_inventory_error(error)
