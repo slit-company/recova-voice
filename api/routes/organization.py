@@ -1064,6 +1064,9 @@ class LastCampaignSettingsResponse(BaseModel):
 class CampaignDefaultsResponse(BaseModel):
     concurrent_call_limit: int
     from_numbers_count: int
+    default_telephony_configuration_id: Optional[int] = None
+    default_telephony_configuration_name: Optional[str] = None
+    default_telephony_configuration_provider: Optional[str] = None
     default_retry_config: RetryConfigResponse
     last_campaign_settings: Optional[LastCampaignSettingsResponse] = None
 
@@ -1096,11 +1099,17 @@ async def get_campaign_defaults(
     # Phone-number count from the org's default telephony config (used by the
     # campaign UI to validate max_concurrency against caller-id supply).
     from_numbers_count = 0
+    default_telephony_configuration_id = None
+    default_telephony_configuration_name = None
+    default_telephony_configuration_provider = None
     try:
         default_cfg = await db_client.get_default_telephony_configuration(
             user.selected_organization_id
         )
         if default_cfg:
+            default_telephony_configuration_id = default_cfg.id
+            default_telephony_configuration_name = default_cfg.name
+            default_telephony_configuration_provider = default_cfg.provider
             addresses = await db_client.list_active_normalized_addresses_for_config(
                 default_cfg.id
             )
@@ -1151,6 +1160,9 @@ async def get_campaign_defaults(
     return CampaignDefaultsResponse(
         concurrent_call_limit=concurrent_limit,
         from_numbers_count=from_numbers_count,
+        default_telephony_configuration_id=default_telephony_configuration_id,
+        default_telephony_configuration_name=default_telephony_configuration_name,
+        default_telephony_configuration_provider=default_telephony_configuration_provider,
         default_retry_config=RetryConfigResponse(**DEFAULT_CAMPAIGN_RETRY_CONFIG),
         last_campaign_settings=last_campaign_settings,
     )

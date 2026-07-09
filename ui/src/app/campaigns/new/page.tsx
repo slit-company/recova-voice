@@ -54,6 +54,11 @@ export default function NewCampaignPage() {
     const [telephonyConfigs, setTelephonyConfigs] = useState<TelephonyConfigurationListItem[]>([]);
     const [selectedTelephonyConfigId, setSelectedTelephonyConfigId] = useState<string>('');
     const [isLoadingTelephonyConfigs, setIsLoadingTelephonyConfigs] = useState(true);
+    const [defaultTelephonyConfig, setDefaultTelephonyConfig] = useState<{
+        id: number;
+        name: string;
+        provider: string;
+    } | null>(null);
 
     // Advanced settings state
     const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
@@ -156,16 +161,32 @@ export default function NewCampaignPage() {
             });
 
             if (response.data) {
-                setOrgConcurrentLimit(response.data.concurrent_call_limit);
-                setFromNumbersCount(response.data.from_numbers_count);
+                const defaults = response.data as typeof response.data & {
+                    default_telephony_configuration_id?: number | null;
+                    default_telephony_configuration_name?: string | null;
+                    default_telephony_configuration_provider?: string | null;
+                    last_campaign_settings?: {
+                        retry_config?: { enabled: boolean; max_retries: number; retry_delay_seconds: number; retry_on_busy: boolean; retry_on_no_answer: boolean; retry_on_voicemail: boolean };
+                        max_concurrency?: number | null;
+                        schedule_config?: { enabled: boolean; timezone: string; slots: TimeSlot[] } | null;
+                        circuit_breaker?: { enabled: boolean; failure_threshold: number; window_seconds: number; min_calls_in_window: number } | null;
+                    } | null;
+                };
 
-                const last = (response.data as { last_campaign_settings?: {
-                    retry_config?: { enabled: boolean; max_retries: number; retry_delay_seconds: number; retry_on_busy: boolean; retry_on_no_answer: boolean; retry_on_voicemail: boolean };
-                    max_concurrency?: number | null;
-                    schedule_config?: { enabled: boolean; timezone: string; slots: TimeSlot[] } | null;
-                    circuit_breaker?: { enabled: boolean; failure_threshold: number; window_seconds: number; min_calls_in_window: number } | null;
-                } | null }).last_campaign_settings;
+                setOrgConcurrentLimit(defaults.concurrent_call_limit);
+                setFromNumbersCount(defaults.from_numbers_count);
+                if (defaults.default_telephony_configuration_id) {
+                    setDefaultTelephonyConfig({
+                        id: defaults.default_telephony_configuration_id,
+                        name: defaults.default_telephony_configuration_name ?? 'Recova managed calling pool',
+                        provider: defaults.default_telephony_configuration_provider ?? 'managed',
+                    });
+                    setSelectedTelephonyConfigId((current) => current || String(defaults.default_telephony_configuration_id));
+                } else {
+                    setDefaultTelephonyConfig(null);
+                }
 
+                const last = defaults.last_campaign_settings;
                 if (last) {
                     // Pre-populate from last campaign
                     if (last.retry_config) {
@@ -230,6 +251,7 @@ export default function NewCampaignPage() {
         (c) => String(c.id) === selectedTelephonyConfigId,
     );
     const availableFromNumbersCount = selectedTelephonyConfig?.phone_number_count ?? fromNumbersCount;
+    const usingManagedDefaultOnly = !isLoadingTelephonyConfigs && telephonyConfigs.length === 0 && defaultTelephonyConfig !== null;
 
     // Effective concurrency limit considering both org limit and available CLIs
     const effectiveLimit = availableFromNumbersCount > 0
@@ -425,16 +447,25 @@ export default function NewCampaignPage() {
 
                             <div className="space-y-2">
                                 <Label htmlFor="telephony-config">{t('campaignNew.telephonyConfig')}</Label>
-                                {!isLoadingTelephonyConfigs && telephonyConfigs.length === 0 ? (
+                                {usingManagedDefaultOnly ? (
+                                    <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                                        <div className="font-medium">
+                                            Using {defaultTelephonyConfig.name} ({defaultTelephonyConfig.provider})
+                                        </div>
+                                        <div className="mt-1 text-muted-foreground">
+                                            This campaign will use Recova-managed assigned numbers. Carrier credentials stay hidden, and concurrency is limited by the assigned caller-ID pool.
+                                        </div>
+                                    </div>
+                                ) : !isLoadingTelephonyConfigs && telephonyConfigs.length === 0 ? (
                                     <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                                        {t('campaignNew.noTelephonyStart')}{' '}
+                                        No calling pool is available yet. Ask a Recova operator to assign managed numbers or add a self-serve telephony configuration in{' '}
                                         <Link
                                             href="/telephony-configurations"
                                             className="underline text-foreground"
                                         >
-                                            {t('campaignNew.addOne')}
-                                        </Link>{' '}
-                                        {t('campaignNew.noTelephonyEnd')}
+                                            Telephony Configuration
+                                        </Link>
+                                        .
                                     </div>
                                 ) : (
                                     <Select
