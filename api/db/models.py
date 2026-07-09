@@ -294,6 +294,234 @@ class TelephonyPhoneNumberModel(Base):
             postgresql_where=text("is_default_caller_id = true"),
         ),
     )
+class TelephonyCallEventModel(Base):
+    __tablename__ = "telephony_call_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    call_attempt_id = Column(String(128), nullable=False)
+    event_id = Column(String(128), nullable=False)
+    idempotency_key = Column(String(255), nullable=False)
+    organization_id = Column(
+        Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
+    )
+    telephony_configuration_id = Column(
+        Integer,
+        ForeignKey("telephony_configurations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    telephony_phone_number_id = Column(
+        Integer,
+        ForeignKey("telephony_phone_numbers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    inventory_id = Column(Integer, nullable=True)
+    workflow_id = Column(
+        Integer, ForeignKey("workflows.id", ondelete="SET NULL"), nullable=True
+    )
+    workflow_run_id = Column(
+        Integer, ForeignKey("workflow_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    campaign_id = Column(
+        Integer, ForeignKey("campaigns.id", ondelete="SET NULL"), nullable=True
+    )
+    queued_run_id = Column(
+        Integer, ForeignKey("queued_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    provider = Column(String(64), nullable=False)
+    provider_call_id_hash = Column(String(64), nullable=True)
+    direction = Column(String(16), nullable=False)
+    event_type = Column(String(64), nullable=False)
+    status = Column(String(64), nullable=True)
+    failure_category = Column(String(64), nullable=True)
+    release_reason = Column(String(64), nullable=True)
+    admission_slot_id = Column(String(128), nullable=True)
+    from_number_masked = Column(String(64), nullable=True)
+    from_number_hash = Column(String(64), nullable=True)
+    to_number_masked = Column(String(64), nullable=True)
+    to_number_hash = Column(String(64), nullable=True)
+    occurred_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    duration_seconds = Column(Integer, nullable=True)
+    artifact_recording_expected = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    artifact_recording_present = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    artifact_transcript_expected = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    artifact_transcript_present = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    artifact_payload = Column(
+        JSON, nullable=False, default=dict, server_default=text("'{}'::json")
+    )
+    provider_payload_redacted = Column(
+        JSON, nullable=False, default=dict, server_default=text("'{}'::json")
+    )
+    contract_version = Column(String(64), nullable=True)
+    is_contract_fixture = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    live_trunk_validated = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    schema_version = Column(Integer, nullable=False, default=1, server_default=text("1"))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "idempotency_key", name="uq_telephony_call_events_idempotency"
+        ),
+        Index("ix_telephony_call_events_attempt", "call_attempt_id"),
+        Index("ix_telephony_call_events_org_created", "organization_id", "created_at"),
+        Index("ix_telephony_call_events_workflow_run", "workflow_run_id"),
+        Index("ix_telephony_call_events_provider_status", "provider", "status"),
+    )
+
+
+class TelephonyCDRModel(Base):
+    __tablename__ = "telephony_cdrs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    call_attempt_id = Column(String(128), nullable=False)
+    idempotency_key = Column(String(255), nullable=False)
+    organization_id = Column(
+        Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
+    )
+    telephony_configuration_id = Column(
+        Integer,
+        ForeignKey("telephony_configurations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    telephony_phone_number_id = Column(
+        Integer,
+        ForeignKey("telephony_phone_numbers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    inventory_id = Column(Integer, nullable=True)
+    workflow_id = Column(
+        Integer, ForeignKey("workflows.id", ondelete="SET NULL"), nullable=True
+    )
+    workflow_run_id = Column(
+        Integer, ForeignKey("workflow_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    campaign_id = Column(
+        Integer, ForeignKey("campaigns.id", ondelete="SET NULL"), nullable=True
+    )
+    queued_run_id = Column(
+        Integer, ForeignKey("queued_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    provider = Column(String(64), nullable=False)
+    provider_call_id_hash = Column(String(64), nullable=True)
+    direction = Column(String(16), nullable=False)
+    terminal_status = Column(String(64), nullable=False)
+    failure_category = Column(String(64), nullable=True)
+    release_reason = Column(String(64), nullable=True)
+    admission_slot_id = Column(String(128), nullable=True)
+    from_number_masked = Column(String(64), nullable=True)
+    from_number_hash = Column(String(64), nullable=True)
+    to_number_masked = Column(String(64), nullable=True)
+    to_number_hash = Column(String(64), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    answered_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    artifact_recording_expected = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    artifact_recording_present = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    artifact_transcript_expected = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    artifact_transcript_present = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    artifact_payload = Column(
+        JSON, nullable=False, default=dict, server_default=text("'{}'::json")
+    )
+    provider_payload_redacted = Column(
+        JSON, nullable=False, default=dict, server_default=text("'{}'::json")
+    )
+    contract_version = Column(String(64), nullable=True)
+    is_contract_fixture = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    live_trunk_validated = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    schema_version = Column(Integer, nullable=False, default=1, server_default=text("1"))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("call_attempt_id", name="uq_telephony_cdrs_attempt"),
+        UniqueConstraint("idempotency_key", name="uq_telephony_cdrs_idempotency"),
+        Index("ix_telephony_cdrs_org_created", "organization_id", "created_at"),
+        Index("ix_telephony_cdrs_workflow_run", "workflow_run_id"),
+        Index("ix_telephony_cdrs_provider_status", "provider", "terminal_status"),
+        Index(
+            "ix_telephony_cdrs_live_readiness",
+            "organization_id",
+            "created_at",
+            postgresql_where=text(
+                "is_contract_fixture = false AND live_trunk_validated = true"
+            ),
+        ),
+    )
+
+
+class TelephonyOpsAlertModel(Base):
+    __tablename__ = "telephony_ops_alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    alert_type = Column(String(64), nullable=False)
+    severity = Column(String(16), nullable=False)
+    dedupe_key = Column(String(255), nullable=False)
+    summary = Column(String(512), nullable=False)
+    details_redacted = Column(
+        JSON, nullable=False, default=dict, server_default=text("'{}'::json")
+    )
+    organization_id = Column(
+        Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
+    )
+    provider = Column(String(64), nullable=True)
+    source = Column(String(64), nullable=False, default="runtime")
+    status = Column(String(32), nullable=False, default="active")
+    is_contract_fixture = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    should_page_live_ops = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    occurrence_count = Column(Integer, nullable=False, default=1, server_default=text("1"))
+    first_seen_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    last_seen_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    escalated_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_telephony_ops_alerts_dedupe"),
+        Index("ix_telephony_ops_alerts_type_status", "alert_type", "status"),
+        Index("ix_telephony_ops_alerts_org_seen", "organization_id", "last_seen_at"),
+    )
+
 
 class TelephonyNumberInventoryModel(Base):
     __tablename__ = "telephony_number_inventory"

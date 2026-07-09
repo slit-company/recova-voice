@@ -26,12 +26,30 @@ from api.errors.telephony_errors import TelephonyError
 from api.sdk_expose import sdk_expose
 from api.services.feature_gates import require_self_serve_telephony
 from api.services.quota_service import check_dograh_quota_by_user_id
+from api.services.telephony.admission import (
+    TelephonyAdmissionRequest,
+    telephony_admission_controller,
+)
 from api.services.telephony.call_transfer_manager import get_call_transfer_manager
 from api.services.telephony.factory import (
     get_all_telephony_providers,
     get_default_telephony_provider,
     get_telephony_provider_by_id,
     get_telephony_provider_for_run,
+)
+from api.services.telephony.cdr import (
+    TelephonyFailureCategory,
+    TelephonyEventRecord,
+    TelephonyEventType,
+    build_call_attempt_id,
+    record_rejected_call,
+    record_telephony_event,
+)
+from api.services.telephony.ops_alerts import (
+    TelephonyOpsAlert,
+    TelephonyOpsAlertSeverity,
+    TelephonyOpsAlertType,
+    telephony_ops_alert_sink,
 )
 from api.services.telephony.status_processor import redact_telephony_payload_for_logs
 from api.services.telephony.transfer_event_protocol import (
@@ -238,13 +256,124 @@ async def initiate_call(
             raise HTTPException(status_code=400, detail="from_phone_number_not_found")
         from_number = phone_row.address_normalized
 
-    # Initiate call via provider
-    result = await provider.initiate_call(
-        to_number=phone_number,
-        webhook_url=webhook_url,
-        workflow_run_id=workflow_run_id,
-        from_number=from_number,
-        **keywords,
+    admission = await telephony_admission_controller.acquire(
+        TelephonyAdmissionRequest(
+            provider=provider.PROVIDER_NAME,
+            organization_id=user.selected_organization_id,
+            direction=CallType.OUTBOUND.value,
+            workflow_run_id=workflow_run_id,
+            telephony_configuration_id=telephony_configuration_id,
+            telephony_phone_number_id=request.from_phone_number_id,
+            workflow_id=workflow.id,
+        )
+    )
+    admission_initial_context = {
+        **(workflow_run.initial_context or {}),
+        "telephony_call_attempt_id": admission.call_attempt_id,
+        "telephony_admission_slot_id": admission.slot_id,
+    }
+    await db_client.update_workflow_run(
+        run_id=workflow_run_id,
+        initial_context=admission_initial_context,
+    )
+    if not admission.allowed:
+        await record_rejected_call(
+            provider=provider.PROVIDER_NAME,
+            direction=CallType.OUTBOUND.value,
+            failure_category=TelephonyFailureCategory.ADMISSION_CAPACITY,
+            status="failed",
+            organization_id=user.selected_organization_id,
+            telephony_configuration_id=telephony_configuration_id,
+            telephony_phone_number_id=request.from_phone_number_id,
+            workflow_id=workflow.id,
+            workflow_run_id=workflow_run_id,
+            call_attempt_id=admission.call_attempt_id,
+            from_number=from_number,
+            to_number=phone_number,
+            release_reason="capacity_denied",
+        )
+        await db_client.update_workflow_run(
+            run_id=workflow_run_id,
+            is_completed=True,
+            state=WorkflowRunState.COMPLETED.value,
+            gathered_context={"error": "telephony_capacity_denied"},
+        )
+        raise HTTPException(status_code=429, detail="telephony_capacity_denied")
+
+    try:
+        result = await provider.initiate_call(
+            to_number=phone_number,
+            webhook_url=webhook_url,
+            workflow_run_id=workflow_run_id,
+            from_number=from_number,
+            **keywords,
+        )
+    except Exception as e:
+        await telephony_admission_controller.release(
+            workflow_run_id=workflow_run_id,
+            reason="initiate_failed",
+        )
+        await record_rejected_call(
+            provider=provider.PROVIDER_NAME,
+            direction=CallType.OUTBOUND.value,
+            failure_category=TelephonyFailureCategory.PROVIDER_INITIATE_FAILED,
+            status="failed",
+            organization_id=user.selected_organization_id,
+            telephony_configuration_id=telephony_configuration_id,
+            telephony_phone_number_id=request.from_phone_number_id,
+            workflow_id=workflow.id,
+            workflow_run_id=workflow_run_id,
+            call_attempt_id=admission.call_attempt_id,
+            from_number=from_number,
+            to_number=phone_number,
+            provider_payload={"error": str(e)},
+            release_reason="initiate_failed",
+        )
+        await telephony_ops_alert_sink.emit(
+            TelephonyOpsAlert(
+                alert_type=TelephonyOpsAlertType.OUTBOUND_FAILURE_SPIKE,
+                severity=TelephonyOpsAlertSeverity.WARNING,
+                summary="Telephony provider failed to initiate direct outbound call",
+                organization_id=user.selected_organization_id,
+                provider=provider.PROVIDER_NAME,
+                details={
+                    "workflow_run_id": workflow_run_id,
+                    "workflow_id": workflow.id,
+                    "error": str(e),
+                },
+                dedupe_components=("direct", provider.PROVIDER_NAME),
+            )
+        )
+        await db_client.update_workflow_run(
+            run_id=workflow_run_id,
+            is_completed=True,
+            state=WorkflowRunState.COMPLETED.value,
+            gathered_context={"error": str(e)},
+        )
+        raise
+    provider_call_id = getattr(result, "call_id", None) or (
+        result.provider_metadata or {}
+    ).get("call_id")
+    await record_telephony_event(
+        TelephonyEventRecord(
+            provider=provider.PROVIDER_NAME,
+            direction=CallType.OUTBOUND.value,
+            event_type=TelephonyEventType.OUTBOUND_INITIATED,
+            status=getattr(result, "status", None),
+            organization_id=user.selected_organization_id,
+            telephony_configuration_id=telephony_configuration_id,
+            telephony_phone_number_id=request.from_phone_number_id,
+            workflow_id=workflow.id,
+            workflow_run_id=workflow_run_id,
+            call_attempt_id=admission.call_attempt_id,
+            event_id=f"outbound-initiated:{admission.call_attempt_id}:{provider_call_id or 'unknown'}",
+            provider_call_id=provider_call_id,
+            from_number=result.caller_number or from_number,
+            to_number=phone_number,
+            admission_slot_id=admission.slot_id,
+            provider_payload=getattr(result, "raw_response", None)
+            or result.provider_metadata,
+        )
     )
 
     # Store provider metadata and caller_number in workflow run context
@@ -254,7 +383,7 @@ async def initiate_call(
     }
     # Merge caller_number into initial_context now that we know which number was used
     updated_initial_context = {
-        **(workflow_run.initial_context or {}),
+        **admission_initial_context,
         "called_number": phone_number,
         "telephony_configuration_id": telephony_configuration_id,
     }
@@ -443,6 +572,8 @@ async def _create_inbound_workflow_run(
     normalized_data,
     telephony_configuration_id: int,
     from_phone_number_id: Optional[int] = None,
+    call_attempt_id: Optional[str] = None,
+    admission_slot_id: Optional[str] = None,
 ) -> int:
     """Create workflow run for inbound call and return run ID"""
     call_id = normalized_data.call_id
@@ -461,6 +592,9 @@ async def _create_inbound_workflow_run(
             "direction": "inbound",
             "provider": provider,
             "telephony_configuration_id": telephony_configuration_id,
+            "from_phone_number_id": from_phone_number_id,
+            "telephony_call_attempt_id": call_attempt_id,
+            "telephony_admission_slot_id": admission_slot_id,
         },
         gathered_context={
             "call_id": call_id,
@@ -675,6 +809,16 @@ async def _handle_telephony_websocket(
         except RuntimeError:
             # WebSocket already closed, ignore
             pass
+    finally:
+        try:
+            await telephony_admission_controller.release(
+                workflow_run_id=workflow_run_id,
+                reason="websocket_closed",
+            )
+        except Exception as e:
+            logger.error(
+                f"[run {workflow_run_id}] Failed to release admission on websocket close: {e}"
+            )
 
 
 @router.post("/inbound/run")
@@ -709,6 +853,11 @@ async def handle_inbound_run(request: Request):
             f"/inbound/run normalized data — provider={normalized_data.provider} "
             "to=[redacted] from=[redacted]"
         )
+        inbound_call_attempt_id = build_call_attempt_id(
+            direction=CallType.INBOUND.value,
+            provider=provider_class.PROVIDER_NAME,
+            provider_call_id=normalized_data.call_id,
+        )
 
         if normalized_data.direction != "inbound":
             logger.warning(
@@ -740,6 +889,17 @@ async def handle_inbound_run(request: Request):
                 "account_id=[redacted] "
                 "to=[redacted]"
             )
+            await record_rejected_call(
+                provider=provider_class.PROVIDER_NAME,
+                direction=CallType.INBOUND.value,
+                failure_category=TelephonyFailureCategory.ROUTE_NOT_FOUND,
+                status="failed",
+                call_attempt_id=inbound_call_attempt_id,
+                provider_call_id=normalized_data.call_id,
+                from_number=normalized_data.from_number,
+                to_number=normalized_data.to_number,
+                provider_payload=normalized_data.raw_data,
+            )
             return provider_class.generate_validation_error_response(
                 TelephonyError.PHONE_NUMBER_NOT_CONFIGURED
             )
@@ -764,6 +924,35 @@ async def handle_inbound_run(request: Request):
                 f"/inbound/run: signature validation failed for "
                 f"{provider_class.PROVIDER_NAME}"
             )
+            await record_rejected_call(
+                provider=provider_class.PROVIDER_NAME,
+                direction=CallType.INBOUND.value,
+                failure_category=TelephonyFailureCategory.SIGNATURE_FAILED,
+                status="failed",
+                organization_id=config.organization_id,
+                telephony_configuration_id=telephony_configuration_id,
+                telephony_phone_number_id=phone_row.id,
+                call_attempt_id=inbound_call_attempt_id,
+                provider_call_id=normalized_data.call_id,
+                from_number=normalized_data.from_number,
+                to_number=normalized_data.to_number,
+                provider_payload=normalized_data.raw_data,
+            )
+            await telephony_ops_alert_sink.emit(
+                TelephonyOpsAlert(
+                    alert_type=TelephonyOpsAlertType.SIGNATURE_FAILURE_SPIKE,
+                    severity=TelephonyOpsAlertSeverity.WARNING,
+                    summary="Telephony inbound signature validation failed",
+                    organization_id=config.organization_id,
+                    provider=provider_class.PROVIDER_NAME,
+                    details={
+                        "telephony_configuration_id": telephony_configuration_id,
+                        "telephony_phone_number_id": phone_row.id,
+                        "call_id": normalized_data.call_id,
+                    },
+                    dedupe_components=(provider_class.PROVIDER_NAME,),
+                )
+            )
             return provider_class.generate_validation_error_response(
                 TelephonyError.SIGNATURE_VALIDATION_FAILED
             )
@@ -785,6 +974,20 @@ async def handle_inbound_run(request: Request):
                 "/inbound/run: called number [redacted] has no "
                 "inbound_workflow_id assigned and no matching preview reservation"
             )
+            await record_rejected_call(
+                provider=provider_class.PROVIDER_NAME,
+                direction=CallType.INBOUND.value,
+                failure_category=TelephonyFailureCategory.WORKFLOW_NOT_BOUND,
+                status="failed",
+                organization_id=config.organization_id,
+                telephony_configuration_id=telephony_configuration_id,
+                telephony_phone_number_id=phone_row.id,
+                call_attempt_id=inbound_call_attempt_id,
+                provider_call_id=normalized_data.call_id,
+                from_number=normalized_data.from_number,
+                to_number=normalized_data.to_number,
+                provider_payload=normalized_data.raw_data,
+            )
             return provider_class.generate_validation_error_response(
                 TelephonyError.WORKFLOW_NOT_FOUND
             )
@@ -796,6 +999,21 @@ async def handle_inbound_run(request: Request):
         if not workflow:
             logger.warning(
                 f"/inbound/run: workflow not found {workflow_id} for org {config.organization_id}"
+            )
+            await record_rejected_call(
+                provider=provider_class.PROVIDER_NAME,
+                direction=CallType.INBOUND.value,
+                failure_category=TelephonyFailureCategory.WORKFLOW_NOT_FOUND,
+                status="failed",
+                organization_id=config.organization_id,
+                telephony_configuration_id=telephony_configuration_id,
+                telephony_phone_number_id=phone_row.id,
+                workflow_id=workflow_id,
+                call_attempt_id=inbound_call_attempt_id,
+                provider_call_id=normalized_data.call_id,
+                from_number=normalized_data.from_number,
+                to_number=normalized_data.to_number,
+                provider_payload=normalized_data.raw_data,
             )
             return provider_class.generate_validation_error_response(
                 TelephonyError.WORKFLOW_NOT_FOUND
@@ -810,11 +1028,58 @@ async def handle_inbound_run(request: Request):
             logger.warning(
                 f"User {user_id} has exceeded quota: {quota_result.error_message}"
             )
+            await record_rejected_call(
+                provider=provider_class.PROVIDER_NAME,
+                direction=CallType.INBOUND.value,
+                failure_category=TelephonyFailureCategory.QUOTA_EXCEEDED,
+                status="failed",
+                organization_id=config.organization_id,
+                telephony_configuration_id=telephony_configuration_id,
+                telephony_phone_number_id=phone_row.id,
+                workflow_id=workflow_id,
+                call_attempt_id=inbound_call_attempt_id,
+                provider_call_id=normalized_data.call_id,
+                from_number=normalized_data.from_number,
+                to_number=normalized_data.to_number,
+                provider_payload={"error": quota_result.error_message},
+            )
             return provider_class.generate_validation_error_response(
                 TelephonyError.QUOTA_EXCEEDED
             )
 
-        # 5. Create workflow run + return provider-shaped response.
+        admission = await telephony_admission_controller.acquire(
+            TelephonyAdmissionRequest(
+                provider=provider_class.PROVIDER_NAME,
+                organization_id=config.organization_id,
+                direction=CallType.INBOUND.value,
+                call_attempt_id=inbound_call_attempt_id,
+                provider_call_id=normalized_data.call_id,
+                telephony_configuration_id=telephony_configuration_id,
+                telephony_phone_number_id=phone_row.id,
+                workflow_id=workflow_id,
+            )
+        )
+        if not admission.allowed:
+            await record_rejected_call(
+                provider=provider_class.PROVIDER_NAME,
+                direction=CallType.INBOUND.value,
+                failure_category=TelephonyFailureCategory.ADMISSION_CAPACITY,
+                status="failed",
+                organization_id=config.organization_id,
+                telephony_configuration_id=telephony_configuration_id,
+                telephony_phone_number_id=phone_row.id,
+                workflow_id=workflow_id,
+                call_attempt_id=admission.call_attempt_id,
+                provider_call_id=normalized_data.call_id,
+                from_number=normalized_data.from_number,
+                to_number=normalized_data.to_number,
+                provider_payload=normalized_data.raw_data,
+                release_reason="capacity_denied",
+            )
+            return provider_class.generate_validation_error_response(
+                TelephonyError.QUOTA_EXCEEDED
+            )
+
         workflow_run_id = await _create_inbound_workflow_run(
             workflow_id,
             user_id,
@@ -822,6 +1087,8 @@ async def handle_inbound_run(request: Request):
             normalized_data,
             telephony_configuration_id=telephony_configuration_id,
             from_phone_number_id=phone_row.id,
+            call_attempt_id=admission.call_attempt_id,
+            admission_slot_id=admission.slot_id,
         )
 
         backend_endpoint, wss_backend_endpoint = await get_backend_endpoints()
@@ -830,12 +1097,57 @@ async def handle_inbound_run(request: Request):
             f"{workflow_id}/{user_id}/{workflow_run_id}"
         )
 
-        return await provider_instance.start_inbound_stream(
-            websocket_url=websocket_url,
-            workflow_run_id=workflow_run_id,
-            normalized_data=normalized_data,
-            backend_endpoint=backend_endpoint,
+        try:
+            response = await provider_instance.start_inbound_stream(
+                websocket_url=websocket_url,
+                workflow_run_id=workflow_run_id,
+                normalized_data=normalized_data,
+                backend_endpoint=backend_endpoint,
+            )
+        except Exception as e:
+            await telephony_admission_controller.release(
+                workflow_run_id=workflow_run_id,
+                reason="media_start_failed",
+            )
+            await record_rejected_call(
+                provider=provider_class.PROVIDER_NAME,
+                direction=CallType.INBOUND.value,
+                failure_category=TelephonyFailureCategory.MEDIA_STREAM_FAILED,
+                status="failed",
+                organization_id=config.organization_id,
+                telephony_configuration_id=telephony_configuration_id,
+                telephony_phone_number_id=phone_row.id,
+                workflow_id=workflow_id,
+                workflow_run_id=workflow_run_id,
+                call_attempt_id=admission.call_attempt_id,
+                provider_call_id=normalized_data.call_id,
+                from_number=normalized_data.from_number,
+                to_number=normalized_data.to_number,
+                provider_payload={"error": str(e)},
+                release_reason="media_start_failed",
+            )
+            raise
+
+        await record_telephony_event(
+            TelephonyEventRecord(
+                provider=provider_class.PROVIDER_NAME,
+                direction=CallType.INBOUND.value,
+                event_type=TelephonyEventType.MEDIA_STARTED,
+                status="started",
+                organization_id=config.organization_id,
+                telephony_configuration_id=telephony_configuration_id,
+                telephony_phone_number_id=phone_row.id,
+                workflow_id=workflow_id,
+                workflow_run_id=workflow_run_id,
+                call_attempt_id=admission.call_attempt_id,
+                provider_call_id=normalized_data.call_id,
+                from_number=normalized_data.from_number,
+                to_number=normalized_data.to_number,
+                admission_slot_id=admission.slot_id,
+                provider_payload=normalized_data.raw_data,
+            )
         )
+        return response
 
     except ValueError as e:
         logger.error(f"/inbound/run request parsing error: {e}")

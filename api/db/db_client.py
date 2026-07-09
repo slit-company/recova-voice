@@ -13,6 +13,7 @@ from api.db.reports_client import ReportsClient
 from api.db.telephony_configuration_client import TelephonyConfigurationClient
 from api.db.telephony_number_inventory_client import TelephonyNumberInventoryClient
 from api.db.telephony_phone_number_client import TelephonyPhoneNumberClient
+from api.db.telephony_call_event_client import TelephonyCallEventClient
 from api.db.tool_client import ToolClient
 from api.db.user_client import UserClient
 from api.db.webhook_credential_client import WebhookCredentialClient
@@ -44,6 +45,7 @@ class DBClient(
     WorkflowRecordingClient,
     TelephonyConfigurationClient,
     TelephonyPhoneNumberClient,
+    TelephonyCallEventClient,
     TelephonyNumberInventoryClient,
     PhonePreviewClient,
     FolderClient,

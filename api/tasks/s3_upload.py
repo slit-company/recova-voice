@@ -7,6 +7,7 @@ from pipecat.utils.run_context import set_current_run_id
 from api.db import db_client
 from api.services.pricing.workflow_run_cost import calculate_workflow_run_cost
 from api.services.storage import get_current_storage_backend, storage_fs
+from api.services.telephony.cdr import mark_telephony_artifact
 from api.tasks.run_integrations import run_integrations_post_workflow_run
 
 
@@ -113,6 +114,12 @@ async def process_workflow_completion(
                     recording_url=recording_url,
                     storage_backend=storage_backend.value,
                 )
+                await mark_telephony_artifact(
+                    workflow_run_id=workflow_run_id,
+                    artifact_type="recording",
+                    present=True,
+                    expected=True,
+                )
                 logger.info(f"Successfully uploaded audio: {recording_url}")
             else:
                 logger.warning(f"Audio temp file not found: {audio_temp_path}")
@@ -143,6 +150,12 @@ async def process_workflow_completion(
                     run_id=workflow_run_id,
                     transcript_url=transcript_url,
                     storage_backend=storage_backend.value,
+                )
+                await mark_telephony_artifact(
+                    workflow_run_id=workflow_run_id,
+                    artifact_type="transcript",
+                    present=True,
+                    expected=True,
                 )
                 logger.info(f"Successfully uploaded transcript: {transcript_url}")
             else:

@@ -235,6 +235,23 @@ class CampaignCallDispatcher:
         self, queued_run: QueuedRunModel, campaign: any, slot_id: str
     ) -> Optional[WorkflowRunModel]:
         """Creates workflow run and initiates call. Requires a pre-acquired slot_id."""
+        from api.services.telephony.admission import (
+            TelephonyAdmissionRequest,
+            telephony_admission_controller,
+        )
+        from api.services.telephony.cdr import (
+            TelephonyEventRecord,
+            TelephonyEventType,
+            TelephonyFailureCategory,
+            record_rejected_call,
+            record_telephony_event,
+        )
+        from api.services.telephony.ops_alerts import (
+            TelephonyOpsAlert,
+            TelephonyOpsAlertSeverity,
+            TelephonyOpsAlertType,
+            telephony_ops_alert_sink,
+        )
         from_number = None
 
         # Get workflow details
@@ -323,6 +340,65 @@ class CampaignCallDispatcher:
                 from_number,
                 telephony_configuration_id=campaign.telephony_configuration_id,
             )
+            admission = await telephony_admission_controller.acquire(
+                TelephonyAdmissionRequest(
+                    provider=provider.PROVIDER_NAME,
+                    organization_id=campaign.organization_id,
+                    direction="outbound",
+                    workflow_run_id=workflow_run.id,
+                    telephony_configuration_id=campaign.telephony_configuration_id,
+                    workflow_id=campaign.workflow_id,
+                    campaign_id=campaign.id,
+                    queued_run_id=queued_run.id,
+                )
+            )
+            initial_context = {
+                **initial_context,
+                "telephony_call_attempt_id": admission.call_attempt_id,
+                "telephony_admission_slot_id": admission.slot_id,
+            }
+            await db_client.update_workflow_run(
+                run_id=workflow_run.id,
+                initial_context=initial_context,
+            )
+            if not admission.allowed:
+                await rate_limiter.release_concurrent_slot(
+                    campaign.organization_id, slot_id
+                )
+                await rate_limiter.delete_workflow_slot_mapping(workflow_run.id)
+                await rate_limiter.release_from_number(
+                    campaign.organization_id,
+                    from_number,
+                    telephony_configuration_id=campaign.telephony_configuration_id,
+                )
+                await rate_limiter.delete_workflow_from_number_mapping(workflow_run.id)
+                await record_rejected_call(
+                    provider=provider.PROVIDER_NAME,
+                    direction="outbound",
+                    failure_category=TelephonyFailureCategory.ADMISSION_CAPACITY,
+                    status="failed",
+                    organization_id=campaign.organization_id,
+                    telephony_configuration_id=campaign.telephony_configuration_id,
+                    workflow_id=campaign.workflow_id,
+                    workflow_run_id=workflow_run.id,
+                    campaign_id=campaign.id,
+                    queued_run_id=queued_run.id,
+                    call_attempt_id=admission.call_attempt_id,
+                    from_number=from_number,
+                    to_number=phone_number,
+                    release_reason="capacity_denied",
+                )
+                await db_client.update_workflow_run(
+                    run_id=workflow_run.id,
+                    is_completed=True,
+                    state=WorkflowRunState.COMPLETED.value,
+                    gathered_context={"error": "telephony_capacity_denied"},
+                )
+                raise ConcurrentSlotAcquisitionError(
+                    organization_id=campaign.organization_id,
+                    campaign_id=campaign.id,
+                    wait_time=0,
+                )
         except Exception:
             # Release slot and from_number on error
             await rate_limiter.release_concurrent_slot(
@@ -367,6 +443,30 @@ class CampaignCallDispatcher:
                 workflow_id=campaign.workflow_id,
                 user_id=campaign.created_by,
             )
+            provider_call_id = getattr(call_result, "call_id", None) or (
+                call_result.provider_metadata or {}
+            ).get("call_id")
+            await record_telephony_event(
+                TelephonyEventRecord(
+                    provider=provider.PROVIDER_NAME,
+                    direction="outbound",
+                    event_type=TelephonyEventType.OUTBOUND_INITIATED,
+                    status=getattr(call_result, "status", None),
+                    organization_id=campaign.organization_id,
+                    telephony_configuration_id=campaign.telephony_configuration_id,
+                    workflow_id=campaign.workflow_id,
+                    workflow_run_id=workflow_run.id,
+                    campaign_id=campaign.id,
+                    queued_run_id=queued_run.id,
+                    call_attempt_id=admission.call_attempt_id,
+                    provider_call_id=provider_call_id,
+                    from_number=from_number,
+                    to_number=phone_number,
+                    admission_slot_id=admission.slot_id,
+                    provider_payload=getattr(call_result, "raw_response", None)
+                    or call_result.provider_metadata,
+                )
+            )
 
             # Store provider type and metadata in gathered_context
             # (required for WebSocket handler to route to correct provider)
@@ -379,12 +479,49 @@ class CampaignCallDispatcher:
             )
 
             logger.info(
-                f"Call initiated for workflow run {workflow_run.id}, Call ID: {call_result.call_id}"
+                f"Call initiated for workflow run {workflow_run.id}, Call ID: {provider_call_id}"
             )
 
         except Exception as e:
             logger.error(
                 f"Failed to initiate call for workflow run {workflow_run.id}: {e}"
+            )
+            await telephony_admission_controller.release(
+                workflow_run_id=workflow_run.id,
+                reason="initiate_failed",
+            )
+            await record_rejected_call(
+                provider=provider.PROVIDER_NAME,
+                direction="outbound",
+                failure_category=TelephonyFailureCategory.PROVIDER_INITIATE_FAILED,
+                status="failed",
+                organization_id=campaign.organization_id,
+                telephony_configuration_id=campaign.telephony_configuration_id,
+                workflow_id=campaign.workflow_id,
+                workflow_run_id=workflow_run.id,
+                campaign_id=campaign.id,
+                queued_run_id=queued_run.id,
+                call_attempt_id=admission.call_attempt_id,
+                from_number=from_number,
+                to_number=phone_number,
+                provider_payload={"error": str(e)},
+                release_reason="initiate_failed",
+            )
+            await telephony_ops_alert_sink.emit(
+                TelephonyOpsAlert(
+                    alert_type=TelephonyOpsAlertType.OUTBOUND_FAILURE_SPIKE,
+                    severity=TelephonyOpsAlertSeverity.WARNING,
+                    summary="Telephony provider failed to initiate campaign call",
+                    organization_id=campaign.organization_id,
+                    provider=provider.PROVIDER_NAME,
+                    details={
+                        "workflow_run_id": workflow_run.id,
+                        "campaign_id": campaign.id,
+                        "queued_run_id": queued_run.id,
+                        "error": str(e),
+                    },
+                    dedupe_components=("campaign", provider.PROVIDER_NAME),
+                )
             )
 
             # Update workflow run as failed

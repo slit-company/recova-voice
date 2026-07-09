@@ -18,6 +18,14 @@ from api.services.campaign.campaign_event_publisher import (
     get_campaign_event_publisher,
 )
 from api.services.campaign.circuit_breaker import circuit_breaker
+from api.services.telephony.admission import telephony_admission_controller
+from api.services.telephony.cdr import record_status_event_and_terminal_cdr
+from api.services.telephony.ops_alerts import (
+    TelephonyOpsAlert,
+    TelephonyOpsAlertSeverity,
+    TelephonyOpsAlertType,
+    telephony_ops_alert_sink,
+)
 
 _PREVIEW_CALLBACK_SENSITIVE_EXACT_KEYS = {
     "account_sid",
@@ -266,6 +274,24 @@ async def _process_status_update(workflow_run_id: int, status: StatusCallbackReq
         run_id=workflow_run_id,
         logs={"telephony_status_callbacks": telephony_callback_logs},
     )
+    try:
+        await record_status_event_and_terminal_cdr(workflow_run, status)
+    except Exception as e:
+        logger.error(
+            f"[run {workflow_run_id}] Failed to persist telephony status/CDR: {e}"
+        )
+
+    if status.status in ["completed", "failed", "busy", "no-answer", "canceled", "error"]:
+        try:
+            await telephony_admission_controller.release(
+                workflow_run_id=workflow_run_id,
+                reason=status.status,
+            )
+        except Exception as e:
+            logger.error(
+                f"[run {workflow_run_id}] Failed to release telephony admission slot: {e}"
+            )
+
 
     if status.status == "completed":
         logger.info(
@@ -292,6 +318,29 @@ async def _process_status_update(workflow_run_id: int, status: StatusCallbackReq
         logger.warning(
             f"[run {workflow_run_id}] Call failed with status: {status.status}"
         )
+        if status.status in ("error", "failed"):
+            initial_context = workflow_run.initial_context or {}
+            await telephony_ops_alert_sink.emit(
+                TelephonyOpsAlert(
+                    alert_type=TelephonyOpsAlertType.PROVIDER_STATUS_FAILURE,
+                    severity=TelephonyOpsAlertSeverity.WARNING,
+                    summary="Telephony provider reported terminal call failure",
+                    organization_id=getattr(workflow_run.workflow, "organization_id", None),
+                    provider=initial_context.get("provider") or workflow_run.mode,
+                    source="contract_simulator"
+                    if initial_context.get("is_contract_fixture")
+                    else "runtime",
+                    is_contract_fixture=bool(initial_context.get("is_contract_fixture")),
+                    details={
+                        "workflow_run_id": workflow_run_id,
+                        "campaign_id": workflow_run.campaign_id,
+                        "queued_run_id": workflow_run.queued_run_id,
+                        "status": status.status,
+                        "call_id": status.call_id,
+                    },
+                    dedupe_components=(status.status,),
+                )
+            )
 
         if workflow_run.campaign_id:
             await campaign_call_dispatcher.release_call_slot(workflow_run_id)
