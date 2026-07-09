@@ -20,6 +20,7 @@ from api.services.campaign.campaign_event_publisher import (
 from api.services.campaign.circuit_breaker import circuit_breaker
 from api.services.telephony.admission import telephony_admission_controller
 from api.services.telephony.cdr import record_status_event_and_terminal_cdr
+from api.services.telephony.evidence_markers import extract_telephony_evidence_markers
 from api.services.telephony.ops_alerts import (
     TelephonyOpsAlert,
     TelephonyOpsAlertSeverity,
@@ -255,6 +256,20 @@ async def _process_status_update(workflow_run_id: int, status: StatusCallbackReq
             f"[run {workflow_run_id}] Workflow run not found in status update"
         )
         return
+    initial_context = workflow_run.initial_context or {}
+    gathered_context = workflow_run.gathered_context or {}
+    status_markers = extract_telephony_evidence_markers(
+        status.extra,
+        trusted_context={
+            **initial_context,
+            **gathered_context,
+            "provider": initial_context.get("provider") or workflow_run.mode,
+            "telephony_phone_number_id": initial_context.get("telephony_phone_number_id")
+            or initial_context.get("from_phone_number_id"),
+            "call_attempt_id": initial_context.get("telephony_call_attempt_id"),
+        },
+    )
+
 
     telephony_callback_logs = workflow_run.logs.get("telephony_status_callbacks", [])
     telephony_callback_log = {
@@ -299,6 +314,7 @@ async def _process_status_update(workflow_run_id: int, status: StatusCallbackReq
                     "error": str(e),
                 },
                 dedupe_components=(str(workflow_run_id), status.status),
+                **status_markers.as_alert_kwargs(),
             )
         )
 
@@ -348,10 +364,7 @@ async def _process_status_update(workflow_run_id: int, status: StatusCallbackReq
                     summary="Telephony provider reported terminal call failure",
                     organization_id=getattr(workflow_run.workflow, "organization_id", None),
                     provider=initial_context.get("provider") or workflow_run.mode,
-                    source="contract_simulator"
-                    if initial_context.get("is_contract_fixture")
-                    else "runtime",
-                    is_contract_fixture=bool(initial_context.get("is_contract_fixture")),
+                    **status_markers.as_alert_kwargs(),
                     details={
                         "workflow_run_id": workflow_run_id,
                         "campaign_id": workflow_run.campaign_id,

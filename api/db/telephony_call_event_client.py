@@ -91,6 +91,7 @@ class TelephonyCallEventClient(BaseDBClient):
         artifact_type: str,
         expected: bool = True,
         present: bool = True,
+        artifact_payload: Optional[dict[str, Any]] = None,
     ) -> None:
         """Mark recording/transcript artifact expectations for events and CDRs."""
 
@@ -102,6 +103,8 @@ class TelephonyCallEventClient(BaseDBClient):
             f"artifact_{artifact_type}_present": present,
             "updated_at": datetime.now(UTC),
         }
+        if artifact_payload is not None:
+            values["artifact_payload"] = artifact_payload
         async with self.async_session() as session:
             await session.execute(
                 update(TelephonyCallEventModel)

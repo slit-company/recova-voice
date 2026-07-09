@@ -53,6 +53,10 @@ def test_contract_fixtures_cover_kr_inbound_and_media_start():
     assert media_start["codec"] == "PCMU"
     assert media_start["sample_rate"] == 8000
 
+    injected_payload, _, _ = simulator.inbound_live_validation_injection()
+    assert injected_payload["live_trunk_validated"] is True
+    assert injected_payload["live_validation_source"] == "simulator"
+
 
 @pytest.mark.asyncio
 async def test_initiate_call_posts_outbound_contract_payload(monkeypatch):
@@ -135,6 +139,64 @@ async def test_initiate_call_posts_outbound_contract_payload(monkeypatch):
     assert request.outbound_profile_id == "profile-070"
     assert captured["headers"]["Authorization"] == "Bearer secret-key"
 
+
+
+@pytest.mark.asyncio
+async def test_get_call_status_uses_contract_owned_endpoint(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def json(self):
+            return {"call_id": "jb-out-123", "status": "completed"}
+
+        async def text(self):
+            return ""
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, endpoint, headers):
+            captured["endpoint"] = endpoint
+            captured["headers"] = headers
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        jambonz_provider_module.aiohttp,
+        "ClientSession",
+        lambda: FakeSession(),
+    )
+
+    provider = JambonzProvider(
+        {
+            "base_url": "https://jambonz.recova.test",
+            "account_id": "acct-kr",
+            "application_id": "app-voice",
+            "api_key": "secret-key",
+            "webhook_secret": "webhook-secret",
+            "from_numbers": ["+827012345678"],
+        }
+    )
+
+    status = await provider.get_call_status("jb-out-123")
+
+    assert captured["endpoint"] == (
+        "https://jambonz.recova.test/v1/jambonz-contract/accounts/"
+        "acct-kr/calls/jb-out-123/status"
+    )
+    assert captured["headers"]["Authorization"] == "Bearer secret-key"
+    assert status["contract_version"] == JAMBONZ_CONTRACT_VERSION
 
 def test_parse_status_callback_normalizes_failures_and_cdr():
     provider = JambonzProvider(

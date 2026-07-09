@@ -147,5 +147,41 @@ def test_inbound_run_rejects_unbound_assigned_jambonz_route_without_preview():
         response = client.post("/telephony/inbound/run", json=_jambonz_payload())
 
     assert response.status_code == 200
-    assert "WORKFLOW_NOT_FOUND" in response.text
+    assert "PHONE_NUMBER_NOT_CONFIGURED" in response.text
     mock_db.get_workflow.assert_not_awaited()
+
+
+def test_inbound_run_strips_live_validation_injection_before_workflow_match():
+    client = TestClient(_app())
+    payload = {
+        **_jambonz_payload(),
+        "contract_version": "jambonz_contract_v1",
+        "is_contract_fixture": True,
+        "live_trunk_validated": True,
+        "live_validation_source": "simulator",
+        "live_validation_evidence_id": "fake-live-proof",
+    }
+    record_rejected = AsyncMock()
+
+    with (
+        patch(
+            "api.routes.telephony.get_all_telephony_providers",
+            new=AsyncMock(return_value=[_InboundJambonzProviderClass]),
+        ),
+        patch("api.routes.telephony.db_client") as mock_db,
+        patch(
+            "api.routes.telephony.record_rejected_call",
+            new=record_rejected,
+        ),
+    ):
+        mock_db.find_inbound_route_by_account = AsyncMock(return_value=None)
+
+        response = client.post("/telephony/inbound/run", json=payload)
+
+    assert response.status_code == 200
+    kwargs = record_rejected.await_args.kwargs
+    assert kwargs["contract_version"] == "jambonz_contract_v1"
+    assert kwargs["is_contract_fixture"] is True
+    assert kwargs["live_validation_source"] is None
+    assert kwargs["live_validation_evidence_id"] is None
+    assert kwargs["artifact_payload"]["evidence_markers"]["live_trunk_validated"] is False

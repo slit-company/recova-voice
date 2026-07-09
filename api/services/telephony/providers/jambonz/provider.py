@@ -192,21 +192,33 @@ class JambonzProvider(TelephonyProvider):
                 "call_id": call_id,
                 "jambonz_account_id": self.account_id,
                 "jambonz_contract_version": JAMBONZ_CONTRACT_VERSION,
+                "contract_version": JAMBONZ_CONTRACT_VERSION,
                 "is_contract_fixture": bool(response_data.get("is_contract_fixture", False)),
             },
             raw_response=response_data,
         )
 
     async def get_call_status(self, call_id: str) -> Dict[str, Any]:
+        """Get status through the Recova-owned Jambonz contract endpoint.
+
+        Native public Jambonz REST status semantics are intentionally excluded
+        from V1 readiness. Readiness-sensitive status/CDR evidence must come
+        through signed contract callbacks or the contract adapter endpoint.
+        """
         if not self.validate_config():
             raise ValueError("Jambonz provider not properly configured")
-        endpoint = f"{self.base_url}/v1/Accounts/{self.account_id}/Calls/{call_id}"
+        endpoint = (
+            f"{self.base_url}/v1/jambonz-contract/accounts/"
+            f"{self.account_id}/calls/{call_id}/status"
+        )
         async with aiohttp.ClientSession() as session:
             async with session.get(endpoint, headers=self._headers()) as response:
                 if response.status != 200:
                     body = await response.text()
-                    raise Exception(f"Failed to get Jambonz call status: {body}")
-                return await response.json()
+                    raise Exception(f"Failed to get Jambonz contract call status: {body}")
+                data = await response.json()
+        data["contract_version"] = data.get("contract_version") or JAMBONZ_CONTRACT_VERSION
+        return data
 
     async def get_available_phone_numbers(self) -> List[str]:
         return self.from_numbers

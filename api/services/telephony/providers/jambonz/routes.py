@@ -11,6 +11,10 @@ from pipecat.utils.run_context import set_current_run_id
 
 from api.db import db_client
 from api.services.telephony.factory import get_telephony_provider_for_run
+from api.services.telephony.evidence_markers import (
+    extract_telephony_evidence_markers,
+    strip_untrusted_evidence_fields,
+)
 from api.services.telephony.status_processor import (
     StatusCallbackRequest,
     _process_status_update,
@@ -66,6 +70,22 @@ async def handle_jambonz_answer(
             "invalid_signature", "Invalid webhook signature."
         )
 
+    markers = extract_telephony_evidence_markers(
+        event_data,
+        trusted_context={
+            "provider": "jambonz",
+            "telephony_configuration_id": (
+                workflow_run.initial_context or {}
+            ).get("telephony_configuration_id"),
+            "telephony_phone_number_id": (
+                workflow_run.initial_context or {}
+            ).get("telephony_phone_number_id")
+            or (workflow_run.initial_context or {}).get("from_phone_number_id"),
+            "call_attempt_id": (workflow_run.initial_context or {}).get(
+                "telephony_call_attempt_id"
+            ),
+        },
+    )
     call_id = event_data.get("call_id") or event_data.get("callSid")
     stream_id = event_data.get("stream_id") or event_data.get("streamSid")
     if call_id or stream_id:
@@ -74,6 +94,10 @@ async def handle_jambonz_answer(
             gathered_context["call_id"] = call_id
         if stream_id:
             gathered_context["stream_id"] = stream_id
+        gathered_context = {
+            **strip_untrusted_evidence_fields(gathered_context),
+            **markers.as_context(),
+        }
         await db_client.update_workflow_run(
             run_id=workflow_run_id, gathered_context=gathered_context
         )

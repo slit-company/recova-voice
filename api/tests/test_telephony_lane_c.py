@@ -25,6 +25,11 @@ from api.services.telephony.cdr import (
     live_readiness_eligible,
     record_rejected_call,
 )
+from api.services.telephony.evidence_markers import (
+    build_trusted_live_validation_markers,
+    extract_telephony_evidence_markers,
+    strip_untrusted_evidence_fields,
+)
 from api.services.telephony.ops_alerts import (
     TelephonyOpsAlert,
     TelephonyOpsAlertSeverity,
@@ -183,6 +188,121 @@ def test_contract_fixtures_never_count_as_live_readiness():
         SimpleNamespace(is_contract_fixture=False, live_trunk_validated=True)
     )
 
+
+
+def test_evidence_markers_strip_untrusted_live_validation_injection():
+    markers = extract_telephony_evidence_markers(
+        {
+            "provider": "jambonz",
+            "contract_version": "jambonz_contract_v1",
+            "is_contract_fixture": True,
+            "live_trunk_validated": True,
+            "live_validation_source": "simulator",
+            "live_validation_evidence_id": "fake-live-proof",
+        },
+        trusted_context={
+            "telephony_configuration_id": 55,
+            "telephony_phone_number_id": 902,
+            "call_attempt_id": "inbound:jambonz:attempt-1",
+        },
+    )
+
+    assert markers.provider == "jambonz"
+    assert markers.contract_version == "jambonz_contract_v1"
+    assert markers.is_contract_fixture is True
+    assert markers.live_trunk_validated is False
+    assert markers.live_validation_source is None
+    assert markers.live_validation_evidence_id is None
+    assert markers.telephony_configuration_id == 55
+    assert markers.telephony_phone_number_id == 902
+    assert markers.call_attempt_id == "inbound:jambonz:attempt-1"
+
+
+def test_evidence_markers_accept_only_approved_live_validation_sources():
+    rejected = build_trusted_live_validation_markers(
+        provider="jambonz",
+        live_validation_source="simulator",
+        live_validation_evidence_id="fake-live-proof",
+    )
+    accepted = build_trusted_live_validation_markers(
+        provider="jambonz",
+        live_validation_source="operator_attestation",
+        live_validation_evidence_id="ops-attestation-123",
+    )
+
+    assert rejected.live_trunk_validated is False
+    assert accepted.live_trunk_validated is True
+    assert accepted.live_validation_source == "operator_attestation"
+
+
+def test_strip_untrusted_evidence_fields_removes_customer_marker_inputs():
+    assert strip_untrusted_evidence_fields(
+        {
+            "phone_number": "+821012345678",
+            "live_trunk_validated": True,
+            "live_validation_source": "operator_attestation",
+            "is_contract_fixture": False,
+            "contract_version": "jambonz_contract_v1",
+        }
+    ) == {"phone_number": "+821012345678"}
+
+
+def test_status_cdr_ignores_live_validation_from_context_and_callback(monkeypatch):
+    async def run():
+        mock_db = SimpleNamespace(
+            record_telephony_call_event=AsyncMock(return_value=SimpleNamespace(id=1)),
+            upsert_telephony_cdr=AsyncMock(return_value=SimpleNamespace(id=2)),
+        )
+        monkeypatch.setattr(cdr_module, "db_client", mock_db)
+
+        workflow_run = SimpleNamespace(
+            id=501,
+            workflow_id=33,
+            campaign_id=None,
+            queued_run_id=None,
+            mode="jambonz",
+            call_type="outbound",
+            workflow=SimpleNamespace(organization_id=11),
+            initial_context={
+                "provider": "jambonz",
+                "direction": "outbound",
+                "telephony_configuration_id": 55,
+                "from_phone_number_id": 902,
+                "telephony_call_attempt_id": "outbound:jambonz:attempt-1",
+                "live_trunk_validated": True,
+                "live_validation_source": "simulator",
+                "live_validation_evidence_id": "fake-live-proof",
+            },
+            gathered_context={},
+        )
+        status = SimpleNamespace(
+            status="completed",
+            call_id="jb-call-secret",
+            from_number="+827012345678",
+            to_number="+821012345678",
+            duration="42",
+            extra={
+                "contract_version": "jambonz_contract_v1",
+                "is_contract_fixture": True,
+                "live_trunk_validated": True,
+                "live_validation_source": "simulator",
+                "live_validation_evidence_id": "callback-fake-proof",
+            },
+        )
+
+        await cdr_module.record_status_event_and_terminal_cdr(workflow_run, status)
+
+        event_kwargs = mock_db.record_telephony_call_event.await_args.kwargs
+        cdr_kwargs = mock_db.upsert_telephony_cdr.await_args.kwargs
+        assert event_kwargs["live_trunk_validated"] is False
+        assert cdr_kwargs["live_trunk_validated"] is False
+        assert cdr_kwargs["is_contract_fixture"] is True
+        assert cdr_kwargs["contract_version"] == "jambonz_contract_v1"
+        assert cdr_kwargs["artifact_payload"]["evidence_markers"][
+            "live_trunk_validated"
+        ] is False
+
+    asyncio.run(run())
 
 def test_alert_sink_dedupes_and_never_pages_contract_simulator(monkeypatch):
     async def run():

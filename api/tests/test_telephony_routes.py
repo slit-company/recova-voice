@@ -79,6 +79,13 @@ def test_initiate_call_executes_as_workflow_owner_for_shared_org_workflow():
     client = TestClient(app)
 
     workflow = _workflow()
+    workflow.template_context_variables.update(
+        {
+            "live_trunk_validated": True,
+            "live_validation_source": "operator_attestation",
+            "live_validation_evidence_id": "template-injected-proof",
+        }
+    )
     provider = _provider()
     quota_mock = AsyncMock(
         return_value=SimpleNamespace(has_quota=True, error_message="")
@@ -98,6 +105,17 @@ def test_initiate_call_executes_as_workflow_owner_for_shared_org_workflow():
             "api.routes.telephony.get_backend_endpoints",
             new=AsyncMock(return_value=("https://api.example.com", "wss://ignored")),
         ),
+        patch(
+            "api.routes.telephony.telephony_admission_controller.acquire",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    allowed=True,
+                    call_attempt_id="outbound:twilio:test-attempt",
+                    slot_id="slot-direct-test",
+                )
+            ),
+        ),
+        patch("api.routes.telephony.record_telephony_event", new=AsyncMock()),
     ):
         mock_db.get_user_configurations = AsyncMock(
             return_value=SimpleNamespace(test_phone_number=None)
@@ -131,6 +149,9 @@ def test_initiate_call_executes_as_workflow_owner_for_shared_org_workflow():
     assert create_kwargs["user_id"] == workflow.user_id
     assert create_kwargs["organization_id"] == workflow.organization_id
     assert create_kwargs["initial_context"]["template_key"] == "template-value"
+    assert "live_trunk_validated" not in create_kwargs["initial_context"]
+    assert "live_validation_source" not in create_kwargs["initial_context"]
+    assert "live_validation_evidence_id" not in create_kwargs["initial_context"]
 
     initiate_kwargs = provider.initiate_call.await_args.kwargs
     assert initiate_kwargs["workflow_id"] == workflow.id
@@ -168,6 +189,17 @@ def test_initiate_call_jambonz_uses_assigned_recova_070_default_caller():
             "api.routes.telephony.get_backend_endpoints",
             new=AsyncMock(return_value=("https://api.example.com", "wss://ignored")),
         ),
+        patch(
+            "api.routes.telephony.telephony_admission_controller.acquire",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    allowed=True,
+                    call_attempt_id="outbound:jambonz:test-attempt",
+                    slot_id="slot-jambonz-test",
+                )
+            ),
+        ),
+        patch("api.routes.telephony.record_telephony_event", new=AsyncMock()),
     ):
         mock_db.get_user_configurations = AsyncMock(
             return_value=SimpleNamespace(test_phone_number=None)

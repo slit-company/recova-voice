@@ -241,6 +241,13 @@ class TestDispatcherThreadsTelephonyConfig:
             organization_id=org_id, telephony_configuration_id=config_id
         )
         queued_run = _make_queued_run()
+        queued_run.context_variables.update(
+            {
+                "live_trunk_validated": True,
+                "live_validation_source": "operator_attestation",
+                "live_validation_evidence_id": "customer-injected-proof",
+            }
+        )
 
         provider = MagicMock()
         provider.PROVIDER_NAME = "twilio"
@@ -269,6 +276,20 @@ class TestDispatcherThreadsTelephonyConfig:
             patch(
                 "api.services.campaign.campaign_call_dispatcher.get_backend_endpoints",
                 AsyncMock(return_value=("https://example.com", None)),
+            ),
+            patch(
+                "api.services.telephony.admission.telephony_admission_controller.acquire",
+                new=AsyncMock(
+                    return_value=SimpleNamespace(
+                        allowed=True,
+                        call_attempt_id="campaign:test-attempt",
+                        slot_id="slot-admission-test",
+                    )
+                ),
+            ),
+            patch(
+                "api.services.telephony.cdr.record_telephony_event",
+                new=AsyncMock(),
             ),
         ):
             mock_db.get_workflow_by_id = AsyncMock(return_value=SimpleNamespace(id=1))
@@ -312,6 +333,12 @@ class TestDispatcherThreadsTelephonyConfig:
                 f"telephony_configuration_id ({config_id}); got args={store_args}, "
                 f"kwargs={store_kwargs}"
             )
+            create_context = mock_db.create_workflow_run.await_args.kwargs[
+                "initial_context"
+            ]
+            assert create_context["live_trunk_validated"] is False
+            assert "live_validation_source" not in create_context
+            assert "live_validation_evidence_id" not in create_context
 
             assert provider.initiate_call.await_count == 1
             webhook_url = provider.initiate_call.await_args.kwargs["webhook_url"]

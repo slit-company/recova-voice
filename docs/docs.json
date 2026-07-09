@@ -99,6 +99,9 @@
             "pages": [
               "integrations/telephony/overview",
               "integrations/telephony/inbound",
+              "integrations/telephony/own-infra-runbook",
+              "integrations/telephony/sip-070-cutover-checklist",
+              "integrations/telephony/own-infra-readiness",
               "integrations/telephony/twilio",
               "integrations/telephony/vonage",
               "integrations/telephony/plivo",

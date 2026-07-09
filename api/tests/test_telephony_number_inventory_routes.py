@@ -101,6 +101,85 @@ def test_operator_import_redacts_secure_inventory_fields():
     import_mock.assert_awaited_once()
     assert import_mock.await_args.kwargs["actor_user_id"] == 99
 
+def test_operator_inventory_response_exposes_only_safe_metadata():
+    app = _make_app()
+    client = TestClient(app)
+    row = _inventory_row(
+        id=101,
+        status="assigned",
+        organization_id=11,
+        telephony_configuration_id=301,
+        telephony_phone_number_id=202,
+        extra_metadata={
+            "recova_inventory_state": "assigned",
+            "managed_by": "recova_number_inventory",
+            "inventory_id": "101",
+            "contract_version": "jambonz-v1",
+            "is_contract_fixture": False,
+            "live_trunk_validated": True,
+            "live_validation_source": "operator_attestation",
+            "live_validation_evidence_id": "cdr-123",
+            "api_token": "secret",
+            "address_hash": "hash",
+            "nested": {"secret": "value"},
+        },
+    )
+
+    with patch(
+        "api.routes.telephony_number_inventory.list_inventory_numbers",
+        new=AsyncMock(return_value=([row], 1)),
+    ):
+        response = client.get("/telephony-number-inventory?limit=1")
+
+    assert response.status_code == 200
+    number = response.json()["numbers"][0]
+    assert number["extra_metadata"] == {
+        "recova_inventory_state": "assigned",
+        "managed_by": "recova_number_inventory",
+        "inventory_id": "101",
+        "contract_version": "jambonz-v1",
+        "is_contract_fixture": False,
+        "live_trunk_validated": True,
+        "live_validation_source": "operator_attestation",
+        "live_validation_evidence_id": "cdr-123",
+    }
+    assert number["assignment_metadata"] == {
+        "managed_by": "recova_number_inventory",
+        "recova_inventory_state": "assigned",
+        "inventory_id": 101,
+        "binding_metadata_consistent": True,
+    }
+    assert number["readiness_metadata"]["live_trunk_validated"] is True
+    assert number["readiness_metadata"]["contract_version"] == "jambonz-v1"
+    assert "api_token" not in number["extra_metadata"]
+    assert "address_hash" not in number["extra_metadata"]
+
+
+def test_contract_fixture_metadata_never_renders_live_ready():
+    app = _make_app()
+    client = TestClient(app)
+    row = _inventory_row(
+        status="assigned",
+        telephony_configuration_id=301,
+        telephony_phone_number_id=202,
+        extra_metadata={
+            "live_trunk_validated": True,
+            "is_contract_fixture": True,
+            "live_validation_source": "simulator",
+            "live_validation_evidence_id": "fixture-1",
+        },
+    )
+
+    with patch(
+        "api.routes.telephony_number_inventory.list_inventory_numbers",
+        new=AsyncMock(return_value=([row], 1)),
+    ):
+        response = client.get("/telephony-number-inventory?limit=1")
+
+    assert response.status_code == 200
+    readiness = response.json()["numbers"][0]["readiness_metadata"]
+    assert readiness["is_contract_fixture"] is True
+    assert readiness["live_trunk_validated"] is False
 
 def test_customer_bind_uses_selected_organization_scope():
     app = _make_app()

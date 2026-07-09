@@ -45,6 +45,12 @@ from api.services.telephony.cdr import (
     record_rejected_call,
     record_telephony_event,
 )
+from api.services.telephony.evidence_markers import (
+    TelephonyEvidenceMarkers,
+    extract_telephony_evidence_markers,
+    inventory_id_from_phone_row,
+    strip_untrusted_evidence_fields,
+)
 from api.services.telephony.jambonz_policy import (
     is_assigned_recova_jambonz_070,
     resolve_jambonz_outbound_caller,
@@ -194,7 +200,9 @@ async def initiate_call(
     if not workflow_run_id:
         # Merge template context variables (e.g. caller_number, called_number
         # set in workflow settings for testing pre-call data fetch).
-        template_vars = workflow.template_context_variables or {}
+        template_vars = strip_untrusted_evidence_fields(
+            workflow.template_context_variables or {}
+        )
 
         numeric_suffix = int(str(uuid.uuid4()).replace("-", "")[:8], 16) % 100000000
         workflow_run_name = f"WR-TEL-OUT-{numeric_suffix:08d}"
@@ -274,6 +282,14 @@ async def initiate_call(
         from_number = phone_row.address_normalized
         from_phone_number_id = phone_row.id
 
+    outbound_markers = extract_telephony_evidence_markers(
+        trusted_context={
+            "provider": provider.PROVIDER_NAME,
+            "telephony_configuration_id": telephony_configuration_id,
+            "telephony_phone_number_id": from_phone_number_id,
+        }
+    )
+
     admission = await telephony_admission_controller.acquire(
         TelephonyAdmissionRequest(
             provider=provider.PROVIDER_NAME,
@@ -281,12 +297,19 @@ async def initiate_call(
             direction=CallType.OUTBOUND.value,
             workflow_run_id=workflow_run_id,
             telephony_configuration_id=telephony_configuration_id,
-            telephony_phone_number_id=request.from_phone_number_id,
+            telephony_phone_number_id=from_phone_number_id,
+            inventory_id=outbound_markers.inventory_id,
+            contract_version=outbound_markers.contract_version,
+            is_contract_fixture=outbound_markers.is_contract_fixture,
             workflow_id=workflow.id,
         )
     )
+    outbound_markers = outbound_markers.with_identity(
+        call_attempt_id=admission.call_attempt_id
+    )
     admission_initial_context = {
-        **(workflow_run.initial_context or {}),
+        **strip_untrusted_evidence_fields(workflow_run.initial_context or {}),
+        **outbound_markers.as_context(),
         "telephony_call_attempt_id": admission.call_attempt_id,
         "telephony_admission_slot_id": admission.slot_id,
     }
@@ -302,13 +325,19 @@ async def initiate_call(
             status="failed",
             organization_id=user.selected_organization_id,
             telephony_configuration_id=telephony_configuration_id,
-            telephony_phone_number_id=request.from_phone_number_id,
+            telephony_phone_number_id=from_phone_number_id,
             workflow_id=workflow.id,
             workflow_run_id=workflow_run_id,
             call_attempt_id=admission.call_attempt_id,
             from_number=from_number,
             to_number=phone_number,
             release_reason="capacity_denied",
+            contract_version=outbound_markers.contract_version,
+            is_contract_fixture=outbound_markers.is_contract_fixture,
+            live_validation_source=outbound_markers.live_validation_source,
+            live_validation_evidence_id=outbound_markers.live_validation_evidence_id,
+            inventory_id=outbound_markers.inventory_id,
+            artifact_payload=outbound_markers.as_artifact_payload(),
         )
         await db_client.update_workflow_run(
             run_id=workflow_run_id,
@@ -338,7 +367,7 @@ async def initiate_call(
             status="failed",
             organization_id=user.selected_organization_id,
             telephony_configuration_id=telephony_configuration_id,
-            telephony_phone_number_id=request.from_phone_number_id,
+            telephony_phone_number_id=from_phone_number_id,
             workflow_id=workflow.id,
             workflow_run_id=workflow_run_id,
             call_attempt_id=admission.call_attempt_id,
@@ -346,6 +375,12 @@ async def initiate_call(
             to_number=phone_number,
             provider_payload={"error": str(e)},
             release_reason="initiate_failed",
+            contract_version=outbound_markers.contract_version,
+            is_contract_fixture=outbound_markers.is_contract_fixture,
+            live_validation_source=outbound_markers.live_validation_source,
+            live_validation_evidence_id=outbound_markers.live_validation_evidence_id,
+            inventory_id=outbound_markers.inventory_id,
+            artifact_payload=outbound_markers.as_artifact_payload(),
         )
         await telephony_ops_alert_sink.emit(
             TelephonyOpsAlert(
@@ -360,6 +395,7 @@ async def initiate_call(
                     "error": str(e),
                 },
                 dedupe_components=("direct", provider.PROVIDER_NAME),
+                **outbound_markers.as_alert_kwargs(),
             )
         )
         await db_client.update_workflow_run(
@@ -372,6 +408,17 @@ async def initiate_call(
     provider_call_id = getattr(result, "call_id", None) or (
         result.provider_metadata or {}
     ).get("call_id")
+    result_markers = extract_telephony_evidence_markers(
+        result.provider_metadata,
+        getattr(result, "raw_response", None),
+        trusted_context={
+            **outbound_markers.as_context(),
+            "provider": provider.PROVIDER_NAME,
+            "telephony_configuration_id": telephony_configuration_id,
+            "telephony_phone_number_id": from_phone_number_id,
+            "call_attempt_id": admission.call_attempt_id,
+        },
+    )
     await record_telephony_event(
         TelephonyEventRecord(
             provider=provider.PROVIDER_NAME,
@@ -380,7 +427,8 @@ async def initiate_call(
             status=getattr(result, "status", None),
             organization_id=user.selected_organization_id,
             telephony_configuration_id=telephony_configuration_id,
-            telephony_phone_number_id=request.from_phone_number_id,
+            telephony_phone_number_id=from_phone_number_id,
+            inventory_id=result_markers.inventory_id,
             workflow_id=workflow.id,
             workflow_run_id=workflow_run_id,
             call_attempt_id=admission.call_attempt_id,
@@ -391,17 +439,25 @@ async def initiate_call(
             admission_slot_id=admission.slot_id,
             provider_payload=getattr(result, "raw_response", None)
             or result.provider_metadata,
+            artifact_payload=result_markers.as_artifact_payload(),
+            contract_version=result_markers.contract_version,
+            is_contract_fixture=result_markers.is_contract_fixture,
+            live_trunk_validated=result_markers.live_trunk_validated,
+            live_validation_source=result_markers.live_validation_source,
+            live_validation_evidence_id=result_markers.live_validation_evidence_id,
         )
     )
 
     # Store provider metadata and caller_number in workflow run context
     gathered_context = {
         "provider": provider.PROVIDER_NAME,
-        **(result.provider_metadata or {}),
+        **strip_untrusted_evidence_fields(result.provider_metadata or {}),
+        **result_markers.as_context(),
     }
     # Merge caller_number into initial_context now that we know which number was used
     updated_initial_context = {
         **admission_initial_context,
+        **result_markers.as_context(),
         "called_number": phone_number,
         "telephony_configuration_id": telephony_configuration_id,
     }
@@ -573,6 +629,17 @@ async def _validate_inbound_request(
             provider_instance,
         )
 
+    evidence_markers = extract_telephony_evidence_markers(
+        webhook_data,
+        normalized_data.raw_data,
+        headers,
+        trusted_context={
+            "provider": provider,
+            "telephony_configuration_id": telephony_configuration_id,
+            "telephony_phone_number_id": phone_number_id,
+        },
+    )
+
     # Return success with workflow context
     workflow_context = {
         "workflow": workflow,
@@ -581,6 +648,7 @@ async def _validate_inbound_request(
         "provider": provider,
         "telephony_configuration_id": telephony_configuration_id,
         "from_phone_number_id": phone_number_id,
+        "evidence_markers": evidence_markers,
     }
     return (True, "", workflow_context, provider_instance)
 
@@ -594,11 +662,28 @@ async def _create_inbound_workflow_run(
     from_phone_number_id: Optional[int] = None,
     call_attempt_id: Optional[str] = None,
     admission_slot_id: Optional[str] = None,
+    evidence_markers: TelephonyEvidenceMarkers | None = None,
 ) -> int:
     """Create workflow run for inbound call and return run ID"""
     call_id = normalized_data.call_id
     numeric_suffix = int(str(uuid.uuid4()).replace("-", "")[:8], 16) % 100000000
     workflow_run_name = f"WR-TEL-IN-{numeric_suffix:08d}"
+    markers = (
+        evidence_markers
+        or extract_telephony_evidence_markers(
+            normalized_data.raw_data,
+            trusted_context={
+                "provider": provider,
+                "telephony_configuration_id": telephony_configuration_id,
+                "telephony_phone_number_id": from_phone_number_id,
+            },
+        )
+    ).with_identity(
+        provider=provider,
+        telephony_configuration_id=telephony_configuration_id,
+        telephony_phone_number_id=from_phone_number_id,
+        call_attempt_id=call_attempt_id,
+    )
 
     workflow_run = await db_client.create_workflow_run(
         workflow_run_name,
@@ -610,10 +695,7 @@ async def _create_inbound_workflow_run(
             "caller_number": normalized_data.from_number,
             "called_number": normalized_data.to_number,
             "direction": "inbound",
-            "provider": provider,
-            "telephony_configuration_id": telephony_configuration_id,
-            "from_phone_number_id": from_phone_number_id,
-            "telephony_call_attempt_id": call_attempt_id,
+            **markers.as_context(),
             "telephony_admission_slot_id": admission_slot_id,
         },
         gathered_context={
@@ -878,6 +960,15 @@ async def handle_inbound_run(request: Request):
             provider=provider_class.PROVIDER_NAME,
             provider_call_id=normalized_data.call_id,
         )
+        inbound_markers = extract_telephony_evidence_markers(
+            webhook_data,
+            normalized_data.raw_data,
+            headers,
+            trusted_context={
+                "provider": provider_class.PROVIDER_NAME,
+                "call_attempt_id": inbound_call_attempt_id,
+            },
+        )
 
         if normalized_data.direction != "inbound":
             logger.warning(
@@ -919,6 +1010,12 @@ async def handle_inbound_run(request: Request):
                 from_number=normalized_data.from_number,
                 to_number=normalized_data.to_number,
                 provider_payload=normalized_data.raw_data,
+                contract_version=inbound_markers.contract_version,
+                is_contract_fixture=inbound_markers.is_contract_fixture,
+                live_validation_source=inbound_markers.live_validation_source,
+                live_validation_evidence_id=inbound_markers.live_validation_evidence_id,
+                inventory_id=inbound_markers.inventory_id,
+                artifact_payload=inbound_markers.as_artifact_payload(),
             )
             return provider_class.generate_validation_error_response(
                 TelephonyError.PHONE_NUMBER_NOT_CONFIGURED
@@ -926,6 +1023,11 @@ async def handle_inbound_run(request: Request):
 
         config, phone_row = match
         telephony_configuration_id = config.id
+        route_markers = inbound_markers.with_identity(
+            telephony_configuration_id=telephony_configuration_id,
+            telephony_phone_number_id=phone_row.id,
+            inventory_id=inventory_id_from_phone_row(phone_row),
+        )
 
         # 2. Verify webhook signature against the matched config's
         # credentials before either static routing or preview routing. This is
@@ -957,6 +1059,12 @@ async def handle_inbound_run(request: Request):
                 from_number=normalized_data.from_number,
                 to_number=normalized_data.to_number,
                 provider_payload=normalized_data.raw_data,
+                contract_version=route_markers.contract_version,
+                is_contract_fixture=route_markers.is_contract_fixture,
+                live_validation_source=route_markers.live_validation_source,
+                live_validation_evidence_id=route_markers.live_validation_evidence_id,
+                inventory_id=route_markers.inventory_id,
+                artifact_payload=route_markers.as_artifact_payload(),
             )
             await telephony_ops_alert_sink.emit(
                 TelephonyOpsAlert(
@@ -971,6 +1079,7 @@ async def handle_inbound_run(request: Request):
                         "call_id": normalized_data.call_id,
                     },
                     dedupe_components=(provider_class.PROVIDER_NAME,),
+                    **route_markers.as_alert_kwargs(),
                 )
             )
             return provider_class.generate_validation_error_response(
@@ -978,7 +1087,7 @@ async def handle_inbound_run(request: Request):
             )
 
         if provider_class.PROVIDER_NAME == "jambonz":
-            if not is_assigned_recova_jambonz_070(phone_row):
+            if not await is_assigned_recova_jambonz_070(phone_row):
                 logger.warning(
                     "/inbound/run: Jambonz called number [redacted] is not an "
                     "assigned active Recova 070 route"
@@ -996,6 +1105,12 @@ async def handle_inbound_run(request: Request):
                     from_number=normalized_data.from_number,
                     to_number=normalized_data.to_number,
                     provider_payload=normalized_data.raw_data,
+                    contract_version=route_markers.contract_version,
+                    is_contract_fixture=route_markers.is_contract_fixture,
+                    live_validation_source=route_markers.live_validation_source,
+                    live_validation_evidence_id=route_markers.live_validation_evidence_id,
+                    inventory_id=route_markers.inventory_id,
+                    artifact_payload=route_markers.as_artifact_payload(),
                 )
                 await telephony_ops_alert_sink.emit(
                     TelephonyOpsAlert(
@@ -1010,6 +1125,7 @@ async def handle_inbound_run(request: Request):
                             "call_id": normalized_data.call_id,
                         },
                         dedupe_components=("jambonz-policy", "unassigned"),
+                        **route_markers.as_alert_kwargs(),
                     )
                 )
                 return provider_class.generate_validation_error_response(
@@ -1033,6 +1149,12 @@ async def handle_inbound_run(request: Request):
                     from_number=normalized_data.from_number,
                     to_number=normalized_data.to_number,
                     provider_payload=normalized_data.raw_data,
+                    contract_version=route_markers.contract_version,
+                    is_contract_fixture=route_markers.is_contract_fixture,
+                    live_validation_source=route_markers.live_validation_source,
+                    live_validation_evidence_id=route_markers.live_validation_evidence_id,
+                    inventory_id=route_markers.inventory_id,
+                    artifact_payload=route_markers.as_artifact_payload(),
                 )
                 await telephony_ops_alert_sink.emit(
                     TelephonyOpsAlert(
@@ -1047,6 +1169,7 @@ async def handle_inbound_run(request: Request):
                             "call_id": normalized_data.call_id,
                         },
                         dedupe_components=("jambonz-policy", "unbound"),
+                        **route_markers.as_alert_kwargs(),
                     )
                 )
                 return provider_class.generate_validation_error_response(
@@ -1082,6 +1205,12 @@ async def handle_inbound_run(request: Request):
                 from_number=normalized_data.from_number,
                 to_number=normalized_data.to_number,
                 provider_payload=normalized_data.raw_data,
+                contract_version=route_markers.contract_version,
+                is_contract_fixture=route_markers.is_contract_fixture,
+                live_validation_source=route_markers.live_validation_source,
+                live_validation_evidence_id=route_markers.live_validation_evidence_id,
+                inventory_id=route_markers.inventory_id,
+                artifact_payload=route_markers.as_artifact_payload(),
             )
             return provider_class.generate_validation_error_response(
                 TelephonyError.WORKFLOW_NOT_FOUND
@@ -1109,6 +1238,12 @@ async def handle_inbound_run(request: Request):
                 from_number=normalized_data.from_number,
                 to_number=normalized_data.to_number,
                 provider_payload=normalized_data.raw_data,
+                contract_version=route_markers.contract_version,
+                is_contract_fixture=route_markers.is_contract_fixture,
+                live_validation_source=route_markers.live_validation_source,
+                live_validation_evidence_id=route_markers.live_validation_evidence_id,
+                inventory_id=route_markers.inventory_id,
+                artifact_payload=route_markers.as_artifact_payload(),
             )
             return provider_class.generate_validation_error_response(
                 TelephonyError.WORKFLOW_NOT_FOUND
@@ -1137,6 +1272,12 @@ async def handle_inbound_run(request: Request):
                 from_number=normalized_data.from_number,
                 to_number=normalized_data.to_number,
                 provider_payload={"error": quota_result.error_message},
+                contract_version=route_markers.contract_version,
+                is_contract_fixture=route_markers.is_contract_fixture,
+                live_validation_source=route_markers.live_validation_source,
+                live_validation_evidence_id=route_markers.live_validation_evidence_id,
+                inventory_id=route_markers.inventory_id,
+                artifact_payload=route_markers.as_artifact_payload(),
             )
             return provider_class.generate_validation_error_response(
                 TelephonyError.QUOTA_EXCEEDED
@@ -1150,6 +1291,7 @@ async def handle_inbound_run(request: Request):
             telephony_configuration_id=telephony_configuration_id,
             from_phone_number_id=phone_row.id,
             call_attempt_id=inbound_call_attempt_id,
+            evidence_markers=route_markers,
         )
 
         admission = await telephony_admission_controller.acquire(
@@ -1162,6 +1304,11 @@ async def handle_inbound_run(request: Request):
                 provider_call_id=normalized_data.call_id,
                 telephony_configuration_id=telephony_configuration_id,
                 telephony_phone_number_id=phone_row.id,
+                inventory_id=route_markers.inventory_id,
+                contract_version=route_markers.contract_version,
+                is_contract_fixture=route_markers.is_contract_fixture,
+                live_validation_source=route_markers.live_validation_source,
+                live_validation_evidence_id=route_markers.live_validation_evidence_id,
                 workflow_id=workflow_id,
             )
         )
@@ -1172,10 +1319,9 @@ async def handle_inbound_run(request: Request):
                     "caller_number": normalized_data.from_number,
                     "called_number": normalized_data.to_number,
                     "direction": "inbound",
-                    "provider": provider_class.PROVIDER_NAME,
-                    "telephony_configuration_id": telephony_configuration_id,
-                    "from_phone_number_id": phone_row.id,
-                    "telephony_call_attempt_id": admission.call_attempt_id,
+                    **route_markers.with_identity(
+                        call_attempt_id=admission.call_attempt_id
+                    ).as_context(),
                     "telephony_admission_slot_id": admission.slot_id,
                 },
             )
@@ -1195,6 +1341,12 @@ async def handle_inbound_run(request: Request):
                 to_number=normalized_data.to_number,
                 provider_payload=normalized_data.raw_data,
                 release_reason="capacity_denied",
+                contract_version=route_markers.contract_version,
+                is_contract_fixture=route_markers.is_contract_fixture,
+                live_validation_source=route_markers.live_validation_source,
+                live_validation_evidence_id=route_markers.live_validation_evidence_id,
+                inventory_id=route_markers.inventory_id,
+                artifact_payload=route_markers.as_artifact_payload(),
             )
             await db_client.update_workflow_run(
                 run_id=workflow_run_id,
@@ -1241,6 +1393,12 @@ async def handle_inbound_run(request: Request):
                 to_number=normalized_data.to_number,
                 provider_payload={"error": str(e)},
                 release_reason="media_start_failed",
+                contract_version=route_markers.contract_version,
+                is_contract_fixture=route_markers.is_contract_fixture,
+                live_validation_source=route_markers.live_validation_source,
+                live_validation_evidence_id=route_markers.live_validation_evidence_id,
+                inventory_id=route_markers.inventory_id,
+                artifact_payload=route_markers.as_artifact_payload(),
             )
             await telephony_ops_alert_sink.emit(
                 TelephonyOpsAlert(
@@ -1258,6 +1416,7 @@ async def handle_inbound_run(request: Request):
                         "error": str(e),
                     },
                     dedupe_components=("inbound", provider_class.PROVIDER_NAME),
+                    **route_markers.as_alert_kwargs(),
                 )
             )
             raise
@@ -1271,6 +1430,7 @@ async def handle_inbound_run(request: Request):
                 organization_id=config.organization_id,
                 telephony_configuration_id=telephony_configuration_id,
                 telephony_phone_number_id=phone_row.id,
+                inventory_id=route_markers.inventory_id,
                 workflow_id=workflow_id,
                 workflow_run_id=workflow_run_id,
                 call_attempt_id=admission.call_attempt_id,
@@ -1279,6 +1439,12 @@ async def handle_inbound_run(request: Request):
                 to_number=normalized_data.to_number,
                 admission_slot_id=admission.slot_id,
                 provider_payload=normalized_data.raw_data,
+                artifact_payload=route_markers.as_artifact_payload(),
+                contract_version=route_markers.contract_version,
+                is_contract_fixture=route_markers.is_contract_fixture,
+                live_trunk_validated=route_markers.live_trunk_validated,
+                live_validation_source=route_markers.live_validation_source,
+                live_validation_evidence_id=route_markers.live_validation_evidence_id,
             )
         )
         return response
@@ -1418,6 +1584,7 @@ async def handle_inbound_telephony(
             normalized_data,
             telephony_configuration_id=workflow_context["telephony_configuration_id"],
             from_phone_number_id=workflow_context.get("from_phone_number_id"),
+            evidence_markers=workflow_context.get("evidence_markers"),
         )
 
         # Generate response URLs

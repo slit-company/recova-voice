@@ -257,6 +257,10 @@ class CampaignCallDispatcher:
             record_rejected_call,
             record_telephony_event,
         )
+        from api.services.telephony.evidence_markers import (
+            extract_telephony_evidence_markers,
+            strip_untrusted_evidence_fields,
+        )
         from api.services.telephony.ops_alerts import (
             TelephonyOpsAlert,
             TelephonyOpsAlertSeverity,
@@ -331,8 +335,9 @@ class CampaignCallDispatcher:
         logger.info(f"Queued run context: {queued_run.context_variables}")
 
         # Merge context variables (queued_run context already includes retry info if applicable)
+        queued_context = strip_untrusted_evidence_fields(queued_run.context_variables)
         initial_context = {
-            **queued_run.context_variables,
+            **queued_context,
             "campaign_id": campaign.id,
             "provider": provider.PROVIDER_NAME,
             "source_uuid": queued_run.source_uuid,
@@ -340,6 +345,14 @@ class CampaignCallDispatcher:
             "called_number": phone_number,
             "telephony_configuration_id": campaign.telephony_configuration_id,
         }
+        campaign_markers = extract_telephony_evidence_markers(
+            trusted_context={
+                "provider": provider.PROVIDER_NAME,
+                "telephony_configuration_id": campaign.telephony_configuration_id,
+            }
+        )
+        initial_context.update(campaign_markers.as_context())
+
 
         logger.info(f"Final initial_context: {initial_context}")
 
@@ -378,12 +391,19 @@ class CampaignCallDispatcher:
                     workflow_id=campaign.workflow_id,
                     campaign_id=campaign.id,
                     queued_run_id=queued_run.id,
+                    inventory_id=campaign_markers.inventory_id,
+                    contract_version=campaign_markers.contract_version,
+                    is_contract_fixture=campaign_markers.is_contract_fixture,
                 )
+            )
+            campaign_markers = campaign_markers.with_identity(
+                call_attempt_id=admission.call_attempt_id
             )
             initial_context = {
                 **initial_context,
                 "telephony_call_attempt_id": admission.call_attempt_id,
                 "telephony_admission_slot_id": admission.slot_id,
+                **campaign_markers.as_context(),
             }
             await db_client.update_workflow_run(
                 run_id=workflow_run.id,
@@ -415,6 +435,12 @@ class CampaignCallDispatcher:
                     from_number=from_number,
                     to_number=phone_number,
                     release_reason="capacity_denied",
+                    contract_version=campaign_markers.contract_version,
+                    is_contract_fixture=campaign_markers.is_contract_fixture,
+                    live_validation_source=campaign_markers.live_validation_source,
+                    live_validation_evidence_id=campaign_markers.live_validation_evidence_id,
+                    inventory_id=campaign_markers.inventory_id,
+                    artifact_payload=campaign_markers.as_artifact_payload(),
                 )
                 await db_client.update_workflow_run(
                     run_id=workflow_run.id,
@@ -474,6 +500,16 @@ class CampaignCallDispatcher:
             provider_call_id = getattr(call_result, "call_id", None) or (
                 call_result.provider_metadata or {}
             ).get("call_id")
+            result_markers = extract_telephony_evidence_markers(
+                call_result.provider_metadata,
+                getattr(call_result, "raw_response", None),
+                trusted_context={
+                    **campaign_markers.as_context(),
+                    "provider": provider.PROVIDER_NAME,
+                    "telephony_configuration_id": campaign.telephony_configuration_id,
+                    "call_attempt_id": admission.call_attempt_id,
+                },
+            )
             await record_telephony_event(
                 TelephonyEventRecord(
                     provider=provider.PROVIDER_NAME,
@@ -493,6 +529,12 @@ class CampaignCallDispatcher:
                     admission_slot_id=admission.slot_id,
                     provider_payload=getattr(call_result, "raw_response", None)
                     or call_result.provider_metadata,
+                    artifact_payload=result_markers.as_artifact_payload(),
+                    contract_version=result_markers.contract_version,
+                    is_contract_fixture=result_markers.is_contract_fixture,
+                    live_trunk_validated=result_markers.live_trunk_validated,
+                    live_validation_source=result_markers.live_validation_source,
+                    live_validation_evidence_id=result_markers.live_validation_evidence_id,
                 )
             )
 
@@ -502,7 +544,8 @@ class CampaignCallDispatcher:
                 run_id=workflow_run.id,
                 gathered_context={
                     "provider": provider.PROVIDER_NAME,
-                    **(call_result.provider_metadata or {}),
+                    **strip_untrusted_evidence_fields(call_result.provider_metadata or {}),
+                    **result_markers.as_context(),
                 },
             )
 
@@ -534,6 +577,12 @@ class CampaignCallDispatcher:
                 to_number=phone_number,
                 provider_payload={"error": str(e)},
                 release_reason="initiate_failed",
+                contract_version=campaign_markers.contract_version,
+                is_contract_fixture=campaign_markers.is_contract_fixture,
+                live_validation_source=campaign_markers.live_validation_source,
+                live_validation_evidence_id=campaign_markers.live_validation_evidence_id,
+                inventory_id=campaign_markers.inventory_id,
+                artifact_payload=campaign_markers.as_artifact_payload(),
             )
             await telephony_ops_alert_sink.emit(
                 TelephonyOpsAlert(
@@ -549,6 +598,7 @@ class CampaignCallDispatcher:
                         "error": str(e),
                     },
                     dedupe_components=("campaign", provider.PROVIDER_NAME),
+                    **campaign_markers.as_alert_kwargs(),
                 )
             )
 

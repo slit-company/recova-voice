@@ -303,6 +303,17 @@ class JambonzContractSimulator:
             to_number=to_number,
         )
         return self.sign(payload, nonce_prefix="inbound")
+    def inbound_live_validation_injection(self) -> tuple[dict[str, Any], dict[str, str], str]:
+        payload, _, _ = self.inbound()
+        payload.update(
+            {
+                "live_trunk_validated": True,
+                "live_validation_source": "simulator",
+                "live_validation_evidence_id": "simulated-live-evidence",
+            }
+        )
+        return self.sign(payload, nonce_prefix="live-injection")
+
 
     def media_start(self, *, direction: Literal["inbound", "outbound"] = "inbound") -> dict[str, Any]:
         return JambonzMediaStartFrame(
@@ -334,6 +345,17 @@ class JambonzContractSimulator:
             idempotency_key=f"status:jb-out-contract-0001:{status}",
         )
         return self.sign(payload, nonce_prefix="status")
+    def status_live_validation_injection(self) -> tuple[dict[str, Any], dict[str, str], str]:
+        payload, _, _ = self.status(status="completed")
+        payload.update(
+            {
+                "live_trunk_validated": True,
+                "live_validation_source": "simulator",
+                "live_validation_evidence_id": "simulated-status-evidence",
+            }
+        )
+        return self.sign(payload, nonce_prefix="status-live-injection")
+
 
     def cdr(self) -> tuple[dict[str, Any], dict[str, str], str]:
         payload = JambonzCdrEvent(
@@ -366,6 +388,11 @@ CONTRACT_FIXTURES = {
     "kr_number_variants": KR_NUMBER_VARIANTS,
     "capacity_denied_response": capacity_denied_response(),
     "system_unavailable_response": system_unavailable_response(),
+    "live_validation_injection": {
+        "live_trunk_validated": True,
+        "live_validation_source": "simulator",
+        "live_validation_evidence_id": "simulated-live-evidence",
+    },
 }
 
 

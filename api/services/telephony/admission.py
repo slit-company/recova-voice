@@ -40,6 +40,7 @@ class TelephonyAdmissionRequest:
     provider_call_id: str | None = None
     telephony_configuration_id: int | None = None
     telephony_phone_number_id: int | None = None
+    inventory_id: int | None = None
     workflow_id: int | None = None
     campaign_id: int | None = None
     queued_run_id: int | None = None
@@ -47,6 +48,8 @@ class TelephonyAdmissionRequest:
     profile: str | None = None
     contract_version: str | None = None
     is_contract_fixture: bool = False
+    live_validation_source: str | None = None
+    live_validation_evidence_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -119,11 +122,16 @@ class TelephonyAdmissionController:
             "telephony_phone_number_id": ""
             if request.telephony_phone_number_id is None
             else str(request.telephony_phone_number_id),
+            "inventory_id": ""
+            if request.inventory_id is None
+            else str(request.inventory_id),
             "workflow_id": "" if request.workflow_id is None else str(request.workflow_id),
             "campaign_id": "" if request.campaign_id is None else str(request.campaign_id),
             "queued_run_id": "" if request.queued_run_id is None else str(request.queued_run_id),
             "contract_version": request.contract_version or "",
             "is_contract_fixture": "1" if request.is_contract_fixture else "0",
+            "live_validation_source": request.live_validation_source or "",
+            "live_validation_evidence_id": request.live_validation_evidence_id or "",
             "dimensions": json.dumps([key for key, _ in dimensions]),
             "acquired_at": str(now),
         }
@@ -224,6 +232,7 @@ class TelephonyAdmissionController:
                         organization_id=request.organization_id,
                         telephony_configuration_id=request.telephony_configuration_id,
                         telephony_phone_number_id=request.telephony_phone_number_id,
+                        inventory_id=request.inventory_id,
                         workflow_id=request.workflow_id,
                         workflow_run_id=request.workflow_run_id,
                         campaign_id=request.campaign_id,
@@ -233,6 +242,8 @@ class TelephonyAdmissionController:
                         admission_slot_id=acquired_slot_id,
                         contract_version=request.contract_version,
                         is_contract_fixture=request.is_contract_fixture,
+                        live_validation_source=request.live_validation_source,
+                        live_validation_evidence_id=request.live_validation_evidence_id,
                     )
                 )
             return TelephonyAdmissionResult(
@@ -252,6 +263,7 @@ class TelephonyAdmissionController:
                 organization_id=request.organization_id,
                 telephony_configuration_id=request.telephony_configuration_id,
                 telephony_phone_number_id=request.telephony_phone_number_id,
+                inventory_id=request.inventory_id,
                 workflow_id=request.workflow_id,
                 workflow_run_id=request.workflow_run_id,
                 campaign_id=request.campaign_id,
@@ -261,6 +273,8 @@ class TelephonyAdmissionController:
                 failure_category=TelephonyFailureCategory.ADMISSION_CAPACITY,
                 contract_version=request.contract_version,
                 is_contract_fixture=request.is_contract_fixture,
+                live_validation_source=request.live_validation_source,
+                live_validation_evidence_id=request.live_validation_evidence_id,
             )
         )
         await self._emit_capacity_alert(request, denied_dimension=denied_dimension)
@@ -422,6 +436,10 @@ class TelephonyAdmissionController:
                     "workflow_run_id": request.workflow_run_id,
                     "campaign_id": request.campaign_id,
                     "queued_run_id": request.queued_run_id,
+                    "contract_version": request.contract_version,
+                    "live_validation_source": request.live_validation_source,
+                    "live_validation_evidence_id": request.live_validation_evidence_id,
+                    "inventory_id": request.inventory_id,
                 },
                 is_contract_fixture=request.is_contract_fixture,
                 dedupe_components=(request.direction, denied_dimension),

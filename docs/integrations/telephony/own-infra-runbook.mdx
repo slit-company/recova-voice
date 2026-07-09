@@ -1,0 +1,46 @@
+---
+title: "Own-infrastructure telephony runbook"
+description: "Operate supplier-independent Korean telephony without exposing carrier credentials to customer organizations."
+---
+
+## Prerequisites
+
+- Supplier access for the SIP/070 trunk you intend to validate.
+- A Recova operator account with superadmin access.
+- A customer organization selected for assignment.
+- A published inbound workflow in the customer organization.
+- A written internal change record for the planned validation window.
+
+This runbook is for technical readiness. It does not decide legal, regulatory, or carrier-contract eligibility.
+
+## Trust boundaries
+
+- Customer organizations can bind assigned Recova-managed numbers to their own workflows, but they must not edit hidden Jambonz carrier credentials or provider configuration.
+- Operator actions happen in **Telephony number inventory** under superadmin.
+- Customer actions happen in **Assigned phone numbers** and remain bind/unbind only.
+- Simulator or contract-fixture results are useful regression evidence, but they must not be counted as live SIP/070 readiness.
+
+## Operator flow
+
+1. Import Korean 070 inventory in `/superadmin/telephony-number-inventory`.
+2. Reserve a number for the target organization before customer handoff.
+3. Assign the number only after the target organization and workflow ownership are confirmed.
+4. Verify the row status, backing configuration row, phone-number row, audit entries, and readiness metadata.
+5. Quarantine a number immediately when supplier, routing, fraud, or quality concerns make it unsafe to use.
+6. Retire a number when it must not return to customer use.
+
+## Customer flow
+
+1. Open `/telephony-numbers`.
+2. Select an assigned number.
+3. Choose an inbound workflow from the same-organization workflow picker.
+4. Save the binding.
+5. Confirm inbound behavior only after the live validation gate is approved.
+
+The customer page intentionally does not expose provider credentials, Jambonz trunk settings, or raw carrier identifiers.
+
+## Operational notes
+
+- Use audit history for who changed inventory state and when.
+- Treat readiness metadata as evidence pointers, not a legal approval.
+- Do not route customer traffic through a number that is quarantined, retired, fixture-only, or missing live validation evidence.

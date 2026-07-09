@@ -1,0 +1,44 @@
+---
+title: "Own-infrastructure readiness"
+description: "Readiness criteria for Recova-managed Korean telephony inventory and live SIP/070 evidence."
+---
+
+## Readiness criteria
+
+A Recova-managed number is ready for controlled live use only when all of these are true:
+
+- The inventory row is assigned to the target organization.
+- The backing phone-number row is active and belongs to the same organization.
+- The hidden provider configuration is managed by Recova number inventory.
+- The customer workflow binding points to a workflow in the same organization.
+- The number is not quarantined or retired.
+- Live validation evidence is present from an approved tooling or operator-attestation path.
+- The evidence is not a simulator or contract fixture.
+
+## Metadata to inspect
+
+Operators should inspect these fields before treating a number as live-ready:
+
+- Inventory status and organization id.
+- Backing telephony configuration id and phone-number id.
+- Assignment marker state and inventory id.
+- Contract version for provider-owned evidence.
+- Fixture marker.
+- Live validation source.
+- Live validation evidence id.
+- CDR/status evidence tied to the same provider, configuration, phone number, inventory id, and call attempt.
+
+## Non-readiness states
+
+Do not treat these states as live-ready:
+
+- Imported or reserved inventory with no assigned backing phone-number row.
+- Marker-only metadata with no matching assigned inventory and phone-number row.
+- Alias-only or missing inventory id.
+- Wrong-organization phone-number or workflow references.
+- Quarantined or retired rows.
+- Simulator-only, fixture-only, or generic callback metadata that claims live validation.
+
+## Customer controls
+
+Customers can bind and unbind assigned numbers to their own workflows. They do not manage carrier credentials, trunk credentials, provider configuration, or readiness evidence.

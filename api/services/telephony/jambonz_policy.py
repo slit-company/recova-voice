@@ -1,28 +1,29 @@
 """Runtime policy for Recova-owned Jambonz core calls.
 
-Lane B owns first-class inventory tables. Until those tables are present in this
-worktree, Lane A enforces the V1 invariant at the shared phone-number row using
-metadata that the inventory assignment path must stamp when creating assigned
-Jambonz rows.
+Assigned Recova Jambonz 070 recognition is trust-boundary first: runtime code
+must validate both phone-row metadata and the authoritative inventory row before
+treating a number as live for inbound or outbound core use.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable
 
 from fastapi import HTTPException
 
 from api.db import db_client
+from api.db.telephony_number_inventory_client import (
+    INVENTORY_ID_METADATA_KEY,
+    INVENTORY_STATUS_ASSIGNED,
+    MANAGED_BY_METADATA_KEY,
+    MANAGED_INVENTORY_CREDENTIAL,
+    RECOVA_INVENTORY_STATE_KEY,
+)
 from api.utils.telephony_address import normalize_telephony_address
 
 JAMBONZ_PROVIDER = "jambonz"
-ASSIGNED_STATE = "assigned"
-_ASSIGNMENT_STATE_KEYS = (
-    "recova_inventory_state",
-    "inventory_state",
-    "assignment_state",
-)
+ASSIGNED_STATE = INVENTORY_STATUS_ASSIGNED
 
 
 @dataclass(frozen=True)
@@ -41,32 +42,96 @@ def is_recova_070_address(address: str | None, country_hint: str | None = "KR") 
     return normalized.address_type == "pstn" and normalized.canonical.startswith("+8270")
 
 
-def _metadata_assignment_state(extra_metadata: dict | None) -> str | None:
-    metadata = extra_metadata or {}
-    for key in _ASSIGNMENT_STATE_KEYS:
-        value = metadata.get(key)
-        if isinstance(value, str) and value.lower() == ASSIGNED_STATE:
-            return ASSIGNED_STATE
-    contract = metadata.get("jambonz_contract_v1")
-    if isinstance(contract, dict):
-        value = contract.get("assignment_state") or contract.get("inventory_state")
-        if isinstance(value, str) and value.lower() == ASSIGNED_STATE:
-            return ASSIGNED_STATE
+def _coerce_inventory_id(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, str) and value.isdecimal():
+        parsed = int(value)
+        return parsed if parsed > 0 else None
     return None
 
 
-def is_assigned_recova_jambonz_070(row) -> bool:
-    """Return whether an existing phone-number row is valid for V1 core use."""
+def _metadata_inventory_id(extra_metadata: dict | None) -> int | None:
+    metadata = extra_metadata or {}
+    if not isinstance(metadata, dict):
+        return None
+
+    inventory_id = _coerce_inventory_id(metadata.get(INVENTORY_ID_METADATA_KEY))
+    if inventory_id is None:
+        return None
+
+    alias_values: list[Any] = []
+    legacy_contract = metadata.get("jambonz_contract_v1")
+    if isinstance(legacy_contract, dict):
+        alias_values.append(legacy_contract.get(INVENTORY_ID_METADATA_KEY))
+    alias_values.extend(
+        metadata.get(key)
+        for key in ("inventoryId", "inventory_ids")
+        if key in metadata
+    )
+
+    for value in alias_values:
+        values = value if isinstance(value, list) else [value]
+        parsed_values = {
+            parsed
+            for parsed in (_coerce_inventory_id(candidate) for candidate in values)
+            if parsed is not None
+        }
+        if len(parsed_values) > 1 or (
+            len(parsed_values) == 1 and inventory_id not in parsed_values
+        ):
+            return None
+
+    return inventory_id
+
+
+def _canonical_assigned_inventory_id(extra_metadata: dict | None) -> int | None:
+    metadata = extra_metadata or {}
+    if not isinstance(metadata, dict):
+        return None
+    state = metadata.get(RECOVA_INVENTORY_STATE_KEY)
+    if not isinstance(state, str) or state.lower() != ASSIGNED_STATE:
+        return None
+    if metadata.get(MANAGED_BY_METADATA_KEY) != MANAGED_INVENTORY_CREDENTIAL:
+        return None
+    return _metadata_inventory_id(metadata)
+
+
+async def is_assigned_recova_jambonz_070(row) -> bool:
+    """Return whether a phone-number row is valid for V1 core use."""
     if row is None or not getattr(row, "is_active", False):
         return False
     country_hint = getattr(row, "country_code", None) or "KR"
-    if not is_recova_070_address(getattr(row, "address_normalized", None), country_hint):
+    address = getattr(row, "address_normalized", None)
+    if not is_recova_070_address(address, country_hint):
         return False
-    return _metadata_assignment_state(getattr(row, "extra_metadata", None)) == ASSIGNED_STATE
+
+    inventory_id = _canonical_assigned_inventory_id(
+        getattr(row, "extra_metadata", None)
+    )
+    if inventory_id is None:
+        return False
+
+    organization_id = getattr(row, "organization_id", None)
+    phone_number_id = getattr(row, "id", None)
+    if organization_id is None or phone_number_id is None:
+        return False
+
+    inventory = await db_client.get_assigned_inventory_for_phone_number(
+        inventory_id=inventory_id,
+        organization_id=organization_id,
+        telephony_phone_number_id=phone_number_id,
+        provider=JAMBONZ_PROVIDER,
+        telephony_configuration_id=getattr(row, "telephony_configuration_id", None),
+        address_normalized=address,
+    )
+    return inventory is not None
 
 
-def assert_assigned_recova_jambonz_070(row, *, detail: str) -> None:
-    if not is_assigned_recova_jambonz_070(row):
+async def assert_assigned_recova_jambonz_070(row, *, detail: str) -> None:
+    if not await is_assigned_recova_jambonz_070(row):
         raise HTTPException(status_code=400, detail=detail)
 
 
@@ -90,7 +155,7 @@ async def resolve_jambonz_outbound_caller(
         row = await db_client.get_default_caller_id(telephony_configuration_id)
         detail = "jambonz_default_recova_070_caller_required"
 
-    assert_assigned_recova_jambonz_070(row, detail=detail)
+    await assert_assigned_recova_jambonz_070(row, detail=detail)
     return JambonzCallerSelection(
         phone_number_id=row.id,
         from_number=row.address_normalized,
@@ -107,17 +172,17 @@ async def require_jambonz_assigned_number_by_address(
     rows = await db_client.list_phone_numbers_for_config(telephony_configuration_id)
     for row in rows:
         if getattr(row, "address_normalized", None) == normalized:
-            assert_assigned_recova_jambonz_070(
+            await assert_assigned_recova_jambonz_070(
                 row, detail="jambonz_assigned_recova_070_caller_required"
             )
             return row
     raise HTTPException(status_code=400, detail="jambonz_assigned_recova_070_caller_required")
 
 
-def filter_assigned_recova_jambonz_numbers(rows: Iterable) -> list[str]:
+async def filter_assigned_recova_jambonz_numbers(rows: Iterable) -> list[str]:
     """Return normalized assigned Recova 070 numbers from phone-number rows."""
-    return [
-        row.address_normalized
-        for row in rows
-        if is_assigned_recova_jambonz_070(row)
-    ]
+    assigned: list[str] = []
+    for row in rows:
+        if await is_assigned_recova_jambonz_070(row):
+            assigned.append(row.address_normalized)
+    return assigned

@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { getWorkflowsSummaryApiV1WorkflowSummaryGet } from "@/client/sdk.gen";
+import type { WorkflowSummaryResponse } from "@/client/types.gen";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,7 +16,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -54,6 +62,8 @@ export default function TelephonyNumbersPage() {
   const { user, getAccessToken, loading: authLoading } = useAuth();
   const [numbers, setNumbers] = useState<AssignedNumber[]>([]);
   const [workflowInputs, setWorkflowInputs] = useState<Record<number, string>>({});
+  const [workflows, setWorkflows] = useState<WorkflowSummaryResponse[]>([]);
+  const [loadingWorkflows, setLoadingWorkflows] = useState(true);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
 
@@ -80,15 +90,36 @@ export default function TelephonyNumbersPage() {
       setLoading(false);
     }
   }, [authLoading, user, getAccessToken]);
+  const fetchWorkflows = useCallback(async () => {
+    if (authLoading || !user) return;
+    setLoadingWorkflows(true);
+    try {
+      const response = await getWorkflowsSummaryApiV1WorkflowSummaryGet({
+        headers: {
+          authorization: `Bearer ${await getAccessToken()}`,
+        },
+        query: {
+          status: "active",
+        },
+      });
+      setWorkflows(response.data ?? []);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to load workflows");
+    } finally {
+      setLoadingWorkflows(false);
+    }
+  }, [authLoading, user, getAccessToken]);
+
 
   useEffect(() => {
     fetchNumbers();
-  }, [fetchNumbers]);
+    fetchWorkflows();
+  }, [fetchNumbers, fetchWorkflows]);
 
   const bindNumber = async (inventoryId: number) => {
     const workflowId = Number(workflowInputs[inventoryId]);
     if (!Number.isInteger(workflowId) || workflowId <= 0) {
-      toast.error("Enter a valid workflow ID");
+      toast.error("Select an inbound workflow");
       return;
     }
     setSavingId(inventoryId);
@@ -126,6 +157,21 @@ export default function TelephonyNumbersPage() {
       setSavingId(null);
     }
   };
+  const workflowOptionsForNumber = (number: AssignedNumber) => {
+    if (
+      number.inbound_workflow_id &&
+      !workflows.some((workflow) => workflow.id === number.inbound_workflow_id)
+    ) {
+      return [
+        {
+          id: number.inbound_workflow_id,
+          name: number.inbound_workflow_name ?? `Workflow #${number.inbound_workflow_id}`,
+        },
+        ...workflows,
+      ];
+    }
+    return workflows;
+  };
 
   return (
     <div className="container mx-auto px-4 py-8 space-y-6">
@@ -137,7 +183,14 @@ export default function TelephonyNumbersPage() {
             inbound workflow without exposing carrier credentials.
           </p>
         </div>
-        <Button variant="outline" onClick={fetchNumbers} disabled={loading}>
+        <Button
+          variant="outline"
+          onClick={() => {
+            void fetchNumbers();
+            void fetchWorkflows();
+          }}
+          disabled={loading || loadingWorkflows}
+        >
           <RefreshCw className="h-4 w-4 mr-2" /> Refresh
         </Button>
       </div>
@@ -167,7 +220,7 @@ export default function TelephonyNumbersPage() {
                   <TableHead>Provider</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Inbound workflow</TableHead>
-                  <TableHead className="w-[280px]">Bind workflow ID</TableHead>
+                  <TableHead className="w-[340px]">Bind workflow</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -211,22 +264,54 @@ export default function TelephonyNumbersPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <Input
-                          inputMode="numeric"
+                        <Select
                           value={workflowInputs[number.inventory_id] ?? ""}
-                          onChange={(event) =>
+                          onValueChange={(value) =>
                             setWorkflowInputs((prev) => ({
                               ...prev,
-                              [number.inventory_id]: event.target.value,
+                              [number.inventory_id]: value,
                             }))
                           }
-                          placeholder="Workflow ID"
-                          className="h-8"
-                        />
+                          disabled={loadingWorkflows}
+                        >
+                          <SelectTrigger className="h-8 min-w-[220px]">
+                            <SelectValue
+                              placeholder={
+                                loadingWorkflows
+                                  ? "Loading workflows"
+                                  : "Select workflow"
+                              }
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {loadingWorkflows ? (
+                              <SelectItem value="loading" disabled>
+                                Loading workflows
+                              </SelectItem>
+                            ) : workflowOptionsForNumber(number).length === 0 ? (
+                              <SelectItem value="none" disabled>
+                                No active workflows
+                              </SelectItem>
+                            ) : (
+                              workflowOptionsForNumber(number).map((workflow) => (
+                                <SelectItem
+                                  key={workflow.id}
+                                  value={workflow.id.toString()}
+                                >
+                                  {workflow.name} (#{workflow.id})
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
                         <Button
                           size="sm"
                           onClick={() => bindNumber(number.inventory_id)}
-                          disabled={savingId === number.inventory_id}
+                          disabled={
+                            savingId === number.inventory_id ||
+                            loadingWorkflows ||
+                            !workflowInputs[number.inventory_id]
+                          }
                         >
                           <LinkIcon className="h-4 w-4" />
                         </Button>
@@ -235,7 +320,8 @@ export default function TelephonyNumbersPage() {
                           variant="outline"
                           onClick={() => unbindNumber(number.inventory_id)}
                           disabled={
-                            savingId === number.inventory_id || !number.inbound_workflow_id
+                            savingId === number.inventory_id ||
+                            !number.inbound_workflow_id
                           }
                         >
                           <Unlink className="h-4 w-4" />

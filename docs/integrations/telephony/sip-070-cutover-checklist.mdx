@@ -1,0 +1,38 @@
+---
+title: "SIP/070 cutover checklist"
+description: "Checklist for moving Korean 070 traffic from preparation to controlled live validation."
+---
+
+## Prerequisites
+
+- Supplier SIP/070 access is available and documented internally.
+- Carrier credentials are stored only in operator-owned configuration.
+- The customer organization has a published inbound workflow.
+- A rollback owner and validation window are named in the change record.
+
+## Before cutover
+
+- Confirm the number is assigned to the correct organization.
+- Confirm the customer workflow picker shows only same-organization workflows.
+- Confirm the customer cannot edit hidden Jambonz credentials or provider configuration.
+- Confirm the inventory row is not quarantined or retired.
+- Confirm fixture and simulator runs are labeled as fixture evidence and not live readiness.
+- Confirm no customer SIP/070 traffic is scheduled before supplier access and live gates are complete.
+
+## Live validation gate
+
+- Use only approved live-validation tooling or operator attestation for live readiness evidence.
+- Record the validation source and evidence identifier.
+- Attach the evidence to the inventory/readiness metadata without copying carrier secrets.
+- Check CDR/status evidence for the intended provider, configuration, phone number, inventory id, and call attempt.
+
+## Rollback
+
+- Quarantine the inventory number if validation fails or produces ambiguous evidence.
+- Disable the backing phone-number row before any customer traffic is allowed to continue.
+- Clear the inbound workflow binding when routing safety is uncertain.
+- Record the reason in audit history.
+
+## Cutover complete
+
+Cutover is technically complete only when the assigned inventory row, backing phone-number row, audit history, and live readiness evidence all point to the same organization and the number remains active and unquarantined.

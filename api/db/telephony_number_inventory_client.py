@@ -27,6 +27,10 @@ INVENTORY_STATUS_ASSIGNED = "assigned"
 INVENTORY_STATUS_QUARANTINED = "quarantined"
 INVENTORY_STATUS_RETIRED = "retired"
 MANAGED_INVENTORY_CREDENTIAL = "recova_number_inventory"
+RECOVA_INVENTORY_STATE_KEY = "recova_inventory_state"
+INVENTORY_ID_METADATA_KEY = "inventory_id"
+MANAGED_BY_METADATA_KEY = "managed_by"
+TELEPHONY_PHONE_NUMBER_ID_METADATA_KEY = "telephony_phone_number_id"
 
 
 class TelephonyNumberInventoryError(Exception):
@@ -282,6 +286,11 @@ class TelephonyNumberInventoryClient(BaseDBClient):
             row.reservation_expires_at = None
             row.quarantined_reason = None
             row.retired_reason = None
+            row.extra_metadata = _with_assigned_inventory_metadata(
+                row.extra_metadata,
+                inventory_id=row.id,
+                telephony_phone_number_id=phone.id,
+            )
             await self._write_inventory_audit(
                 session,
                 inventory_id=row.id,
@@ -440,6 +449,91 @@ class TelephonyNumberInventoryClient(BaseDBClient):
             await session.refresh(phone)
             return row, phone, workflow_name
 
+    async def get_assigned_inventory_for_phone_number(
+        self,
+        *,
+        inventory_id: int,
+        organization_id: int,
+        telephony_phone_number_id: int,
+        provider: str,
+        telephony_configuration_id: int | None = None,
+        address_normalized: str | None = None,
+    ) -> TelephonyNumberInventoryModel | None:
+        async with self.async_session() as session:
+            stmt = select(TelephonyNumberInventoryModel).where(
+                TelephonyNumberInventoryModel.id == inventory_id,
+                TelephonyNumberInventoryModel.provider == provider,
+                TelephonyNumberInventoryModel.status == INVENTORY_STATUS_ASSIGNED,
+                TelephonyNumberInventoryModel.organization_id == organization_id,
+                TelephonyNumberInventoryModel.telephony_phone_number_id
+                == telephony_phone_number_id,
+            )
+            if telephony_configuration_id is not None:
+                stmt = stmt.where(
+                    TelephonyNumberInventoryModel.telephony_configuration_id
+                    == telephony_configuration_id
+                )
+            if address_normalized is not None:
+                stmt = stmt.where(
+                    TelephonyNumberInventoryModel.address_normalized == address_normalized
+                )
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+    async def backfill_assigned_inventory_metadata(
+        self,
+        *,
+        limit: int | None = None,
+    ) -> int:
+        async with self.async_session() as session:
+            stmt = (
+                select(TelephonyNumberInventoryModel, TelephonyPhoneNumberModel)
+                .join(
+                    TelephonyPhoneNumberModel,
+                    and_(
+                        TelephonyPhoneNumberModel.id
+                        == TelephonyNumberInventoryModel.telephony_phone_number_id,
+                        TelephonyPhoneNumberModel.organization_id
+                        == TelephonyNumberInventoryModel.organization_id,
+                        TelephonyPhoneNumberModel.address_normalized
+                        == TelephonyNumberInventoryModel.address_normalized,
+                    ),
+                )
+                .where(
+                    TelephonyNumberInventoryModel.status == INVENTORY_STATUS_ASSIGNED,
+                    TelephonyNumberInventoryModel.provider == "jambonz",
+                    TelephonyNumberInventoryModel.telephony_phone_number_id.is_not(None),
+                )
+                .order_by(TelephonyNumberInventoryModel.id)
+            )
+            if limit is not None:
+                stmt = stmt.limit(limit)
+
+            updated_count = 0
+            result = await session.execute(stmt)
+            for row, phone in result.all():
+                next_phone_metadata = _with_assigned_inventory_metadata(
+                    phone.extra_metadata,
+                    inventory_id=row.id,
+                )
+                next_inventory_metadata = _with_assigned_inventory_metadata(
+                    row.extra_metadata,
+                    inventory_id=row.id,
+                    telephony_phone_number_id=phone.id,
+                )
+                changed = False
+                if next_phone_metadata != (phone.extra_metadata or {}):
+                    phone.extra_metadata = next_phone_metadata
+                    changed = True
+                if next_inventory_metadata != (row.extra_metadata or {}):
+                    row.extra_metadata = next_inventory_metadata
+                    changed = True
+                if changed:
+                    updated_count += 1
+
+            await session.commit()
+            return updated_count
+
     async def _transition_inventory_state(
         self,
         inventory_id: int,
@@ -465,13 +559,19 @@ class TelephonyNumberInventoryClient(BaseDBClient):
                 row.quarantined_reason = reason
             if status == INVENTORY_STATUS_RETIRED:
                 row.retired_reason = reason
-            if row.telephony_phone_number_id is not None:
-                phone = await session.get(
-                    TelephonyPhoneNumberModel, row.telephony_phone_number_id
-                )
+            phone_id = row.telephony_phone_number_id
+            if phone_id is not None:
+                phone = await session.get(TelephonyPhoneNumberModel, phone_id)
                 if phone:
                     phone.is_active = False
+                    phone.is_default_caller_id = False
                     phone.inbound_workflow_id = None
+                    phone.extra_metadata = _strip_assigned_inventory_metadata(
+                        phone.extra_metadata
+                    )
+            row.telephony_phone_number_id = None
+            row.telephony_configuration_id = None
+            row.extra_metadata = _strip_assigned_inventory_metadata(row.extra_metadata)
             await self._write_inventory_audit(
                 session,
                 inventory_id=row.id,
@@ -564,7 +664,16 @@ class TelephonyNumberInventoryClient(BaseDBClient):
             ).scalars().first()
             if existing:
                 metadata = existing.extra_metadata or {}
-                if metadata.get("inventory_id") not in (None, row.id):
+                existing_inventory_id = _coerce_inventory_id(
+                    metadata.get(INVENTORY_ID_METADATA_KEY)
+                )
+                if (
+                    (
+                        INVENTORY_ID_METADATA_KEY in metadata
+                        and existing_inventory_id is None
+                    )
+                    or existing_inventory_id not in (None, row.id)
+                ):
                     raise TelephonyNumberInventoryConflictError(
                         "telephony_phone_number_already_bound_to_inventory"
                     )
@@ -584,10 +693,10 @@ class TelephonyNumberInventoryClient(BaseDBClient):
                     inbound_workflow_id=inbound_workflow_id,
                     is_active=True,
                     is_default_caller_id=False,
-                    extra_metadata={
-                        "inventory_id": row.id,
-                        "managed_by": MANAGED_INVENTORY_CREDENTIAL,
-                    },
+                    extra_metadata=_with_assigned_inventory_metadata(
+                        {},
+                        inventory_id=row.id,
+                    ),
                 )
                 session.add(phone)
                 await session.flush()
@@ -597,11 +706,10 @@ class TelephonyNumberInventoryClient(BaseDBClient):
         if inbound_workflow_id is not None:
             phone.inbound_workflow_id = inbound_workflow_id
         phone.is_active = True
-        phone.extra_metadata = {
-            **(phone.extra_metadata or {}),
-            "inventory_id": row.id,
-            "managed_by": MANAGED_INVENTORY_CREDENTIAL,
-        }
+        phone.extra_metadata = _with_assigned_inventory_metadata(
+            phone.extra_metadata,
+            inventory_id=row.id,
+        )
         if set_default_caller_id:
             await session.execute(
                 update(TelephonyPhoneNumberModel)
@@ -664,6 +772,43 @@ class TelephonyNumberInventoryClient(BaseDBClient):
             )
         )
 
+
+def _coerce_inventory_id(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, str) and value.isdecimal():
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _with_assigned_inventory_metadata(
+    extra_metadata: dict[str, Any] | None,
+    *,
+    inventory_id: int,
+    telephony_phone_number_id: int | None = None,
+) -> dict[str, Any]:
+    metadata = dict(extra_metadata or {})
+    metadata[RECOVA_INVENTORY_STATE_KEY] = INVENTORY_STATUS_ASSIGNED
+    metadata[MANAGED_BY_METADATA_KEY] = MANAGED_INVENTORY_CREDENTIAL
+    metadata[INVENTORY_ID_METADATA_KEY] = inventory_id
+    if telephony_phone_number_id is not None:
+        metadata[TELEPHONY_PHONE_NUMBER_ID_METADATA_KEY] = telephony_phone_number_id
+    return metadata
+
+
+def _strip_assigned_inventory_metadata(
+    extra_metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    metadata = dict(extra_metadata or {})
+    metadata.pop(RECOVA_INVENTORY_STATE_KEY, None)
+    metadata.pop(INVENTORY_ID_METADATA_KEY, None)
+    metadata.pop(TELEPHONY_PHONE_NUMBER_ID_METADATA_KEY, None)
+    if metadata.get(MANAGED_BY_METADATA_KEY) == MANAGED_INVENTORY_CREDENTIAL:
+        metadata.pop(MANAGED_BY_METADATA_KEY, None)
+    return metadata
 
 def _iso(value: datetime | None) -> str | None:
     if value is None:

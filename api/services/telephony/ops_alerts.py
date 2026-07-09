@@ -11,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from api.db import db_client
+from api.services.telephony.evidence_markers import TelephonyEvidenceMarkers
 
 
 class TelephonyOpsAlertType(StrEnum):
@@ -44,6 +45,14 @@ class TelephonyOpsAlert:
     source: str = "runtime"
     details: dict[str, Any] = field(default_factory=dict)
     is_contract_fixture: bool = False
+    contract_version: str | None = None
+    live_trunk_validated: bool = False
+    live_validation_source: str | None = None
+    live_validation_evidence_id: str | None = None
+    telephony_configuration_id: int | None = None
+    telephony_phone_number_id: int | None = None
+    inventory_id: int | None = None
+    call_attempt_id: str | None = None
     dedupe_components: tuple[str, ...] = ()
 
 
@@ -80,7 +89,7 @@ class TelephonyOpsAlertSink:
         )
 
     async def emit(self, alert: TelephonyOpsAlert):
-        details_redacted = redact_alert_details(alert.details)
+        details_redacted = redact_alert_details(_details_with_markers(alert))
         should_page_live_ops = self._should_page_live_ops(alert)
         dedupe_key = self._dedupe_key(alert)
 
@@ -149,6 +158,26 @@ def redact_alert_details(value: Any, *, key: object | None = None):
     if isinstance(value, list):
         return [redact_alert_details(item) for item in value]
     return value
+
+
+def _details_with_markers(alert: TelephonyOpsAlert) -> dict[str, Any]:
+    details = dict(alert.details)
+    markers = TelephonyEvidenceMarkers(
+        provider=alert.provider,
+        contract_version=alert.contract_version,
+        is_contract_fixture=alert.is_contract_fixture,
+        live_trunk_validated=alert.live_trunk_validated,
+        live_validation_source=alert.live_validation_source,
+        live_validation_evidence_id=alert.live_validation_evidence_id,
+        telephony_configuration_id=alert.telephony_configuration_id,
+        telephony_phone_number_id=alert.telephony_phone_number_id,
+        inventory_id=alert.inventory_id,
+        call_attempt_id=alert.call_attempt_id,
+    )
+    marker_payload = markers.to_dict(include_false=True)
+    if marker_payload:
+        details.setdefault("evidence_markers", marker_payload)
+    return details
 
 
 telephony_ops_alert_sink = TelephonyOpsAlertSink()

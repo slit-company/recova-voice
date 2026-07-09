@@ -24,7 +24,7 @@ async def allowed_campaign_from_numbers(
     if telephony_configuration_id is None:
         return []
     rows = await db_client.list_phone_numbers_for_config(telephony_configuration_id)
-    return filter_assigned_recova_jambonz_numbers(rows)
+    return await filter_assigned_recova_jambonz_numbers(rows)
 
 
 async def validate_campaign_caller_id(

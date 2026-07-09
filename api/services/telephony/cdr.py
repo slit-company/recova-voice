@@ -12,6 +12,10 @@ from typing import Any
 from loguru import logger
 
 from api.db import db_client
+from api.services.telephony.evidence_markers import (
+    TelephonyEvidenceMarkers,
+    extract_telephony_evidence_markers,
+)
 from api.utils.phone_security import hash_phone_number, mask_phone_number
 
 
@@ -78,6 +82,8 @@ class TelephonyEventRecord:
     contract_version: str | None = None
     is_contract_fixture: bool = False
     live_trunk_validated: bool = False
+    live_validation_source: str | None = None
+    live_validation_evidence_id: str | None = None
     occurred_at: datetime | None = None
 
 
@@ -114,6 +120,8 @@ class TelephonyTerminalCDR:
     contract_version: str | None = None
     is_contract_fixture: bool = False
     live_trunk_validated: bool = False
+    live_validation_source: str | None = None
+    live_validation_evidence_id: str | None = None
 
 
 def build_call_attempt_id(
@@ -205,7 +213,19 @@ async def record_terminal_cdr(cdr: TelephonyTerminalCDR):
         artifact_recording_present=cdr.artifact_recording_present,
         artifact_transcript_expected=cdr.artifact_transcript_expected,
         artifact_transcript_present=cdr.artifact_transcript_present,
-        artifact_payload=cdr.artifact_payload,
+        artifact_payload=_artifact_payload_with_markers(
+            cdr.artifact_payload,
+            provider=cdr.provider,
+            contract_version=cdr.contract_version,
+            is_contract_fixture=cdr.is_contract_fixture,
+            live_trunk_validated=cdr.live_trunk_validated,
+            live_validation_source=cdr.live_validation_source,
+            live_validation_evidence_id=cdr.live_validation_evidence_id,
+            telephony_configuration_id=cdr.telephony_configuration_id,
+            telephony_phone_number_id=cdr.telephony_phone_number_id,
+            inventory_id=cdr.inventory_id,
+            call_attempt_id=call_attempt_id,
+        ),
         provider_payload_redacted=redact_provider_payload(cdr.provider_payload),
         contract_version=cdr.contract_version,
         is_contract_fixture=cdr.is_contract_fixture,
@@ -224,11 +244,19 @@ async def record_status_event_and_terminal_cdr(workflow_run, status) -> None:
     call_attempt_id = call_attempt_from_workflow_run(workflow_run)
     terminal = status.status in TERMINAL_STATUSES
     failure_category = _category_for_status(status.status)
-    is_contract_fixture = bool(initial_context.get("is_contract_fixture"))
-    contract_version = initial_context.get("contract_version") or initial_context.get(
-        "jambonz_contract_version"
+    markers = extract_telephony_evidence_markers(
+        status.extra,
+        trusted_context={
+            **initial_context,
+            **gathered_context,
+            "provider": provider,
+            "telephony_phone_number_id": initial_context.get("telephony_phone_number_id")
+            or initial_context.get("from_phone_number_id"),
+            "call_attempt_id": call_attempt_id,
+        },
     )
-    live_trunk_validated = bool(initial_context.get("live_trunk_validated"))
+    call_attempt_id = markers.call_attempt_id or call_attempt_id
+    telephony_phone_number_id = markers.telephony_phone_number_id
 
     await record_telephony_event(
         TelephonyEventRecord(
@@ -237,8 +265,8 @@ async def record_status_event_and_terminal_cdr(workflow_run, status) -> None:
             event_type=TelephonyEventType.TERMINAL_CDR if terminal else TelephonyEventType.STATUS_CALLBACK,
             status=status.status,
             organization_id=_workflow_org_id(workflow_run),
-            telephony_configuration_id=initial_context.get("telephony_configuration_id"),
-            telephony_phone_number_id=initial_context.get("from_phone_number_id"),
+            telephony_configuration_id=markers.telephony_configuration_id,
+            telephony_phone_number_id=telephony_phone_number_id,
             workflow_id=getattr(workflow_run, "workflow_id", None),
             workflow_run_id=workflow_run_id,
             campaign_id=getattr(workflow_run, "campaign_id", None),
@@ -251,9 +279,12 @@ async def record_status_event_and_terminal_cdr(workflow_run, status) -> None:
             duration_seconds=_parse_duration(status.duration),
             failure_category=failure_category,
             provider_payload=status.extra,
-            contract_version=contract_version,
-            is_contract_fixture=is_contract_fixture,
-            live_trunk_validated=live_trunk_validated,
+            artifact_payload=markers.as_artifact_payload(),
+            contract_version=markers.contract_version,
+            is_contract_fixture=markers.is_contract_fixture,
+            live_trunk_validated=markers.live_trunk_validated,
+            live_validation_source=markers.live_validation_source,
+            live_validation_evidence_id=markers.live_validation_evidence_id,
         )
     )
 
@@ -265,8 +296,8 @@ async def record_status_event_and_terminal_cdr(workflow_run, status) -> None:
                 direction=direction,
                 terminal_status=status.status,
                 organization_id=_workflow_org_id(workflow_run),
-                telephony_configuration_id=initial_context.get("telephony_configuration_id"),
-                telephony_phone_number_id=initial_context.get("from_phone_number_id"),
+                telephony_configuration_id=markers.telephony_configuration_id,
+                telephony_phone_number_id=telephony_phone_number_id,
                 workflow_id=getattr(workflow_run, "workflow_id", None),
                 workflow_run_id=workflow_run_id,
                 campaign_id=getattr(workflow_run, "campaign_id", None),
@@ -278,11 +309,14 @@ async def record_status_event_and_terminal_cdr(workflow_run, status) -> None:
                 duration_seconds=_parse_duration(status.duration),
                 failure_category=failure_category,
                 provider_payload=status.extra,
+                artifact_payload=markers.as_artifact_payload(),
                 artifact_recording_expected=expect_artifacts,
                 artifact_transcript_expected=expect_artifacts,
-                contract_version=contract_version,
-                is_contract_fixture=is_contract_fixture,
-                live_trunk_validated=live_trunk_validated,
+                contract_version=markers.contract_version,
+                is_contract_fixture=markers.is_contract_fixture,
+                live_trunk_validated=markers.live_trunk_validated,
+                live_validation_source=markers.live_validation_source,
+                live_validation_evidence_id=markers.live_validation_evidence_id,
             )
         )
 
@@ -309,6 +343,10 @@ async def record_rejected_call(
     release_reason: str | None = None,
     contract_version: str | None = None,
     is_contract_fixture: bool = False,
+    live_validation_source: str | None = None,
+    live_validation_evidence_id: str | None = None,
+    inventory_id: int | None = None,
+    artifact_payload: dict[str, Any] | None = None,
 ) -> None:
     resolved_attempt_id = build_call_attempt_id(
         direction=direction,
@@ -328,6 +366,7 @@ async def record_rejected_call(
             organization_id=organization_id,
             telephony_configuration_id=telephony_configuration_id,
             telephony_phone_number_id=telephony_phone_number_id,
+            inventory_id=inventory_id,
             workflow_id=workflow_id,
             workflow_run_id=workflow_run_id,
             campaign_id=campaign_id,
@@ -341,8 +380,20 @@ async def record_rejected_call(
             release_reason=release_reason,
             admission_slot_id=admission_slot_id,
             provider_payload=provider_payload or {},
+            artifact_payload=_artifact_payload_with_markers(
+                artifact_payload,
+                provider=provider,
+                contract_version=contract_version,
+                is_contract_fixture=is_contract_fixture,
+                live_validation_source=live_validation_source,
+                live_validation_evidence_id=live_validation_evidence_id,
+                inventory_id=inventory_id,
+                call_attempt_id=resolved_attempt_id,
+            ),
             contract_version=contract_version,
             is_contract_fixture=is_contract_fixture,
+            live_validation_source=live_validation_source,
+            live_validation_evidence_id=live_validation_evidence_id,
         )
     )
     await record_terminal_cdr(
@@ -353,6 +404,7 @@ async def record_rejected_call(
             organization_id=organization_id,
             telephony_configuration_id=telephony_configuration_id,
             telephony_phone_number_id=telephony_phone_number_id,
+            inventory_id=inventory_id,
             workflow_id=workflow_id,
             workflow_run_id=workflow_run_id,
             campaign_id=campaign_id,
@@ -365,8 +417,20 @@ async def record_rejected_call(
             release_reason=release_reason,
             admission_slot_id=admission_slot_id,
             provider_payload=provider_payload or {},
+            artifact_payload=_artifact_payload_with_markers(
+                artifact_payload,
+                provider=provider,
+                contract_version=contract_version,
+                is_contract_fixture=is_contract_fixture,
+                live_validation_source=live_validation_source,
+                live_validation_evidence_id=live_validation_evidence_id,
+                inventory_id=inventory_id,
+                call_attempt_id=resolved_attempt_id,
+            ),
             contract_version=contract_version,
             is_contract_fixture=is_contract_fixture,
+            live_validation_source=live_validation_source,
+            live_validation_evidence_id=live_validation_evidence_id,
         )
     )
 
@@ -374,11 +438,34 @@ async def record_rejected_call(
 async def mark_telephony_artifact(
     *, workflow_run_id: int, artifact_type: str, present: bool = True, expected: bool = True
 ) -> None:
+    artifact_payload = None
+    if hasattr(db_client, "get_workflow_run_by_id"):
+        workflow_run = await db_client.get_workflow_run_by_id(workflow_run_id)
+        if workflow_run is not None:
+            initial_context = getattr(workflow_run, "initial_context", None) or {}
+            gathered_context = getattr(workflow_run, "gathered_context", None) or {}
+            provider = str(
+                initial_context.get("provider") or getattr(workflow_run, "mode", "unknown")
+            )
+            markers = extract_telephony_evidence_markers(
+                trusted_context={
+                    **initial_context,
+                    **gathered_context,
+                    "provider": provider,
+                    "call_attempt_id": call_attempt_from_workflow_run(workflow_run),
+                    "telephony_phone_number_id": initial_context.get(
+                        "telephony_phone_number_id"
+                    )
+                    or initial_context.get("from_phone_number_id"),
+                },
+            )
+            artifact_payload = markers.as_artifact_payload()
     await db_client.mark_telephony_artifact(
         workflow_run_id=workflow_run_id,
         artifact_type=artifact_type,
         present=present,
         expected=expected,
+        artifact_payload=artifact_payload,
     )
 
 
@@ -453,7 +540,19 @@ def _shared_payload(record: TelephonyEventRecord, call_attempt_id: str) -> dict[
         "release_reason": record.release_reason,
         "admission_slot_id": record.admission_slot_id,
         "duration_seconds": record.duration_seconds,
-        "artifact_payload": record.artifact_payload,
+        "artifact_payload": _artifact_payload_with_markers(
+            record.artifact_payload,
+            provider=record.provider,
+            contract_version=record.contract_version,
+            is_contract_fixture=record.is_contract_fixture,
+            live_trunk_validated=record.live_trunk_validated,
+            live_validation_source=record.live_validation_source,
+            live_validation_evidence_id=record.live_validation_evidence_id,
+            telephony_configuration_id=record.telephony_configuration_id,
+            telephony_phone_number_id=record.telephony_phone_number_id,
+            inventory_id=record.inventory_id,
+            call_attempt_id=call_attempt_id,
+        ),
         "provider_payload_redacted": redact_provider_payload(record.provider_payload),
         "contract_version": record.contract_version,
         "is_contract_fixture": record.is_contract_fixture,
@@ -461,6 +560,37 @@ def _shared_payload(record: TelephonyEventRecord, call_attempt_id: str) -> dict[
         "schema_version": 1,
         **_number_fields(record.from_number, record.to_number),
     }
+
+
+def _artifact_payload_with_markers(
+    artifact_payload: dict[str, Any] | None,
+    *,
+    provider: str | None = None,
+    contract_version: str | None = None,
+    is_contract_fixture: bool = False,
+    live_trunk_validated: bool = False,
+    live_validation_source: str | None = None,
+    live_validation_evidence_id: str | None = None,
+    telephony_configuration_id: int | None = None,
+    telephony_phone_number_id: int | None = None,
+    inventory_id: int | None = None,
+    call_attempt_id: str | None = None,
+) -> dict[str, Any]:
+    payload = dict(artifact_payload or {})
+    markers = TelephonyEvidenceMarkers(
+        provider=provider,
+        contract_version=contract_version,
+        is_contract_fixture=is_contract_fixture,
+        live_trunk_validated=live_trunk_validated,
+        live_validation_source=live_validation_source,
+        live_validation_evidence_id=live_validation_evidence_id,
+        telephony_configuration_id=telephony_configuration_id,
+        telephony_phone_number_id=telephony_phone_number_id,
+        inventory_id=inventory_id,
+        call_attempt_id=call_attempt_id,
+    )
+    payload["evidence_markers"] = markers.to_dict(include_false=True)
+    return payload
 
 
 def _number_fields(from_number: str | None, to_number: str | None) -> dict[str, str | None]:

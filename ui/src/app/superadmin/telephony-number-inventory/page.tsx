@@ -29,6 +29,26 @@ import { useAuth } from "@/lib/auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
 
+type AssignmentMetadata = {
+  managed_by: string | null;
+  recova_inventory_state: string | null;
+  inventory_id: number | null;
+  binding_metadata_consistent: boolean;
+};
+
+type ReadinessMetadata = {
+  contract_version: string | null;
+  is_contract_fixture: boolean;
+  live_trunk_validated: boolean;
+  live_validation_source: string | null;
+  live_validation_evidence_id: string | null;
+  provider_config_id: string | null;
+  phone_number_id: number | null;
+  inventory_id: number | null;
+  call_attempt_id: string | null;
+};
+
+
 type InventoryNumber = {
   id: number;
   provider: string;
@@ -41,6 +61,12 @@ type InventoryNumber = {
   country_code: string | null;
   label: string | null;
   status: string;
+  reservation_expires_at: string | null;
+  quarantined_reason: string | null;
+  retired_reason: string | null;
+  extra_metadata: Record<string, unknown>;
+  assignment_metadata: AssignmentMetadata;
+  readiness_metadata: ReadinessMetadata;
   created_at: string;
   updated_at: string;
 };
@@ -248,6 +274,7 @@ export default function TelephonyNumberInventoryPage() {
                   <TableHead>ID</TableHead>
                   <TableHead>Number</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Readiness</TableHead>
                   <TableHead>Organization</TableHead>
                   <TableHead>Backing rows</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -266,9 +293,55 @@ export default function TelephonyNumberInventoryPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={number.status === "assigned" ? "secondary" : "outline"}>
-                        {number.status}
-                      </Badge>
+                      <div className="space-y-1">
+                        <Badge
+                          variant={
+                            number.status === "assigned" ? "secondary" : "outline"
+                          }
+                        >
+                          {number.status}
+                        </Badge>
+                        {number.quarantined_reason && (
+                          <div className="text-xs text-muted-foreground">
+                            Quarantine: {number.quarantined_reason}
+                          </div>
+                        )}
+                        {number.retired_reason && (
+                          <div className="text-xs text-muted-foreground">
+                            Retired: {number.retired_reason}
+                          </div>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-1 text-xs text-muted-foreground">
+                        <Badge
+                          variant={
+                            number.readiness_metadata.live_trunk_validated
+                              ? "secondary"
+                              : "outline"
+                          }
+                        >
+                          {number.readiness_metadata.live_trunk_validated
+                            ? "Live evidence"
+                            : number.readiness_metadata.is_contract_fixture
+                              ? "Fixture only"
+                              : "No live evidence"}
+                        </Badge>
+                        {number.readiness_metadata.contract_version && (
+                          <div>
+                            Contract {number.readiness_metadata.contract_version}
+                          </div>
+                        )}
+                        {number.readiness_metadata.live_validation_source && (
+                          <div>
+                            {number.readiness_metadata.live_validation_source}
+                            {number.readiness_metadata.live_validation_evidence_id
+                              ? ` · ${number.readiness_metadata.live_validation_evidence_id}`
+                              : ""}
+                          </div>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <Input
@@ -285,8 +358,28 @@ export default function TelephonyNumberInventoryPage() {
                       />
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      cfg {number.telephony_configuration_id ?? "-"} / phone{" "}
-                      {number.telephony_phone_number_id ?? "-"}
+                      <div className="space-y-1">
+                        <div>
+                          cfg {number.telephony_configuration_id ?? "-"} / phone{" "}
+                          {number.telephony_phone_number_id ?? "-"}
+                        </div>
+                        <div>trunk {number.trunk_group ?? "-"}</div>
+                        <div>
+                          marker {number.assignment_metadata.managed_by ?? "-"} /
+                          inv {number.assignment_metadata.inventory_id ?? "-"}
+                        </div>
+                        <Badge
+                          variant={
+                            number.assignment_metadata.binding_metadata_consistent
+                              ? "secondary"
+                              : "outline"
+                          }
+                        >
+                          {number.assignment_metadata.binding_metadata_consistent
+                            ? "marker complete"
+                            : "marker incomplete"}
+                        </Badge>
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-1">

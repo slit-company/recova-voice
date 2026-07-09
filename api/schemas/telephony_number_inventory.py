@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -47,6 +47,25 @@ class TelephonyNumberInventorySkippedItem(BaseModel):
     inventory_id: int | None = None
 
 
+class TelephonyNumberInventoryAssignmentMetadata(BaseModel):
+    managed_by: str | None = None
+    recova_inventory_state: str | None = None
+    inventory_id: int | None = None
+    binding_metadata_consistent: bool = False
+
+
+class TelephonyNumberInventoryReadinessMetadata(BaseModel):
+    contract_version: str | None = None
+    is_contract_fixture: bool = False
+    live_trunk_validated: bool = False
+    live_validation_source: str | None = None
+    live_validation_evidence_id: str | None = None
+    provider_config_id: str | None = None
+    phone_number_id: int | None = None
+    inventory_id: int | None = None
+    call_attempt_id: str | None = None
+
+
 class TelephonyNumberInventoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -65,6 +84,12 @@ class TelephonyNumberInventoryResponse(BaseModel):
     quarantined_reason: str | None = None
     retired_reason: str | None = None
     extra_metadata: dict[str, Any]
+    assignment_metadata: TelephonyNumberInventoryAssignmentMetadata = Field(
+        default_factory=TelephonyNumberInventoryAssignmentMetadata
+    )
+    readiness_metadata: TelephonyNumberInventoryReadinessMetadata = Field(
+        default_factory=TelephonyNumberInventoryReadinessMetadata
+    )
     created_at: datetime
     updated_at: datetime
 
