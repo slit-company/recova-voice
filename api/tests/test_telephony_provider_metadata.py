@@ -20,6 +20,7 @@ async def test_telephony_provider_metadata_hides_infrastructure_only_providers()
     provider_names = {provider.provider for provider in result.providers}
     assert "aws_connect" not in provider_names
     assert "clawops" not in provider_names
+    assert "jambonz" not in provider_names
 
 
 def test_self_serve_guard_rejects_infrastructure_only_aws_connect_provider():
@@ -38,9 +39,26 @@ def test_self_serve_guard_rejects_recova_owned_clawops_provider():
     assert exc.value.detail == "telephony_provider_not_supported_for_self_serve"
 
 
+def test_self_serve_guard_rejects_operator_owned_jambonz_provider():
+    with pytest.raises(HTTPException) as exc:
+        _ensure_self_serve_provider("jambonz")
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "telephony_provider_not_supported_for_self_serve"
+
+
 def test_recova_owned_clawops_provider_allows_preview_smoke_only():
     spec = get("clawops")
 
     assert spec.visible_in_self_serve is False
     assert spec.supports_preview_smoke is True
     assert spec.supports_media_transport is True
+
+
+def test_operator_owned_jambonz_provider_is_hidden_but_media_capable():
+    spec = get("jambonz")
+
+    assert spec.visible_in_self_serve is False
+    assert spec.supports_preview_smoke is False
+    assert spec.supports_media_transport is True
+    assert spec.account_id_credential_field == "account_id"

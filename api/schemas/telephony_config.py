@@ -28,6 +28,10 @@ from api.services.telephony.providers.cloudonix.config import (
     CloudonixConfigurationRequest,
     CloudonixConfigurationResponse,
 )
+from api.services.telephony.providers.jambonz.config import (
+    JambonzConfigurationRequest,
+    JambonzConfigurationResponse,
+)
 from api.services.telephony.providers.plivo.config import (
     PlivoConfigurationRequest,
     PlivoConfigurationResponse,
@@ -58,6 +62,7 @@ TelephonyConfigRequest = Annotated[
         AWSConnectConfigurationRequest,
         ClawOpsConfigurationRequest,
         CloudonixConfigurationRequest,
+        JambonzConfigurationRequest,
         PlivoConfigurationRequest,
         TelnyxConfigurationRequest,
         TwilioConfigurationRequest,
@@ -83,6 +88,7 @@ class TelephonyConfigurationResponse(BaseModel):
     cloudonix: Optional[CloudonixConfigurationResponse] = None
     clawops: Optional[ClawOpsConfigurationResponse] = None
     ari: Optional[ARIConfigurationResponse] = None
+    jambonz: Optional[JambonzConfigurationResponse] = None
     aws_connect: Optional[AWSConnectConfigurationResponse] = None
     telnyx: Optional[TelnyxConfigurationResponse] = None
 
@@ -152,6 +158,8 @@ __all__ = [
     "ClawOpsConfigurationResponse",
     "CloudonixConfigurationRequest",
     "CloudonixConfigurationResponse",
+    "JambonzConfigurationRequest",
+    "JambonzConfigurationResponse",
     "PlivoConfigurationRequest",
     "PlivoConfigurationResponse",
     "TelephonyConfigRequest",

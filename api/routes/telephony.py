@@ -45,11 +45,16 @@ from api.services.telephony.cdr import (
     record_rejected_call,
     record_telephony_event,
 )
+from api.services.telephony.jambonz_policy import (
+    is_assigned_recova_jambonz_070,
+    resolve_jambonz_outbound_caller,
+)
 from api.services.telephony.ops_alerts import (
     TelephonyOpsAlert,
     TelephonyOpsAlertSeverity,
     TelephonyOpsAlertType,
     telephony_ops_alert_sink,
+)
 )
 from api.services.telephony.status_processor import redact_telephony_payload_for_logs
 from api.services.telephony.transfer_event_protocol import (
@@ -239,11 +244,24 @@ async def initiate_call(
 
     keywords = {"workflow_id": workflow.id, "user_id": execution_user_id}
 
-    # Resolve optional caller-ID. The config has already been validated against
-    # the user's organization, so filtering by config_id is sufficient for
-    # tenant isolation.
+    # Resolve caller-ID. Jambonz V1 core must originate only from an assigned
+    # active Recova 070 number; other providers keep the existing optional
+    # caller-ID behavior.
     from_number: str | None = None
-    if request.from_phone_number_id is not None:
+    from_phone_number_id: int | None = None
+    if provider.PROVIDER_NAME == "jambonz":
+        if telephony_configuration_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="from_phone_number_id_requires_telephony_configuration",
+            )
+        caller = await resolve_jambonz_outbound_caller(
+            telephony_configuration_id=telephony_configuration_id,
+            from_phone_number_id=request.from_phone_number_id,
+        )
+        from_number = caller.from_number
+        from_phone_number_id = caller.phone_number_id
+    elif request.from_phone_number_id is not None:
         if telephony_configuration_id is None:
             raise HTTPException(
                 status_code=400,
@@ -255,6 +273,7 @@ async def initiate_call(
         if not phone_row or not phone_row.is_active:
             raise HTTPException(status_code=400, detail="from_phone_number_not_found")
         from_number = phone_row.address_normalized
+        from_phone_number_id = phone_row.id
 
     admission = await telephony_admission_controller.acquire(
         TelephonyAdmissionRequest(
@@ -389,6 +408,8 @@ async def initiate_call(
     }
     if result.caller_number:
         updated_initial_context["caller_number"] = result.caller_number
+    if from_phone_number_id is not None:
+        updated_initial_context["from_phone_number_id"] = from_phone_number_id
     await db_client.update_workflow_run(
         run_id=workflow_run_id,
         gathered_context=gathered_context,
@@ -957,6 +978,23 @@ async def handle_inbound_run(request: Request):
                 TelephonyError.SIGNATURE_VALIDATION_FAILED
             )
 
+        if provider_class.PROVIDER_NAME == "jambonz":
+            if not is_assigned_recova_jambonz_070(phone_row):
+                logger.warning(
+                    "/inbound/run: Jambonz called number [redacted] is not an "
+                    "assigned active Recova 070 route"
+                )
+                return provider_class.generate_validation_error_response(
+                    TelephonyError.PHONE_NUMBER_NOT_CONFIGURED
+                )
+            if not phone_row.inbound_workflow_id:
+                logger.warning(
+                    "/inbound/run: assigned Jambonz number [redacted] has no "
+                    "inbound_workflow_id bound"
+                )
+                return provider_class.generate_validation_error_response(
+                    TelephonyError.WORKFLOW_NOT_FOUND
+                )
         if not phone_row.inbound_workflow_id:
             from api.services.phone_preview.service import phone_preview_service
 

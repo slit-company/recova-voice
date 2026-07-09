@@ -3,6 +3,7 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Optional
 
+
 from loguru import logger
 
 from api.constants import DEFAULT_ORG_CONCURRENCY_LIMIT
@@ -15,6 +16,7 @@ from api.services.campaign.errors import (
     PhoneNumberPoolExhaustedError,
 )
 from api.services.campaign.rate_limiter import rate_limiter
+
 from api.utils.common import get_backend_endpoints
 
 if TYPE_CHECKING:
@@ -98,10 +100,19 @@ class CampaignCallDispatcher:
         # Initialize from_number pool for this campaign's telephony config.
         try:
             provider = await self.get_provider_for_campaign(campaign)
-            if provider.from_numbers:
+            from api.services.telephony.runtime_policy import (
+                allowed_campaign_from_numbers,
+            )
+
+            from_numbers = await allowed_campaign_from_numbers(
+                provider_name=provider.PROVIDER_NAME,
+                telephony_configuration_id=campaign.telephony_configuration_id,
+                fallback_from_numbers=provider.from_numbers,
+            )
+            if from_numbers:
                 await rate_limiter.initialize_from_number_pool(
                     campaign.organization_id,
-                    provider.from_numbers,
+                    from_numbers,
                     telephony_configuration_id=campaign.telephony_configuration_id,
                 )
         except Exception as e:
@@ -299,6 +310,23 @@ class CampaignCallDispatcher:
                 organization_id=campaign.organization_id
             )
 
+        from api.services.telephony.runtime_policy import validate_campaign_caller_id
+        try:
+            await validate_campaign_caller_id(
+                provider_name=provider.PROVIDER_NAME,
+                telephony_configuration_id=campaign.telephony_configuration_id,
+                from_number=from_number,
+            )
+        except ValueError:
+            await rate_limiter.release_concurrent_slot(
+                campaign.organization_id, slot_id
+            )
+            await rate_limiter.release_from_number(
+                campaign.organization_id,
+                from_number,
+                telephony_configuration_id=campaign.telephony_configuration_id,
+            )
+            raise
         logger.info(f"Provider name: {provider.PROVIDER_NAME}")
         logger.info(f"Queued run context: {queued_run.context_variables}")
 

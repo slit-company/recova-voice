@@ -137,6 +137,71 @@ def test_initiate_call_executes_as_workflow_owner_for_shared_org_workflow():
     assert initiate_kwargs["user_id"] == workflow.user_id
     assert "user_id=99" in initiate_kwargs["webhook_url"]
 
+def test_initiate_call_jambonz_uses_assigned_recova_070_default_caller():
+    app = _make_test_app()
+    client = TestClient(app)
+
+    workflow = _workflow()
+    provider = _provider()
+    provider.PROVIDER_NAME = "jambonz"
+    provider.WEBHOOK_ENDPOINT = "jambonz/answer"
+    quota_mock = AsyncMock(
+        return_value=SimpleNamespace(has_quota=True, error_message="")
+    )
+    caller = SimpleNamespace(phone_number_id=902, from_number="+827012345678")
+
+    with (
+        patch("api.routes.telephony.db_client") as mock_db,
+        patch(
+            "api.routes.telephony.check_dograh_quota_by_user_id",
+            new=quota_mock,
+        ),
+        patch(
+            "api.routes.telephony.get_default_telephony_provider",
+            new=AsyncMock(return_value=provider),
+        ),
+        patch(
+            "api.routes.telephony.resolve_jambonz_outbound_caller",
+            new=AsyncMock(return_value=caller),
+        ) as resolve_caller,
+        patch(
+            "api.routes.telephony.get_backend_endpoints",
+            new=AsyncMock(return_value=("https://api.example.com", "wss://ignored")),
+        ),
+    ):
+        mock_db.get_user_configurations = AsyncMock(
+            return_value=SimpleNamespace(test_phone_number=None)
+        )
+        mock_db.get_default_telephony_configuration = AsyncMock(
+            return_value=SimpleNamespace(id=55)
+        )
+        mock_db.get_workflow = AsyncMock(return_value=workflow)
+        mock_db.create_workflow_run = AsyncMock(
+            return_value=SimpleNamespace(
+                id=501,
+                name="WR-TEL-OUT-00000001",
+                initial_context={},
+            )
+        )
+        mock_db.update_workflow_run = AsyncMock()
+
+        response = client.post(
+            "/telephony/initiate-call",
+            json={"workflow_id": workflow.id, "phone_number": "+821012345678"},
+        )
+
+    assert response.status_code == 200
+    resolve_caller.assert_awaited_once_with(
+        telephony_configuration_id=55,
+        from_phone_number_id=None,
+    )
+    initiate_kwargs = provider.initiate_call.await_args.kwargs
+    assert initiate_kwargs["from_number"] == "+827012345678"
+    assert "/telephony/jambonz/answer" in initiate_kwargs["webhook_url"]
+
+    update_context = mock_db.update_workflow_run.await_args.kwargs["initial_context"]
+    assert update_context["caller_number"] == "+15550001111"
+    assert update_context["from_phone_number_id"] == 902
 
 def test_initiate_call_rejects_existing_run_for_different_workflow():
     app = _make_test_app()
