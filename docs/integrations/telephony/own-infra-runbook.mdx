@@ -5,11 +5,12 @@ description: "Operate supplier-independent Korean telephony without exposing car
 
 ## Prerequisites
 
-- Supplier access for the SIP/070 trunk you intend to validate.
 - A Recova operator account with superadmin access.
 - A customer organization selected for assignment.
 - A published inbound workflow in the customer organization.
 - A written internal change record for the planned validation window.
+- For supplier-independent regression checks: local backend dependencies installed.
+- For live validation attestation: supplier access for the SIP/070 trunk you intend to validate.
 
 This runbook is for technical readiness. It does not decide legal, regulatory, or carrier-contract eligibility.
 
@@ -25,9 +26,16 @@ This runbook is for technical readiness. It does not decide legal, regulatory, o
 1. Import Korean 070 inventory in `/superadmin/telephony-number-inventory`.
 2. Reserve a number for the target organization before customer handoff.
 3. Assign the number only after the target organization and workflow ownership are confirmed.
-4. Verify the row status, backing configuration row, phone-number row, audit entries, and readiness metadata.
-5. Quarantine a number immediately when supplier, routing, fraud, or quality concerns make it unsafe to use.
-6. Retire a number when it must not return to customer use.
+4. Before supplier access, run the Jambonz contract smoke check:
+
+   ```bash
+   PYTHONPATH=.:pipecat/src api/.venv/bin/python -m api.scripts.jambonz_contract_smoke
+   ```
+
+5. Verify the row status, backing configuration row, phone-number row, audit entries, and readiness metadata.
+6. After a real SIP/070 route proof exists, click **Attest live** on the assigned inventory row and enter the real-route evidence id.
+7. Quarantine a number immediately when supplier, routing, fraud, or quality concerns make it unsafe to use.
+8. Retire a number when it must not return to customer use.
 
 ## Customer flow
 
@@ -43,4 +51,5 @@ The customer page intentionally does not expose provider credentials, Jambonz tr
 
 - Use audit history for who changed inventory state and when.
 - Treat readiness metadata as evidence pointers, not a legal approval.
+- **Attest live** is an operator-only technical evidence write. It records a pointer to a real route proof; it is not legal, regulatory, or business launch approval.
 - Do not route customer traffic through a number that is quarantined, retired, fixture-only, or missing live validation evidence.

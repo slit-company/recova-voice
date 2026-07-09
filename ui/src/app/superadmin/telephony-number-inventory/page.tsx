@@ -1,6 +1,6 @@
 "use client";
 
-import { RefreshCw, Upload } from "lucide-react";
+import { RefreshCw, ShieldCheck, Upload } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -44,6 +44,8 @@ type ReadinessMetadata = {
   live_validation_evidence_id: string | null;
   provider_config_id: string | null;
   phone_number_id: number | null;
+  telephony_configuration_id: number | null;
+  telephony_phone_number_id: number | null;
   inventory_id: number | null;
   call_attempt_id: string | null;
 };
@@ -201,6 +203,53 @@ export default function TelephonyNumberInventoryPage() {
     }
   };
 
+  const attestLiveValidation = async (number: InventoryNumber) => {
+    if (number.status !== "assigned") {
+      toast.error("Only assigned numbers can receive live validation evidence");
+      return;
+    }
+
+    const evidenceId = window.prompt(
+      "Live validation evidence ID (for example, real-route CDR or staging ticket ID)",
+    );
+    if (!evidenceId?.trim()) return;
+
+    const callAttemptId =
+      window
+        .prompt("Call attempt ID tied to this real route proof (optional)")
+        ?.trim() || undefined;
+    const note =
+      window.prompt("Operator attestation note (optional)")?.trim() || undefined;
+
+    setSavingId(number.id);
+    try {
+      await apiRequest<InventoryNumber>(
+        `/api/v1/telephony-number-inventory/${number.id}/live-validation`,
+        await getAccessToken(),
+        {
+          method: "POST",
+          body: JSON.stringify({
+            live_validation_source: "operator_attestation",
+            live_validation_evidence_id: evidenceId.trim(),
+            contract_version: "jambonz_contract_v1",
+            call_attempt_id: callAttemptId,
+            note,
+          }),
+        },
+      );
+      toast.success("Live validation evidence attested");
+      await fetchNumbers();
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Failed to attest live validation evidence",
+      );
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   const loadAudit = async (inventoryId: number) => {
     try {
       const data = await apiRequest<{ audit: AuditItem[] }>(
@@ -341,6 +390,9 @@ export default function TelephonyNumberInventoryPage() {
                               : ""}
                           </div>
                         )}
+                        {number.readiness_metadata.call_attempt_id && (
+                          <div>Call {number.readiness_metadata.call_attempt_id}</div>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -413,6 +465,14 @@ export default function TelephonyNumberInventoryPage() {
                           onClick={() => transition(number.id, "retire")}
                         >
                           Retire
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={savingId === number.id}
+                          onClick={() => attestLiveValidation(number)}
+                        >
+                          <ShieldCheck className="h-3.5 w-3.5 mr-1" /> Attest live
                         </Button>
                         <Button size="sm" variant="ghost" onClick={() => loadAudit(number.id)}>
                           Audit

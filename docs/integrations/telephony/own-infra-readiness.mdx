@@ -13,6 +13,7 @@ A Recova-managed number is ready for controlled live use only when all of these 
 - The customer workflow binding points to a workflow in the same organization.
 - The number is not quarantined or retired.
 - Live validation evidence is present from an approved tooling or operator-attestation path.
+- The live validation metadata includes the trusted Recova writer marker created by operator attestation or approved tooling.
 - The evidence is not a simulator or contract fixture.
 
 ## Metadata to inspect
@@ -27,6 +28,7 @@ Operators should inspect these fields before treating a number as live-ready:
 - Live validation source.
 - Live validation evidence id.
 - CDR/status evidence tied to the same provider, configuration, phone number, inventory id, and call attempt.
+- Trusted writer marker (`live_validation_trusted_writer=recova_operator_live_validation_v1`) on inventory metadata.
 
 ## Non-readiness states
 
@@ -38,7 +40,18 @@ Do not treat these states as live-ready:
 - Wrong-organization phone-number or workflow references.
 - Quarantined or retired rows.
 - Simulator-only, fixture-only, or generic callback metadata that claims live validation.
+- Generic metadata that includes `live_trunk_validated=true` but lacks the trusted Recova writer marker.
 
 ## Customer controls
 
 Customers can bind and unbind assigned numbers to their own workflows. They do not manage carrier credentials, trunk credentials, provider configuration, or readiness evidence.
+
+## Supplier-independent smoke check
+
+Run this before carrier access to prove the local Jambonz contract fixtures still enforce the trust boundary:
+
+```bash
+PYTHONPATH=.:pipecat/src api/.venv/bin/python -m api.scripts.jambonz_contract_smoke
+```
+
+A passing result proves signed fixtures, replay rejection, expired and malformed signature rejection, simulator/live marker separation, trusted operator attestation markers, CDR fixtures, and canonical JSON stability. It does not prove live SIP/070 routing.
