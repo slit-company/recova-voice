@@ -89,6 +89,7 @@ const NAV_SECTIONS: SidebarNavSection[] = [
       { titleKey: "sidebar.campaigns", url: "/campaigns", icon: Megaphone },
       { titleKey: "sidebar.models", url: "/model-configurations", icon: Brain },
       { titleKey: "sidebar.telephony", url: "/telephony-configurations", icon: Phone, showsTelephonyWarning: true },
+      { titleKey: "sidebar.phoneNumbers", url: "/telephony-numbers", icon: Phone },
       { titleKey: "sidebar.tools", url: "/tools", icon: Wrench },
       { titleKey: "sidebar.files", url: "/files", icon: Database },
       { titleKey: "sidebar.recordings", url: "/recordings", icon: AudioLines },
@@ -146,7 +147,12 @@ export function AppSidebar() {
       items: section.items
         .filter((item) => {
           if (item.url === "/campaigns") return canAccessCampaigns;
-          if (item.url === "/telephony-configurations") return canAccessTelephony;
+          if (
+            item.url === "/telephony-configurations" ||
+            item.url === "/telephony-numbers"
+          ) {
+            return canAccessTelephony;
+          }
           return true;
         })
         .map((item) => ({

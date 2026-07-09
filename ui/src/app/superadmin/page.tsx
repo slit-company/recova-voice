@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, List, Loader2 } from 'lucide-react';
+import { ArrowRight, List, Loader2, Phone } from 'lucide-react';
 import Link from "next/link";
 import { useState } from "react";
 
@@ -119,6 +119,28 @@ export default function SuperadminPage() {
                                         <Button className="w-full">
                                             <List className="mr-2 h-4 w-4" />
                                             View All Runs
+                                            <ArrowRight className="ml-2 h-4 w-4" />
+                                        </Button>
+                                    </Link>
+                                </div>
+                            </CardContent>
+                        </Card>
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Telephony Number Inventory</CardTitle>
+                                <CardDescription>
+                                    Import, reserve, assign, quarantine, and retire Recova-owned phone numbers
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="space-y-4">
+                                    <p className="text-sm text-muted-foreground">
+                                        Manage hidden Jambonz-backed number inventory and customer assignments.
+                                    </p>
+                                    <Link href="/superadmin/telephony-number-inventory">
+                                        <Button className="w-full">
+                                            <Phone className="mr-2 h-4 w-4" />
+                                            Manage Number Inventory
                                             <ArrowRight className="ml-2 h-4 w-4" />
                                         </Button>
                                     </Link>

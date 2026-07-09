@@ -295,6 +295,120 @@ class TelephonyPhoneNumberModel(Base):
         ),
     )
 
+class TelephonyNumberInventoryModel(Base):
+    __tablename__ = "telephony_number_inventory"
+
+    id = Column(Integer, primary_key=True, index=True)
+    provider = Column(
+        String(32),
+        nullable=False,
+        default="jambonz",
+        server_default=text("'jambonz'"),
+    )
+    trunk_group = Column(String(64), nullable=True)
+    organization_id = Column(
+        Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
+    )
+    telephony_configuration_id = Column(
+        Integer,
+        ForeignKey("telephony_configurations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    telephony_phone_number_id = Column(
+        Integer,
+        ForeignKey("telephony_phone_numbers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    address_normalized = Column(String(255), nullable=False)
+    address_masked = Column(String(255), nullable=True)
+    address_hash = Column(String(64), nullable=True)
+    address_encrypted_raw = Column(Text, nullable=True)
+    address_type = Column(String(16), nullable=False)
+    country_code = Column(String(2), nullable=True)
+    label = Column(String(64), nullable=True)
+    status = Column(
+        String(32),
+        nullable=False,
+        default="available",
+        server_default=text("'available'"),
+    )
+    reservation_expires_at = Column(DateTime(timezone=True), nullable=True)
+    quarantined_reason = Column(Text, nullable=True)
+    retired_reason = Column(Text, nullable=True)
+    extra_metadata = Column(
+        JSON, nullable=False, default=dict, server_default=text("'{}'::json")
+    )
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    organization = relationship("OrganizationModel")
+    telephony_configuration = relationship("TelephonyConfigurationModel")
+    telephony_phone_number = relationship("TelephonyPhoneNumberModel")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "address_normalized",
+            name="uq_telephony_number_inventory_provider_address",
+        ),
+        Index("ix_telephony_number_inventory_provider_status", "provider", "status"),
+        Index(
+            "ix_telephony_number_inventory_org_status",
+            "organization_id",
+            "status",
+        ),
+        Index(
+            "ix_telephony_number_inventory_address_hash",
+            "address_hash",
+            postgresql_where=text("address_hash IS NOT NULL"),
+        ),
+        Index(
+            "uq_telephony_number_inventory_phone_number",
+            "telephony_phone_number_id",
+            unique=True,
+            postgresql_where=text("telephony_phone_number_id IS NOT NULL"),
+        ),
+    )
+
+
+class TelephonyNumberInventoryAuditModel(Base):
+    __tablename__ = "telephony_number_inventory_audit"
+
+    id = Column(Integer, primary_key=True, index=True)
+    inventory_id = Column(
+        Integer,
+        ForeignKey("telephony_number_inventory.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    actor_user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    organization_id = Column(
+        Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
+    )
+    action = Column(String(32), nullable=False)
+    from_status = Column(String(32), nullable=True)
+    to_status = Column(String(32), nullable=True)
+    details = Column(
+        JSON, nullable=False, default=dict, server_default=text("'{}'::json")
+    )
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+    inventory = relationship("TelephonyNumberInventoryModel")
+    actor = relationship("UserModel")
+    organization = relationship("OrganizationModel")
+
+    __table_args__ = (
+        Index("ix_telephony_number_inventory_audit_inventory", "inventory_id"),
+        Index("ix_telephony_number_inventory_audit_actor", "actor_user_id"),
+        Index("ix_telephony_number_inventory_audit_created", "created_at"),
+    )
+
+
 
 class PhonePreviewVerificationModel(Base):
     __tablename__ = "phone_preview_verifications"

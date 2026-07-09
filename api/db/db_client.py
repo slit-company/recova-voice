@@ -11,6 +11,7 @@ from api.db.organization_usage_client import OrganizationUsageClient
 from api.db.phone_preview_client import PhonePreviewClient
 from api.db.reports_client import ReportsClient
 from api.db.telephony_configuration_client import TelephonyConfigurationClient
+from api.db.telephony_number_inventory_client import TelephonyNumberInventoryClient
 from api.db.telephony_phone_number_client import TelephonyPhoneNumberClient
 from api.db.tool_client import ToolClient
 from api.db.user_client import UserClient
@@ -43,6 +44,7 @@ class DBClient(
     WorkflowRecordingClient,
     TelephonyConfigurationClient,
     TelephonyPhoneNumberClient,
+    TelephonyNumberInventoryClient,
     PhonePreviewClient,
     FolderClient,
 ):
@@ -67,6 +69,7 @@ class DBClient(
     - ToolClient: handles tool operations for reusable HTTP API tools
     - KnowledgeBaseClient: handles knowledge base document and vector search operations
     - PhonePreviewClient: handles logged-in call-me preview sessions
+    - TelephonyNumberInventoryClient: handles managed telephony number inventory
     - FolderClient: handles folder operations for grouping workflows (agents)
     """
 

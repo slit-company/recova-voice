@@ -68,7 +68,7 @@ def _mask_sensitive(provider_name: str, value: dict) -> dict:
 def _is_self_serve_provider(provider_name: str) -> bool:
     """Return whether a provider may be managed through self-serve org routes."""
     spec = telephony_registry.get_optional(provider_name)
-    return spec is None or spec.visible_in_self_serve
+    return spec is not None and spec.visible_in_self_serve
 
 
 def _ensure_self_serve_provider(provider_name: str) -> None:
