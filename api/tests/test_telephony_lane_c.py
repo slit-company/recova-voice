@@ -13,6 +13,9 @@ telephony_pkg.__path__ = ["api/services/telephony"]
 sys.modules.setdefault("api.services.telephony", telephony_pkg)
 setattr(api_services, "telephony", telephony_pkg)
 
+import api.services.telephony.admission as admission_module
+import api.services.telephony.cdr as cdr_module
+import api.services.telephony.ops_alerts as ops_alerts_module
 from api.services.telephony.admission import (
     TelephonyAdmissionController,
     TelephonyAdmissionRequest,
@@ -106,7 +109,7 @@ def test_admission_acquire_is_idempotent_and_release_is_idempotent(monkeypatch):
     async def run():
         recorded_events = AsyncMock()
         monkeypatch.setattr(
-            "api.services.telephony.admission.record_telephony_event", recorded_events
+            admission_module, "record_telephony_event", recorded_events
         )
         controller = TelephonyAdmissionController(
             redis_client=_FakeRedis(), alert_sink=SimpleNamespace(emit=AsyncMock())
@@ -143,7 +146,7 @@ def test_record_rejected_call_redacts_payload_and_keeps_attempt_identity(monkeyp
             record_telephony_call_event=AsyncMock(return_value=SimpleNamespace(id=1)),
             upsert_telephony_cdr=AsyncMock(return_value=SimpleNamespace(id=2)),
         )
-        monkeypatch.setattr("api.services.telephony.cdr.db_client", mock_db)
+        monkeypatch.setattr(cdr_module, "db_client", mock_db)
 
         await record_rejected_call(
             provider="jambonz",
@@ -184,7 +187,7 @@ def test_contract_fixtures_never_count_as_live_readiness():
 def test_alert_sink_dedupes_and_never_pages_contract_simulator(monkeypatch):
     async def run():
         mock_db = SimpleNamespace(upsert_telephony_ops_alert=AsyncMock())
-        monkeypatch.setattr("api.services.telephony.ops_alerts.db_client", mock_db)
+        monkeypatch.setattr(ops_alerts_module, "db_client", mock_db)
         sink = TelephonyOpsAlertSink(sink_name="db")
 
         await sink.emit(

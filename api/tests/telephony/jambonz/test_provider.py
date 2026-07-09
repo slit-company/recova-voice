@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import api.services.telephony.providers.jambonz.provider as jambonz_provider_module
 from api.services.telephony.providers.jambonz.contract import (
     JAMBONZ_CONTRACT_VERSION,
     JambonzContractSimulator,
@@ -89,11 +90,13 @@ async def test_initiate_call_posts_outbound_contract_payload(monkeypatch):
             return FakeResponse()
 
     monkeypatch.setattr(
-        "api.services.telephony.providers.jambonz.provider.aiohttp.ClientSession",
+        jambonz_provider_module.aiohttp,
+        "ClientSession",
         lambda: FakeSession(),
     )
     monkeypatch.setattr(
-        "api.services.telephony.providers.jambonz.provider.get_backend_endpoints",
+        jambonz_provider_module,
+        "get_backend_endpoints",
         AsyncMock(return_value=("https://api.recova.test", "wss://api.recova.test")),
     )
 
@@ -120,7 +123,9 @@ async def test_initiate_call_posts_outbound_contract_payload(monkeypatch):
 
     assert result.call_id == "jb-out-123"
     assert result.caller_number == "+827012345678"
-    assert captured["endpoint"] == "https://jambonz.recova.test/v1/Accounts/acct-kr/Calls"
+    assert captured["endpoint"] == (
+        "https://jambonz.recova.test/v1/jambonz-contract/accounts/acct-kr/calls"
+    )
 
     request = JambonzOutboundCallRequest.model_validate(captured["payload"])
     assert request.contract_version == JAMBONZ_CONTRACT_VERSION

@@ -83,6 +83,14 @@ def test_inbound_run_rejects_unassigned_jambonz_route_before_workflow_lookup():
             "api.routes.telephony.get_telephony_provider_by_id",
             new=AsyncMock(return_value=provider_instance),
         ),
+        patch(
+            "api.routes.telephony.record_rejected_call",
+            new=AsyncMock(),
+        ),
+        patch(
+            "api.routes.telephony.telephony_ops_alert_sink.emit",
+            new=AsyncMock(),
+        ),
     ):
         config = SimpleNamespace(id=901, organization_id=11)
         phone_row = SimpleNamespace(
@@ -119,6 +127,14 @@ def test_inbound_run_rejects_unbound_assigned_jambonz_route_without_preview():
         patch(
             "api.routes.telephony.get_telephony_provider_by_id",
             new=AsyncMock(return_value=provider_instance),
+        ),
+        patch(
+            "api.routes.telephony.record_rejected_call",
+            new=AsyncMock(),
+        ),
+        patch(
+            "api.routes.telephony.telephony_ops_alert_sink.emit",
+            new=AsyncMock(),
         ),
 
     ):

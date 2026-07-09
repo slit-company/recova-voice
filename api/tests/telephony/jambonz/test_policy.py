@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+import api.services.telephony.jambonz_policy as jambonz_policy_module
+import api.services.telephony.runtime_policy as runtime_policy_module
 from api.services.telephony.jambonz_policy import (
     filter_assigned_recova_jambonz_numbers,
     is_recova_070_address,
@@ -56,7 +58,7 @@ async def test_resolve_jambonz_outbound_caller_requires_assigned_default(monkeyp
         get_default_caller_id=AsyncMock(return_value=_phone_row()),
         get_phone_number_for_config=AsyncMock(),
     )
-    monkeypatch.setattr("api.services.telephony.jambonz_policy.db_client", mock_db)
+    monkeypatch.setattr(jambonz_policy_module, "db_client", mock_db)
 
     selection = await resolve_jambonz_outbound_caller(
         telephony_configuration_id=901,
@@ -77,7 +79,7 @@ async def test_resolve_jambonz_outbound_caller_rejects_unassigned_explicit_numbe
             return_value=_phone_row(state="reserved")
         ),
     )
-    monkeypatch.setattr("api.services.telephony.jambonz_policy.db_client", mock_db)
+    monkeypatch.setattr(jambonz_policy_module, "db_client", mock_db)
 
     with pytest.raises(HTTPException) as exc:
         await resolve_jambonz_outbound_caller(
@@ -98,8 +100,8 @@ async def test_runtime_policy_filters_jambonz_campaign_pool_and_validates_select
     mock_runtime_db = SimpleNamespace(
         list_phone_numbers_for_config=AsyncMock(return_value=rows)
     )
-    monkeypatch.setattr("api.services.telephony.runtime_policy.db_client", mock_runtime_db)
-    monkeypatch.setattr("api.services.telephony.jambonz_policy.db_client", mock_policy_db)
+    monkeypatch.setattr(runtime_policy_module, "db_client", mock_runtime_db)
+    monkeypatch.setattr(jambonz_policy_module, "db_client", mock_policy_db)
 
     allowed = await allowed_campaign_from_numbers(
         provider_name="jambonz",

@@ -164,13 +164,16 @@ class JambonzReplayGuard:
     tolerance_seconds: int = JAMBONZ_REPLAY_TOLERANCE_SECONDS
     _seen: dict[str, int] = field(default_factory=dict)
 
-    def check_and_store(self, nonce: str, timestamp: int, *, now: int | None = None) -> bool:
+    def check_and_store(
+        self, nonce: str, timestamp: int, *, now: int | None = None, scope: str = ""
+    ) -> bool:
         now = int(time.time()) if now is None else now
         cutoff = now - self.tolerance_seconds
         self._seen = {key: ts for key, ts in self._seen.items() if ts >= cutoff}
-        if nonce in self._seen:
+        replay_key = f"{scope}:{nonce}" if scope else nonce
+        if replay_key in self._seen:
             return False
-        self._seen[nonce] = timestamp
+        self._seen[replay_key] = timestamp
         return True
 
 
@@ -204,6 +207,7 @@ def verify_signed_payload(
     replay_guard: JambonzReplayGuard | None = None,
     now: int | None = None,
     tolerance_seconds: int = JAMBONZ_REPLAY_TOLERANCE_SECONDS,
+    replay_scope: str = "",
 ) -> bool:
     if not secret:
         return False
@@ -228,7 +232,7 @@ def verify_signed_payload(
         return False
 
     if replay_guard is not None and not replay_guard.check_and_store(
-        nonce, timestamp, now=now
+        nonce, timestamp, now=now, scope=replay_scope
     ):
         return False
 

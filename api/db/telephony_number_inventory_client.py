@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, update
+from sqlalchemy import and_, func, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.future import select
 
@@ -359,13 +359,19 @@ class TelephonyNumberInventoryClient(BaseDBClient):
                 )
                 .join(
                     TelephonyPhoneNumberModel,
-                    TelephonyPhoneNumberModel.id
-                    == TelephonyNumberInventoryModel.telephony_phone_number_id,
+                    and_(
+                        TelephonyPhoneNumberModel.id
+                        == TelephonyNumberInventoryModel.telephony_phone_number_id,
+                        TelephonyPhoneNumberModel.organization_id == organization_id,
+                    ),
                     isouter=True,
                 )
                 .join(
                     WorkflowModel,
-                    WorkflowModel.id == TelephonyPhoneNumberModel.inbound_workflow_id,
+                    and_(
+                        WorkflowModel.id == TelephonyPhoneNumberModel.inbound_workflow_id,
+                        WorkflowModel.organization_id == organization_id,
+                    ),
                     isouter=True,
                 )
                 .where(
@@ -588,7 +594,8 @@ class TelephonyNumberInventoryClient(BaseDBClient):
 
         phone.telephony_configuration_id = config.id
         phone.label = label if label is not None else phone.label
-        phone.inbound_workflow_id = inbound_workflow_id
+        if inbound_workflow_id is not None:
+            phone.inbound_workflow_id = inbound_workflow_id
         phone.is_active = True
         phone.extra_metadata = {
             **(phone.extra_metadata or {}),

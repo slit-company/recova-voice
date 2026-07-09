@@ -25,6 +25,7 @@ async def create_transport(
     is_realtime: bool = False,
     stream_id: str,
     call_id: str,
+    jambonz_sample_rate: int | None = None,
 ):
     """Create a transport for Jambonz contract media streams."""
     await load_credentials_for_transport(
@@ -35,7 +36,9 @@ async def create_transport(
         stream_id=stream_id,
         call_id=call_id,
         params=JambonzFrameSerializer.InputParams(
-            jambonz_sample_rate=audio_config.transport_in_sample_rate,
+            jambonz_sample_rate=(
+                jambonz_sample_rate or audio_config.transport_in_sample_rate
+            ),
             sample_rate=audio_config.pipeline_sample_rate,
         ),
     )

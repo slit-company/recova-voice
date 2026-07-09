@@ -77,6 +77,38 @@ class JambonzProvider(TelephonyProvider):
         if isinstance(self.from_numbers, str):
             self.from_numbers = [self.from_numbers]
 
+    def _assigned_caller_ids(self) -> set[str]:
+        normalized: set[str] = set()
+        for number in self.from_numbers:
+            if not number:
+                continue
+            normalized.add(
+                normalize_telephony_address(str(number), country_hint="KR").canonical
+            )
+        return normalized
+
+    def _require_assigned_recova_070_caller(self, from_number: str | None) -> str:
+        if from_number is None:
+            if not self.from_numbers:
+                raise HTTPException(
+                    status_code=400,
+                    detail="jambonz_assigned_recova_070_caller_required",
+                )
+            from_number = random.choice(self.from_numbers)
+
+        normalized = normalize_telephony_address(
+            from_number, country_hint="KR"
+        ).canonical
+        if normalized not in self._assigned_caller_ids() or not normalized.startswith(
+            "+8270"
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="jambonz_assigned_recova_070_caller_required",
+            )
+        return normalized
+
+
     def _headers(self) -> dict[str, str]:
         return {
             "Authorization": f"Bearer {self.api_key}",
@@ -96,8 +128,8 @@ class JambonzProvider(TelephonyProvider):
         if not self.validate_config():
             raise ValueError("Jambonz provider not properly configured")
 
-        if from_number is None:
-            from_number = random.choice(self.from_numbers)
+        from_number = self._require_assigned_recova_070_caller(from_number)
+        to_number = normalize_telephony_address(to_number, country_hint="KR").canonical
         logger.info("Selected Recova 070 caller ID [redacted] for Jambonz outbound call")
 
         backend_endpoint, _ = await get_backend_endpoints()
@@ -121,7 +153,10 @@ class JambonzProvider(TelephonyProvider):
         log_payload = redact_telephony_payload_for_logs(payload)
         logger.info(f"Jambonz call-create payload: {json.dumps(log_payload)}")
 
-        endpoint = f"{self.base_url}/v1/Accounts/{self.account_id}/Calls"
+        endpoint = (
+            f"{self.base_url}/v1/jambonz-contract/accounts/"
+            f"{self.account_id}/calls"
+        )
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 endpoint, json=payload, headers=self._headers()
@@ -263,15 +298,34 @@ class JambonzProvider(TelephonyProvider):
             return
 
         event = start.get("event") or start.get("type")
-        if event not in {"start", "media_start"}:
+        native_metadata = not event and (
+            start.get("callSid") or start.get("accountSid") or start.get("sampleRate")
+        )
+        if event not in {"start", "media_start"} and not native_metadata:
             await websocket.close(code=4400, reason="Expected Jambonz start frame")
             return
 
-        stream_id = start.get("stream_id") or start.get("streamSid") or ""
+        account_id = start.get("account_id") or start.get("accountSid")
+        application_id = start.get("application_id") or start.get("applicationSid")
+        if account_id and account_id != self.account_id:
+            await websocket.close(code=4403, reason="Jambonz account mismatch")
+            return
+        if application_id and application_id != self.application_id:
+            await websocket.close(code=4403, reason="Jambonz application mismatch")
+            return
+
+        stream_id = (
+            start.get("stream_id")
+            or start.get("streamSid")
+            or start.get("callSid")
+            or ""
+        )
         call_id = start.get("call_id") or start.get("callSid") or ""
         if not (stream_id and call_id):
             await websocket.close(code=4400, reason="Missing Jambonz stream identifiers")
             return
+
+        sample_rate = int(start.get("sample_rate") or start.get("sampleRate") or 8000)
 
         await run_pipeline_telephony(
             websocket,
@@ -280,7 +334,11 @@ class JambonzProvider(TelephonyProvider):
             workflow_run_id=workflow_run_id,
             user_id=user_id,
             call_id=call_id,
-            transport_kwargs={"stream_id": stream_id, "call_id": call_id},
+            transport_kwargs={
+                "stream_id": stream_id,
+                "call_id": call_id,
+                "jambonz_sample_rate": sample_rate,
+            },
         )
 
     @classmethod
@@ -338,11 +396,23 @@ class JambonzProvider(TelephonyProvider):
         body: str = "",
     ) -> bool:
         raw_body = body or canonical_json(webhook_data)
+        envelope = (
+            webhook_data.get("data")
+            if isinstance(webhook_data.get("data"), dict)
+            else webhook_data
+        )
+        account_id = envelope.get("account_id") or envelope.get("accountSid")
+        application_id = envelope.get("application_id") or envelope.get("applicationSid")
+        if account_id and account_id != self.account_id:
+            return False
+        if application_id and application_id != self.application_id:
+            return False
         return verify_signed_payload(
             self.webhook_secret,
             raw_body,
             headers,
             replay_guard=self._replay_guard,
+            replay_scope=f"{self.account_id}:{self.application_id}",
         )
 
     async def start_inbound_stream(
@@ -408,6 +478,11 @@ class JambonzProvider(TelephonyProvider):
                 "url": websocket_url,
                 "mixType": "mono",
                 "sampleRate": 8000,
+                "bidirectionalAudio": {
+                    "enabled": True,
+                    "streaming": True,
+                    "sampleRate": 8000,
+                },
                 "metadata": {
                     "provider": self.PROVIDER_NAME,
                     "workflow_run_id": workflow_run_id,

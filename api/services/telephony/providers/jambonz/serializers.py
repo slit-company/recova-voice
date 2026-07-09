@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 from pipecat.audio.dtmf.types import KeypadEntry
-from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
+from pipecat.audio.utils import create_stream_resampler, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
     Frame,
@@ -51,28 +51,23 @@ class JambonzFrameSerializer(FrameSerializer):
     async def serialize(self, frame: Frame) -> str | bytes | None:
         if isinstance(frame, InterruptionFrame):
             return json.dumps(
-                {"event": "clear", "stream_id": self._stream_id, "call_id": self._call_id}
+                {
+                    "type": "command",
+                    "command": "killAudio",
+                    "stream_id": self._stream_id,
+                    "call_id": self._call_id,
+                }
             )
 
         if isinstance(frame, AudioRawFrame):
-            serialized_data = await pcm_to_ulaw(
+            serialized_data = await self._output_resampler.resample(
                 frame.audio,
                 frame.sample_rate,
                 self._jambonz_sample_rate,
-                self._output_resampler,
             )
             if not serialized_data:
                 return None
-            return json.dumps(
-                {
-                    "event": "media",
-                    "stream_id": self._stream_id,
-                    "call_id": self._call_id,
-                    "media": {
-                        "payload": base64.b64encode(serialized_data).decode("utf-8")
-                    },
-                }
-            )
+            return serialized_data
 
         if isinstance(
             frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)
@@ -85,7 +80,19 @@ class JambonzFrameSerializer(FrameSerializer):
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         if isinstance(data, bytes):
-            data = data.decode("utf-8")
+            deserialized_data = await self._input_resampler.resample(
+                data,
+                self._jambonz_sample_rate,
+                self._sample_rate,
+            )
+            if not deserialized_data:
+                return None
+            return InputAudioRawFrame(
+                audio=deserialized_data,
+                num_channels=1,
+                sample_rate=self._sample_rate,
+            )
+
         message: dict[str, Any] = json.loads(data)
         event = message.get("event")
 
@@ -109,7 +116,9 @@ class JambonzFrameSerializer(FrameSerializer):
             )
 
         if event == "dtmf":
-            digit = message.get("dtmf", {}).get("digit") or message.get("digit")
+            dtmf = message.get("dtmf")
+            digit = dtmf.get("digit") if isinstance(dtmf, dict) else dtmf
+            digit = digit or message.get("digit")
             try:
                 return InputDTMFFrame(KeypadEntry(digit))
             except ValueError:

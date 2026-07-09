@@ -280,6 +280,27 @@ async def _process_status_update(workflow_run_id: int, status: StatusCallbackReq
         logger.error(
             f"[run {workflow_run_id}] Failed to persist telephony status/CDR: {e}"
         )
+        initial_context = workflow_run.initial_context or {}
+        await telephony_ops_alert_sink.emit(
+            TelephonyOpsAlert(
+                alert_type=TelephonyOpsAlertType.MISSING_LATE_CDR,
+                severity=TelephonyOpsAlertSeverity.WARNING,
+                summary="Telephony status callback could not persist terminal CDR",
+                organization_id=getattr(workflow_run, "organization_id", None),
+                provider=workflow_run.mode,
+                details={
+                    "workflow_run_id": workflow_run_id,
+                    "status": status.status,
+                    "call_id": status.call_id,
+                    "telephony_configuration_id": initial_context.get(
+                        "telephony_configuration_id"
+                    ),
+                    "from_phone_number_id": initial_context.get("from_phone_number_id"),
+                    "error": str(e),
+                },
+                dedupe_components=(str(workflow_run_id), status.status),
+            )
+        )
 
     if status.status in ["completed", "failed", "busy", "no-answer", "canceled", "error"]:
         try:

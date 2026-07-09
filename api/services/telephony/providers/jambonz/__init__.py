@@ -28,11 +28,11 @@ def _config_loader(value: Dict[str, Any]) -> Dict[str, Any]:
 
 
 _UI_METADATA = ProviderUIMetadata(
-    display_name="Recova Jambonz",
+    display_name="Recova Jambonz Contract Adapter",
     fields=[
         ProviderUIField(
             name="base_url",
-            label="Jambonz API Base URL",
+            label="Recova Jambonz Adapter Base URL",
             type="text",
             sensitive=True,
         ),

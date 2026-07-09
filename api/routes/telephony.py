@@ -55,7 +55,6 @@ from api.services.telephony.ops_alerts import (
     TelephonyOpsAlertType,
     telephony_ops_alert_sink,
 )
-)
 from api.services.telephony.status_processor import redact_telephony_payload_for_logs
 from api.services.telephony.transfer_event_protocol import (
     TransferEvent,
@@ -984,6 +983,35 @@ async def handle_inbound_run(request: Request):
                     "/inbound/run: Jambonz called number [redacted] is not an "
                     "assigned active Recova 070 route"
                 )
+                await record_rejected_call(
+                    provider=provider_class.PROVIDER_NAME,
+                    direction=CallType.INBOUND.value,
+                    failure_category=TelephonyFailureCategory.ROUTE_NOT_FOUND,
+                    status="failed",
+                    organization_id=config.organization_id,
+                    telephony_configuration_id=telephony_configuration_id,
+                    telephony_phone_number_id=phone_row.id,
+                    call_attempt_id=inbound_call_attempt_id,
+                    provider_call_id=normalized_data.call_id,
+                    from_number=normalized_data.from_number,
+                    to_number=normalized_data.to_number,
+                    provider_payload=normalized_data.raw_data,
+                )
+                await telephony_ops_alert_sink.emit(
+                    TelephonyOpsAlert(
+                        alert_type=TelephonyOpsAlertType.NUMBER_QUARANTINE_ROUTING_SUSPICION,
+                        severity=TelephonyOpsAlertSeverity.WARNING,
+                        summary="Jambonz inbound call hit a non-assigned Recova 070 route",
+                        organization_id=config.organization_id,
+                        provider=provider_class.PROVIDER_NAME,
+                        details={
+                            "telephony_configuration_id": telephony_configuration_id,
+                            "telephony_phone_number_id": phone_row.id,
+                            "call_id": normalized_data.call_id,
+                        },
+                        dedupe_components=("jambonz-policy", "unassigned"),
+                    )
+                )
                 return provider_class.generate_validation_error_response(
                     TelephonyError.PHONE_NUMBER_NOT_CONFIGURED
                 )
@@ -991,6 +1019,35 @@ async def handle_inbound_run(request: Request):
                 logger.warning(
                     "/inbound/run: assigned Jambonz number [redacted] has no "
                     "inbound_workflow_id bound"
+                )
+                await record_rejected_call(
+                    provider=provider_class.PROVIDER_NAME,
+                    direction=CallType.INBOUND.value,
+                    failure_category=TelephonyFailureCategory.WORKFLOW_NOT_BOUND,
+                    status="failed",
+                    organization_id=config.organization_id,
+                    telephony_configuration_id=telephony_configuration_id,
+                    telephony_phone_number_id=phone_row.id,
+                    call_attempt_id=inbound_call_attempt_id,
+                    provider_call_id=normalized_data.call_id,
+                    from_number=normalized_data.from_number,
+                    to_number=normalized_data.to_number,
+                    provider_payload=normalized_data.raw_data,
+                )
+                await telephony_ops_alert_sink.emit(
+                    TelephonyOpsAlert(
+                        alert_type=TelephonyOpsAlertType.ROUTE_SYNC_FAILURE,
+                        severity=TelephonyOpsAlertSeverity.WARNING,
+                        summary="Assigned Jambonz Recova 070 number has no workflow binding",
+                        organization_id=config.organization_id,
+                        provider=provider_class.PROVIDER_NAME,
+                        details={
+                            "telephony_configuration_id": telephony_configuration_id,
+                            "telephony_phone_number_id": phone_row.id,
+                            "call_id": normalized_data.call_id,
+                        },
+                        dedupe_components=("jambonz-policy", "unbound"),
+                    )
                 )
                 return provider_class.generate_validation_error_response(
                     TelephonyError.WORKFLOW_NOT_FOUND
@@ -1085,18 +1142,43 @@ async def handle_inbound_run(request: Request):
                 TelephonyError.QUOTA_EXCEEDED
             )
 
+        workflow_run_id = await _create_inbound_workflow_run(
+            workflow_id,
+            user_id,
+            provider_class.PROVIDER_NAME,
+            normalized_data,
+            telephony_configuration_id=telephony_configuration_id,
+            from_phone_number_id=phone_row.id,
+            call_attempt_id=inbound_call_attempt_id,
+        )
+
         admission = await telephony_admission_controller.acquire(
             TelephonyAdmissionRequest(
                 provider=provider_class.PROVIDER_NAME,
                 organization_id=config.organization_id,
                 direction=CallType.INBOUND.value,
                 call_attempt_id=inbound_call_attempt_id,
+                workflow_run_id=workflow_run_id,
                 provider_call_id=normalized_data.call_id,
                 telephony_configuration_id=telephony_configuration_id,
                 telephony_phone_number_id=phone_row.id,
                 workflow_id=workflow_id,
             )
         )
+        if admission.allowed:
+            await db_client.update_workflow_run(
+                run_id=workflow_run_id,
+                initial_context={
+                    "caller_number": normalized_data.from_number,
+                    "called_number": normalized_data.to_number,
+                    "direction": "inbound",
+                    "provider": provider_class.PROVIDER_NAME,
+                    "telephony_configuration_id": telephony_configuration_id,
+                    "from_phone_number_id": phone_row.id,
+                    "telephony_call_attempt_id": admission.call_attempt_id,
+                    "telephony_admission_slot_id": admission.slot_id,
+                },
+            )
         if not admission.allowed:
             await record_rejected_call(
                 provider=provider_class.PROVIDER_NAME,
@@ -1114,20 +1196,16 @@ async def handle_inbound_run(request: Request):
                 provider_payload=normalized_data.raw_data,
                 release_reason="capacity_denied",
             )
+            await db_client.update_workflow_run(
+                run_id=workflow_run_id,
+                is_completed=True,
+                state=WorkflowRunState.COMPLETED.value,
+                gathered_context={"error": "telephony_capacity_denied"},
+            )
             return provider_class.generate_validation_error_response(
                 TelephonyError.QUOTA_EXCEEDED
             )
 
-        workflow_run_id = await _create_inbound_workflow_run(
-            workflow_id,
-            user_id,
-            provider_class.PROVIDER_NAME,
-            normalized_data,
-            telephony_configuration_id=telephony_configuration_id,
-            from_phone_number_id=phone_row.id,
-            call_attempt_id=admission.call_attempt_id,
-            admission_slot_id=admission.slot_id,
-        )
 
         backend_endpoint, wss_backend_endpoint = await get_backend_endpoints()
         websocket_url = (
@@ -1163,6 +1241,24 @@ async def handle_inbound_run(request: Request):
                 to_number=normalized_data.to_number,
                 provider_payload={"error": str(e)},
                 release_reason="media_start_failed",
+            )
+            await telephony_ops_alert_sink.emit(
+                TelephonyOpsAlert(
+                    alert_type=TelephonyOpsAlertType.MEDIA_STREAM_FAILURE,
+                    severity=TelephonyOpsAlertSeverity.CRITICAL,
+                    summary="Telephony inbound media stream failed to start",
+                    organization_id=config.organization_id,
+                    provider=provider_class.PROVIDER_NAME,
+                    details={
+                        "telephony_configuration_id": telephony_configuration_id,
+                        "telephony_phone_number_id": phone_row.id,
+                        "workflow_id": workflow_id,
+                        "workflow_run_id": workflow_run_id,
+                        "call_id": normalized_data.call_id,
+                        "error": str(e),
+                    },
+                    dedupe_components=("inbound", provider_class.PROVIDER_NAME),
+                )
             )
             raise
 
@@ -1269,6 +1365,13 @@ async def handle_inbound_telephony(
         logger.info(
             f"Normalized data: {_normalized_inbound_data_for_logs(normalized_data)}"
         )
+        if provider_class.PROVIDER_NAME == "jambonz":
+            logger.warning(
+                "[legacy /inbound/{workflow_id}] Jambonz V1 calls must use /inbound/run"
+            )
+            return provider_class.generate_validation_error_response(
+                TelephonyError.PHONE_NUMBER_NOT_CONFIGURED
+            )
 
         # Validate inbound direction
         if normalized_data.direction != "inbound":

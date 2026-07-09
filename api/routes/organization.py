@@ -10,6 +10,7 @@ from api.constants import DEFAULT_CAMPAIGN_RETRY_CONFIG, DEFAULT_ORG_CONCURRENCY
 from api.db import db_client
 from api.db.models import UserModel
 from api.db.telephony_configuration_client import TelephonyConfigurationInUseError
+from api.db.telephony_number_inventory_client import MANAGED_INVENTORY_CREDENTIAL
 from api.enums import OrganizationConfigurationKey, PostHogEvent
 from api.schemas.telephony_config import (
     TelephonyConfigRequest,
@@ -69,6 +70,20 @@ def _is_self_serve_provider(provider_name: str) -> bool:
     """Return whether a provider may be managed through self-serve org routes."""
     spec = telephony_registry.get_optional(provider_name)
     return spec is not None and spec.visible_in_self_serve
+
+def _is_hidden_managed_telephony_config(row) -> bool:
+    credentials = row.credentials or {}
+    return (
+        credentials.get("managed_by") == MANAGED_INVENTORY_CREDENTIAL
+        or credentials.get("hidden") is True
+    )
+
+
+def _is_self_serve_config(row) -> bool:
+    return _is_self_serve_provider(
+        row.provider
+    ) and not _is_hidden_managed_telephony_config(row)
+
 
 
 def _ensure_self_serve_provider(provider_name: str) -> None:
@@ -367,7 +382,7 @@ async def list_telephony_configurations(
     rows = await db_client.list_telephony_configurations(user.selected_organization_id)
     items: List[TelephonyConfigurationListItem] = []
     for row in rows:
-        if not _is_self_serve_provider(row.provider):
+        if not _is_self_serve_config(row):
             continue
         numbers = await db_client.list_phone_numbers_for_config(row.id)
         items.append(
@@ -446,7 +461,7 @@ async def get_telephony_configuration_by_id(
     )
     if not row:
         raise HTTPException(status_code=404, detail="Telephony configuration not found")
-    if not _is_self_serve_provider(row.provider):
+    if not _is_self_serve_config(row):
         raise HTTPException(status_code=404, detail="Telephony configuration not found")
     return _detail_response(row)
 
@@ -467,7 +482,7 @@ async def update_telephony_configuration(
     )
     if not existing:
         raise HTTPException(status_code=404, detail="Telephony configuration not found")
-    if not _is_self_serve_provider(existing.provider):
+    if not _is_self_serve_config(existing):
         raise HTTPException(status_code=404, detail="Telephony configuration not found")
 
     credentials = None
@@ -561,7 +576,7 @@ async def _ensure_config_belongs_to_org(config_id: int, organization_id: int):
     )
     if not cfg:
         raise HTTPException(status_code=404, detail="Telephony configuration not found")
-    if not _is_self_serve_provider(cfg.provider):
+    if not _is_self_serve_config(cfg):
         raise HTTPException(status_code=404, detail="Telephony configuration not found")
     return cfg
 
@@ -793,7 +808,7 @@ async def get_telephony_configuration(
         return TelephonyConfigurationResponse()
 
     spec = telephony_registry.get_optional(cfg.provider)
-    if spec is None or not spec.visible_in_self_serve:
+    if spec is None or not _is_self_serve_config(cfg):
         return TelephonyConfigurationResponse()
 
     addresses = await db_client.list_active_normalized_addresses_for_config(cfg.id)
@@ -823,6 +838,8 @@ async def save_telephony_configuration(
     default = await db_client.get_default_telephony_configuration(
         user.selected_organization_id
     )
+    if default and _is_hidden_managed_telephony_config(default):
+        default = None
 
     if default and default.provider == request.provider:
         preserve_masked_fields(request.provider, payload, default.credentials or {})

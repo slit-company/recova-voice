@@ -8,6 +8,12 @@ from api.db import db_client
 from api.services.pricing.workflow_run_cost import calculate_workflow_run_cost
 from api.services.storage import get_current_storage_backend, storage_fs
 from api.services.telephony.cdr import mark_telephony_artifact
+from api.services.telephony.ops_alerts import (
+    TelephonyOpsAlert,
+    TelephonyOpsAlertSeverity,
+    TelephonyOpsAlertType,
+    telephony_ops_alert_sink,
+)
 from api.tasks.run_integrations import run_integrations_post_workflow_run
 
 
@@ -71,6 +77,30 @@ async def upload_voicemail_audio_to_s3(
                     f"Failed to clean up temp voicemail audio file {temp_file_path}: {e}"
                 )
 
+async def _mark_missing_upload(
+    *, workflow_run_id: int, artifact_type: str, reason: str
+) -> None:
+    await mark_telephony_artifact(
+        workflow_run_id=workflow_run_id,
+        artifact_type=artifact_type,
+        present=False,
+        expected=True,
+    )
+    await telephony_ops_alert_sink.emit(
+        TelephonyOpsAlert(
+            alert_type=TelephonyOpsAlertType.MISSING_RECORDING_UPLOAD,
+            severity=TelephonyOpsAlertSeverity.WARNING,
+            summary=f"Telephony {artifact_type} upload was expected but missing",
+            details={
+                "workflow_run_id": workflow_run_id,
+                "artifact_type": artifact_type,
+                "reason": reason,
+            },
+            dedupe_components=(artifact_type, str(workflow_run_id)),
+        )
+    )
+
+
 
 async def process_workflow_completion(
     _ctx,
@@ -108,7 +138,18 @@ async def process_workflow_completion(
                     f"Uploading audio to {storage_backend.name} - workflow_run_id: {workflow_run_id}"
                 )
 
-                await storage_fs.aupload_file(audio_temp_path, recording_url)
+                upload_ok = await storage_fs.aupload_file(audio_temp_path, recording_url)
+                if not upload_ok:
+                    logger.error(
+                        f"Failed to upload audio for workflow {workflow_run_id}: "
+                        f"{recording_url}"
+                    )
+                    await _mark_missing_upload(
+                        workflow_run_id=workflow_run_id,
+                        artifact_type="recording",
+                        reason="upload_failed",
+                    )
+                    raise RuntimeError("audio_upload_failed")
                 await db_client.update_workflow_run(
                     run_id=workflow_run_id,
                     recording_url=recording_url,
@@ -145,7 +186,18 @@ async def process_workflow_completion(
                     f"Uploading transcript to {storage_backend.name} - workflow_run_id: {workflow_run_id}"
                 )
 
-                await storage_fs.aupload_file(transcript_temp_path, transcript_url)
+                upload_ok = await storage_fs.aupload_file(transcript_temp_path, transcript_url)
+                if not upload_ok:
+                    logger.error(
+                        f"Failed to upload transcript for workflow {workflow_run_id}: "
+                        f"{transcript_url}"
+                    )
+                    await _mark_missing_upload(
+                        workflow_run_id=workflow_run_id,
+                        artifact_type="transcript",
+                        reason="upload_failed",
+                    )
+                    raise RuntimeError("transcript_upload_failed")
                 await db_client.update_workflow_run(
                     run_id=workflow_run_id,
                     transcript_url=transcript_url,
