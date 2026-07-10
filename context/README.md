@@ -18,3 +18,4 @@
 | [001-own-telephony-infra.md](./001-own-telephony-infra.md) | 우리만의 ClawOps — 자체 한국 전화 인프라 구축 결정 | active |
 | [002-korean-sip070-contract-guide.md](./002-korean-sip070-contract-guide.md) | 한국 SIP/070 공급자 계약·기술 부속서 가이드 | active |
 | [003-sip070-phone-call-playbook.md](./003-sip070-phone-call-playbook.md) | SIP/070 공급자 전화 문의·상사 보고 플레이북 | active |
+| [own-telephony-handoff/](./own-telephony-handoff/) | 자체 한국 전화 인프라 코딩 재개용 인수인계 메모 | active |
