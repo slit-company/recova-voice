@@ -30,6 +30,9 @@ names, and community links still say Dograh and should be migrated deliberately.
 dograh/
 ├── api/              # FastAPI backend, DB models, services, ARQ tasks
 ├── ui/               # Next.js 15 app, generated API client, dashboard
+├── product/          # Canonical internal product planning
+├── context/          # Decision rationale and handoff context
+├── plans/            # Implementation execution plans
 ├── docs/             # Mintlify documentation, mostly upstream Dograh today
 ├── scripts/          # Local/dev/deployment helpers; many have .sh/.ps1 pairs
 ├── sdk/              # Python and TypeScript SDK packages
@@ -44,6 +47,7 @@ dograh/
 
 | Task | Start here | Notes |
 | --- | --- | --- |
+| Product planning | `product/README.md` | Canonical product definition, journeys, status, priorities, and metrics. |
 | API routes | `api/routes/main.py` | Routers are mounted under `/api/v1`. Keep handlers thin. |
 | Product/workflow logic | `api/services/workflow/` | Agent graph, node data, QA, tool execution, text chat. |
 | Live voice runtime | `api/services/pipecat/` | Pipeline construction, events, audio, realtime model adapters. |
@@ -74,6 +78,15 @@ dograh/
   filter or validate by `organization_id`.
 - Treat campaigns, telephony configuration, reports, usage, recordings, and API
   keys as production B2B surfaces, not demo-only features.
+
+## Product Planning
+
+Canonical internal product planning lives in [`product/README.md`](product/README.md).
+It separates the product definition, end-to-end journeys, current capability
+status, priorities, and metrics from decision history in `context/`, executable
+implementation plans in `plans/`, and public guidance in `docs/`. Changes to
+product definition, behavior, journey/capability status, priorities, metrics, or
+decision status must update the relevant `product/` document in the same change.
 
 ## Local Development
 

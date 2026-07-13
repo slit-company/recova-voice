@@ -15,6 +15,14 @@ corresponding runtime, docs, links, screenshots, and deployment artifacts are
 true.
 
 ## Product Priorities
+- Canonical internal product planning lives in `product/README.md`. Before product
+  work, read its product definition, journeys, capability map, priorities, and
+  metrics. A change that alters product definition, behavior, journey/capability
+  state, priority, metric/gate, or decision status MUST update the relevant
+  `product/` document in the same verified change. Keep the official product
+  state only in `product/03-capability-map.md`, decision rationale in `context/`,
+  implementation plans in `plans/`, and truthful public guidance in `docs/`; do
+  not duplicate their detailed content into product planning.
 
 - Korean B2B operators are the target users: sales/support teams, call-center
   style operations, admin/superadmin workflows, organization-level controls,
@@ -49,8 +57,11 @@ true.
 dograh/
 ├── api/              # Backend - FastAPI application
 ├── ui/               # Frontend - Next.js application
+├── product/          # Canonical internal product planning
+├── context/          # Decision rationale and handoff context
+├── plans/            # Implementation execution plans
+├── docs/             # Mintlify/public and operational documentation
 ├── scripts/          # Helper scripts for local development
-├── docs/             # Mintlify documentation
 ├── pipecat/          # Pipecat framework (git submodule)
 ├── docker-compose.yaml       # Production/OSS deployment
 ├── docker-compose-local.yaml # Local development services
@@ -79,6 +90,7 @@ dograh/
 
 | Task | Location | Notes |
 | ---- | -------- | ----- |
+| Product planning | `product/README.md` | Canonical product definition, journeys, status, priorities, and metrics |
 | API entrypoint | `api/app.py` | App metadata, `/api/v1`, MCP mount, worker sync startup |
 | Route composition | `api/routes/main.py` | Main router aggregation and health response |
 | Workflow builder/runtime | `api/services/workflow/` | Graph, node data/specs, tools, QA, text chat |

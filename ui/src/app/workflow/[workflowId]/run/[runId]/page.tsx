@@ -1,13 +1,16 @@
 "use client";
 
-import { Check, Copy, ExternalLink, FileText, Video } from "lucide-react";
+import { Bot, Check, Copy, ExternalLink, FileText, Video } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import posthog from "posthog-js";
 import { useEffect, useRef, useState } from "react";
 
 import WorkflowLayout from "@/app/workflow/WorkflowLayout";
-import { getWorkflowRunApiV1WorkflowWorkflowIdRunsRunIdGet } from "@/client/sdk.gen";
+import {
+  getWorkflowApiV1WorkflowFetchWorkflowIdGet,
+  getWorkflowRunApiV1WorkflowWorkflowIdRunsRunIdGet,
+} from "@/client/sdk.gen";
 import {
   MediaPreviewButton,
   MediaPreviewDialog,
@@ -212,6 +215,7 @@ export default function WorkflowRunPage() {
   const [workflowRun, setWorkflowRun] = useState<WorkflowRunResponse | null>(
     null,
   );
+  const [workflowName, setWorkflowName] = useState<string | null>(null);
   const { hasSeenTooltip, markTooltipSeen } = useOnboarding();
   const { t } = useLocale();
   const customizeButtonRef = useRef<HTMLButtonElement>(null);
@@ -230,14 +234,21 @@ export default function WorkflowRunPage() {
       if (!auth.isAuthenticated || auth.loading) return;
 
       setIsLoading(true);
-      const workflowId = params.workflowId;
-      const runId = params.runId;
-      const response = await getWorkflowRunApiV1WorkflowWorkflowIdRunsRunIdGet({
-        path: {
-          workflow_id: Number(workflowId),
-          run_id: Number(runId),
-        },
-      });
+      setWorkflowName(null);
+      const workflowId = Number(params.workflowId);
+      const runId = Number(params.runId);
+      const [response, workflowResponse] = await Promise.all([
+        getWorkflowRunApiV1WorkflowWorkflowIdRunsRunIdGet({
+          path: {
+            workflow_id: workflowId,
+            run_id: runId,
+          },
+        }),
+        getWorkflowApiV1WorkflowFetchWorkflowIdGet({
+          path: { workflow_id: workflowId },
+        }).catch(() => null),
+      ]);
+      setWorkflowName(workflowResponse?.data?.name ?? null);
       setIsLoading(false);
       const runData = {
         mode: response.data?.mode ?? "",
@@ -258,8 +269,9 @@ export default function WorkflowRunPage() {
       };
       setWorkflowRun(runData);
       posthog.capture(PostHogEvent.WORKFLOW_RUN_DETAILS_VIEWED, {
-        workflow_id: Number(workflowId),
-        run_id: Number(runId),
+        workflow_id: workflowId,
+        workflow_name: workflowResponse?.data?.name ?? null,
+        run_id: runId,
         is_completed: runData.is_completed,
         has_recording: !!runData.recording_url,
         has_transcript: !!runData.transcript_url,
@@ -303,33 +315,50 @@ export default function WorkflowRunPage() {
         <div className="min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-4xl space-y-6 p-6">
             <Card className="border-border">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <CardTitle className="text-2xl">
-                    {isTextChatRun
-                      ? t("runDetail.textChatSession")
-                      : t("runDetail.completed")}
-                  </CardTitle>
-                  <div
-                    className={`h-8 w-8 rounded-full flex items-center justify-center ${isTextChatRun ? "bg-sky-500/15" : "bg-emerald-500/20"}`}
-                  >
-                    {isTextChatRun ? (
-                      <FileText className="h-5 w-5 text-sky-500" />
-                    ) : (
-                      <svg
-                        className="h-5 w-5 text-emerald-500"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                    )}
+              <CardHeader className="flex flex-row items-start justify-between">
+                <div className="min-w-0 space-y-3">
+                  {workflowName && (
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-primary/20 bg-primary/10 text-primary">
+                        <Bot className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                          {t("runDetail.agent")}
+                        </p>
+                        <p className="truncate text-xl font-semibold text-foreground">
+                          {workflowName}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-4">
+                    <CardTitle className="text-2xl">
+                      {isTextChatRun
+                        ? t("runDetail.textChatSession")
+                        : t("runDetail.completed")}
+                    </CardTitle>
+                    <div
+                      className={`h-8 w-8 rounded-full flex items-center justify-center ${isTextChatRun ? "bg-sky-500/15" : "bg-emerald-500/20"}`}
+                    >
+                      {isTextChatRun ? (
+                        <FileText className="h-5 w-5 text-sky-500" />
+                      ) : (
+                        <svg
+                          className="h-5 w-5 text-emerald-500"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

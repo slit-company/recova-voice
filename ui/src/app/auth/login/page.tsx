@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { loginApiV1AuthLoginPost } from "@/client/sdk.gen";
+import { loginApiV1AuthLoginPost, signupApiV1AuthSignupPost } from "@/client/sdk.gen";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,21 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const developerLoginEnabled = process.env.NODE_ENV === "development";
+
+  const persistSession = async (data: { token: string; user: unknown }) => {
+    const response = await fetch("/api/auth/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to create login session");
+    }
+
+    window.location.href = "/after-sign-in";
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,20 +47,52 @@ export default function LoginPage() {
         return;
       }
 
-      // Set httpOnly cookies via server route
-      await fetch("/api/auth/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: res.data.token, user: res.data.user }),
-      });
-
-      window.location.href = "/after-sign-in";
+      await persistSession(res.data);
     } catch {
       toast.error(t("auth.genericError"));
     } finally {
       setLoading(false);
     }
   };
+  const handleDeveloperLogin = async () => {
+    const developerEmail = "developer@recova.dev";
+    const developerPassword = "recova-local-developer";
+
+    setLoading(true);
+
+    try {
+      let authResponse = await loginApiV1AuthLoginPost({
+        body: { email: developerEmail, password: developerPassword },
+      });
+
+      if (authResponse.error || !authResponse.data) {
+        const signupResponse = await signupApiV1AuthSignupPost({
+          body: {
+            email: developerEmail,
+            password: developerPassword,
+            name: "Recova Developer",
+          },
+        });
+
+        if (signupResponse.error || !signupResponse.data) {
+          const detail = (signupResponse.error as { detail?: unknown })?.detail;
+          toast.error(
+            typeof detail === "string" ? detail : t("auth.login.developerFailed"),
+          );
+          return;
+        }
+
+        authResponse = signupResponse;
+      }
+
+      await persistSession(authResponse.data);
+    } catch {
+      toast.error(t("auth.genericError"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
@@ -81,6 +128,17 @@ export default function LoginPage() {
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? t("auth.login.submitting") : t("auth.login.submit")}
             </Button>
+            {developerLoginEnabled && (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={loading}
+                onClick={handleDeveloperLogin}
+              >
+                {t("auth.login.developerSubmit")}
+              </Button>
+            )}
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
             {t("auth.login.noAccount")}{" "}
