@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "resources": [
+    {
+      "address": "google_compute_firewall.deny_all_egress",
+      "mode": "managed",
+      "name": "deny_all_egress",
+      "type": "google_compute_firewall"
+    },
+    {
+      "address": "google_compute_firewall.deny_all_ingress",
+      "mode": "managed",
+      "name": "deny_all_ingress",
+      "type": "google_compute_firewall"
+    },
+    {
+      "address": "google_compute_network.phase_b",
+      "mode": "managed",
+      "name": "phase_b",
+      "type": "google_compute_network"
+    },
+    {
+      "address": "google_compute_subnetwork.phase_b",
+      "mode": "managed",
+      "name": "phase_b",
+      "type": "google_compute_subnetwork"
+    }
+  ],
+  "accepted_actions": {
+    "create": ["create"],
+    "destroy": ["delete"],
+    "drift-clean": []
+  },
+  "planned_values": {
+    "create": "exact_allowlist",
+    "destroy": "empty",
+    "drift-clean": "exact_allowlist"
+  }
+}
