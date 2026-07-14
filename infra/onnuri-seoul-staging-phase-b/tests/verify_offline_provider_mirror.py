@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import sys
 from pathlib import Path
@@ -23,6 +24,13 @@ def _read(path: Path) -> bytes:
         return path.read_bytes()
     except OSError as error:
         raise VerificationError(f"cannot read {path}: {error}") from error
+
+
+def _read_json(path: Path) -> object:
+    try:
+        return json.loads(_read(path).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise VerificationError(f"metadata is not valid UTF-8 JSON: {path.name}") from error
 
 
 def _without_comments(text: str) -> str:
@@ -73,33 +81,60 @@ def _lock_checksums(lockfile: Path) -> set[str]:
     return checksums
 
 
+def _provider_directory(mirror: Path) -> Path:
+    return mirror / "registry.terraform.io" / "hashicorp" / "google"
+
+
 def _expected_artifact(mirror: Path, platform: str) -> Path:
-    return (
-        mirror
-        / "registry.terraform.io"
-        / "hashicorp"
-        / "google"
-        / PROVIDER_VERSION
-        / platform
-        / f"terraform-provider-google_{PROVIDER_VERSION}_{platform}.zip"
-    )
+    return _provider_directory(mirror) / f"terraform-provider-google_{PROVIDER_VERSION}_{platform}.zip"
+
+
+def _validate_metadata(mirror: Path) -> None:
+    directory = _provider_directory(mirror)
+    index = _read_json(directory / "index.json")
+    if index != {"versions": {PROVIDER_VERSION: {}}}:
+        raise VerificationError("index.json must describe only Google provider 7.39.0")
+
+    version = _read_json(directory / f"{PROVIDER_VERSION}.json")
+    if not isinstance(version, dict) or set(version) != {"archives"}:
+        raise VerificationError("version metadata must contain only archives")
+    archives = version["archives"]
+    if not isinstance(archives, dict) or set(archives) != set(PLATFORMS):
+        raise VerificationError("version metadata must describe exactly the required platforms")
+    for platform in PLATFORMS:
+        archive = archives[platform]
+        expected_name = _expected_artifact(mirror, platform).name
+        if not isinstance(archive, dict) or set(archive) != {"url", "hashes"}:
+            raise VerificationError(f"version metadata has an invalid {platform} archive")
+        if archive["url"] != expected_name:
+            raise VerificationError(f"version metadata has an invalid {platform} package URL")
+        if not isinstance(archive["hashes"], list) or not archive["hashes"] or not all(
+            isinstance(value, str) and value for value in archive["hashes"]
+        ):
+            raise VerificationError(f"version metadata has invalid {platform} hashes")
 
 
 def verify_mirror(mirror: Path, cli_config: Path, lockfile: Path) -> None:
-    """Check required package bytes and reject every extra mirror artifact."""
+    """Check packed mirror bytes and reject every extra mirror artifact."""
     mirror = mirror.resolve()
     if not mirror.is_dir():
         raise VerificationError("provider mirror directory is missing")
     verify_cli_config(cli_config, mirror)
     checksums = _lock_checksums(lockfile)
-    expected = {_expected_artifact(mirror, platform) for platform in PLATFORMS}
+    expected = {
+        _provider_directory(mirror) / "index.json",
+        _provider_directory(mirror) / f"{PROVIDER_VERSION}.json",
+        *(_expected_artifact(mirror, platform) for platform in PLATFORMS),
+    }
     entries = set(mirror.rglob("*"))
     if any(path.is_symlink() for path in entries):
         raise VerificationError("provider mirror must not contain symbolic links")
     actual = {path for path in entries if path.is_file()}
     if actual != expected:
-        raise VerificationError("provider mirror must contain exactly the three required Google package artifacts")
-    for artifact in sorted(expected):
+        raise VerificationError("provider mirror must contain exactly the packed metadata and three required Google package artifacts")
+    _validate_metadata(mirror)
+    for platform in PLATFORMS:
+        artifact = _expected_artifact(mirror, platform)
         digest = hashlib.sha256(_read(artifact)).hexdigest()
         if digest not in checksums:
             raise VerificationError(f"package checksum is not pinned by the lock file: {artifact.name}")

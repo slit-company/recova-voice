@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import importlib.util
 import tempfile
 import unittest
@@ -19,11 +20,25 @@ class OfflineProviderMirrorTests(unittest.TestCase):
         root = Path(temporary.name)
         mirror = root / "mirror"
         checksums = []
+        archives = {}
+        provider_directory = mirror_verifier._provider_directory(mirror)
+        provider_directory.mkdir(parents=True, exist_ok=True)
         for platform in mirror_verifier.PLATFORMS:
             artifact = mirror_verifier._expected_artifact(mirror, platform)
-            artifact.parent.mkdir(parents=True, exist_ok=True)
             artifact.write_bytes(f"package-{platform}".encode())
             checksums.append(hashlib.sha256(artifact.read_bytes()).hexdigest())
+            archives[platform] = {
+                "url": artifact.name,
+                "hashes": [f"h1:fixture-{platform}"],
+            }
+        (provider_directory / "index.json").write_text(
+            json.dumps({"versions": {mirror_verifier.PROVIDER_VERSION: {}}}),
+            encoding="utf-8",
+        )
+        (provider_directory / f"{mirror_verifier.PROVIDER_VERSION}.json").write_text(
+            json.dumps({"archives": archives}),
+            encoding="utf-8",
+        )
 
         lockfile = root / ".terraform.lock.hcl"
         lockfile.write_text(
@@ -81,6 +96,21 @@ class OfflineProviderMirrorTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(mirror_verifier.VerificationError, "checksum"):
+                mirror_verifier.verify_mirror(mirror, config, lockfile)
+    def test_rejects_invalid_packed_metadata(self) -> None:
+        temporary, mirror, config, lockfile = self.make_fixture()
+        with temporary:
+            index = mirror_verifier._provider_directory(mirror) / "index.json"
+            index.write_text('{"versions": {"7.39.1": {}}}', encoding="utf-8")
+            with self.assertRaisesRegex(mirror_verifier.VerificationError, "index.json"):
+                mirror_verifier.verify_mirror(mirror, config, lockfile)
+
+    def test_rejects_symbolic_link_in_mirror(self) -> None:
+        temporary, mirror, config, lockfile = self.make_fixture()
+        with temporary:
+            link = mirror_verifier._provider_directory(mirror) / "unexpected-link"
+            link.symlink_to("index.json")
+            with self.assertRaisesRegex(mirror_verifier.VerificationError, "symbolic links"):
                 mirror_verifier.verify_mirror(mirror, config, lockfile)
 
 
