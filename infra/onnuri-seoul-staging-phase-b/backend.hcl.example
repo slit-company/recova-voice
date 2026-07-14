@@ -1,0 +1,4 @@
+# Copy only after every cloud hard gate is independently approved.
+# These are placeholders, not current cloud authority.
+bucket = "__G0_APPROVED_STATE_BUCKET__"
+prefix = "__G0_APPROVED_STATE_PREFIX__"
