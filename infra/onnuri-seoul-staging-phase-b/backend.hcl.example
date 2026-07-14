@@ -2,3 +2,4 @@
 # These are placeholders, not current cloud authority.
 bucket = "__G0_APPROVED_STATE_BUCKET__"
 prefix = "__G0_APPROVED_STATE_PREFIX__"
+impersonate_service_account = "__G0_APPROVED_IMPERSONATE_SERVICE_ACCOUNT__"
