@@ -1,0 +1,50 @@
+{
+  "resource_changes": [
+    {
+      "address": "google_compute_firewall.deny_all_egress",
+      "mode": "managed",
+      "name": "deny_all_egress",
+      "type": "google_compute_firewall",
+      "change": {"actions": ["create"]}
+    },
+    {
+      "address": "google_compute_firewall.deny_all_ingress",
+      "mode": "managed",
+      "name": "deny_all_ingress",
+      "type": "google_compute_firewall",
+      "change": {"actions": ["create"]}
+    },
+    {
+      "address": "google_compute_network.phase_b",
+      "mode": "managed",
+      "name": "phase_b",
+      "type": "google_compute_network",
+      "change": {"actions": ["create"]}
+    },
+    {
+      "address": "google_compute_subnetwork.phase_b",
+      "mode": "managed",
+      "name": "phase_b",
+      "type": "google_compute_subnetwork",
+      "change": {"actions": ["create"]}
+    },
+    {
+      "address": "null_resource.provisioner",
+      "mode": "managed",
+      "name": "provisioner",
+      "type": "null_resource",
+      "provisioner": "local-exec",
+      "change": {"actions": ["create"]}
+    }
+  ],
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {"address": "google_compute_firewall.deny_all_egress", "mode": "managed", "name": "deny_all_egress", "type": "google_compute_firewall"},
+        {"address": "google_compute_firewall.deny_all_ingress", "mode": "managed", "name": "deny_all_ingress", "type": "google_compute_firewall"},
+        {"address": "google_compute_network.phase_b", "mode": "managed", "name": "phase_b", "type": "google_compute_network"},
+        {"address": "google_compute_subnetwork.phase_b", "mode": "managed", "name": "phase_b", "type": "google_compute_subnetwork"}
+      ]
+    }
+  }
+}
