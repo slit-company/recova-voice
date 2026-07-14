@@ -1,0 +1,3 @@
+# This source-only Phase B example intentionally supplies no cloud values.
+# After every G0 confirmation is approved, copy this file outside the repository
+# and provide the approved project_id and subnet_ipv4_cidr there.
