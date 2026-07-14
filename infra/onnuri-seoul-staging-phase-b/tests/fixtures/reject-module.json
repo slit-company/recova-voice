@@ -1,0 +1,18 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {"address": "module.unapproved.google_compute_network.phase_b", "mode": "managed", "type": "google_compute_network", "name": "phase_b", "change": {"actions": ["create"]}}
+  ],
+  "planned_values": {
+    "root_module": {
+      "child_modules": [
+        {
+          "address": "module.unapproved",
+          "resources": [
+            {"address": "module.unapproved.google_compute_network.phase_b", "mode": "managed", "type": "google_compute_network", "name": "phase_b"}
+          ]
+        }
+      ]
+    }
+  }
+}

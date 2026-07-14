@@ -1,0 +1,13 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {"address": "data.google_compute_network.unapproved", "mode": "data", "type": "google_compute_network", "name": "unapproved", "change": {"actions": ["read"]}}
+  ],
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {"address": "data.google_compute_network.unapproved", "mode": "data", "type": "google_compute_network", "name": "unapproved"}
+      ]
+    }
+  }
+}
