@@ -84,5 +84,26 @@ class OfflineProviderMirrorTests(unittest.TestCase):
                 mirror_verifier.verify_mirror(mirror, config, lockfile)
 
 
+class FrozenProviderInterfaceTests(unittest.TestCase):
+    def test_provider_interface_uses_only_frozen_variables(self) -> None:
+        phase_root = MODULE_PATH.parents[1]
+        provider = (phase_root / "providers.tf").read_text(encoding="utf-8")
+        variables = (phase_root / "variables.tf").read_text(encoding="utf-8")
+        example = (phase_root / "terraform.tfvars.example").read_text(encoding="utf-8")
+
+        self.assertNotIn("required_providers", provider)
+        self.assertIn("project                     = var.project_id", provider)
+        self.assertIn("region                      = var.region", provider)
+        self.assertIn("impersonate_service_account = var.deployer_service_account", provider)
+        for name in ("project_id", "region", "subnet_ipv4_cidr", "deployer_service_account"):
+            self.assertIn(f'variable "{name}"', variables)
+            self.assertIn(f"{name}", example)
+        self.assertIn('var.project_id == "slit-497603"', variables)
+        self.assertIn('var.region == "asia-northeast3"', variables)
+        self.assertIn(
+            'var.deployer_service_account == "REPLACE_WITH_G0_APPROVED_DEPLOYER_SERVICE_ACCOUNT"',
+            variables,
+        )
+
 if __name__ == "__main__":
     unittest.main()

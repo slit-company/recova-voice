@@ -93,7 +93,10 @@ def verify_mirror(mirror: Path, cli_config: Path, lockfile: Path) -> None:
     verify_cli_config(cli_config, mirror)
     checksums = _lock_checksums(lockfile)
     expected = {_expected_artifact(mirror, platform) for platform in PLATFORMS}
-    actual = {path for path in mirror.rglob("*") if path.is_file()}
+    entries = set(mirror.rglob("*"))
+    if any(path.is_symlink() for path in entries):
+        raise VerificationError("provider mirror must not contain symbolic links")
+    actual = {path for path in entries if path.is_file()}
     if actual != expected:
         raise VerificationError("provider mirror must contain exactly the three required Google package artifacts")
     for artifact in sorted(expected):

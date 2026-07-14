@@ -1,12 +1,5 @@
-terraform {
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "7.39.0"
-    }
-  }
-}
-
 provider "google" {
-  project = var.project_id
+  project                     = var.project_id
+  region                      = var.region
+  impersonate_service_account = var.deployer_service_account
 }

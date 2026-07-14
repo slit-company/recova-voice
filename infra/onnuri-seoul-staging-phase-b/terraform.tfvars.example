@@ -1,3 +1,4 @@
-# This source-only Phase B example intentionally supplies no cloud values.
-# After every G0 confirmation is approved, copy this file outside the repository
-# and provide the approved project_id and subnet_ipv4_cidr there.
+project_id               = "slit-497603"
+region                   = "asia-northeast3"
+subnet_ipv4_cidr         = "REPLACE_WITH_G0_APPROVED_RFC1918_SLASH_24"
+deployer_service_account = "REPLACE_WITH_G0_APPROVED_DEPLOYER_SERVICE_ACCOUNT"
