@@ -1058,6 +1058,28 @@ def finding_acceptance_key(image_name: str, finding: dict[str, Any]) -> str:
         raise Refusal("invalid Critical/High vulnerability identity")
     return urllib.parse.urlencode(list(zip(ACCEPTANCE_IDENTITY_FIELDS, values)))
 
+def finding_acceptance_digest(finding: dict[str, Any]) -> str:
+    vulnerability = finding.get("vulnerability")
+    artifact = finding.get("artifact")
+    fix = vulnerability.get("fix") if isinstance(vulnerability, dict) else None
+    projection = {
+        "vulnerability": vulnerability.get("id") if isinstance(vulnerability, dict) else None,
+        "severity": str(vulnerability.get("severity", "")).upper() if isinstance(vulnerability, dict) else None,
+        "artifact_name": artifact.get("name") if isinstance(artifact, dict) else None,
+        "artifact_version": artifact.get("version") if isinstance(artifact, dict) else None,
+        "artifact_type": artifact.get("type") if isinstance(artifact, dict) else None,
+        "fix_state": fix.get("state") if isinstance(fix, dict) else None,
+        "fix_versions": sorted(fix.get("versions", [])) if isinstance(fix, dict) and isinstance(fix.get("versions", []), list) else [],
+    }
+    if not all(isinstance(projection[field], str) and projection[field] for field in ("vulnerability", "severity", "artifact_name", "artifact_version", "artifact_type")):
+        raise Refusal("invalid Critical/High vulnerability identity")
+    if projection["fix_state"] is not None and not isinstance(projection["fix_state"], str):
+        raise Refusal("invalid Critical/High vulnerability fix state")
+    if projection["fix_versions"] is None or any(not isinstance(version, str) or not version for version in projection["fix_versions"]):
+        raise Refusal("invalid Critical/High vulnerability fix versions")
+    return sha(canonical(projection))
+
+
 def validate_acceptance_key(key: Any) -> None:
     if not isinstance(key, str):
         raise Refusal("invalid vulnerability acceptance identity")
@@ -1109,7 +1131,7 @@ def vulnerabilities(
         critical += severity == "CRITICAL"; high += severity == "HIGH"
         key = finding_acceptance_key(image_name, finding)
         approved = validate_acceptance_decision(acceptances.get(key))
-        if approved["finding_sha256"] != sha(canonical(finding)):
+        if approved["finding_sha256"] != finding_acceptance_digest(finding):
             raise Refusal("mismatched vulnerability acceptance")
         if used_acceptances is not None:
             used_acceptances.add(key)

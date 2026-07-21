@@ -1371,6 +1371,27 @@ def finding_key(image: str, finding: dict[str, Any]) -> str | None:
         return None
     return urllib.parse.urlencode(list(zip(("image", "vulnerability", "artifact_name", "artifact_version", "artifact_type"), values)))
 
+def finding_digest(finding: dict[str, Any]) -> str | None:
+    vulnerability, artifact = finding.get("vulnerability"), finding.get("artifact")
+    fix = vulnerability.get("fix") if isinstance(vulnerability, dict) else None
+    projection = {
+        "vulnerability": vulnerability.get("id") if isinstance(vulnerability, dict) else None,
+        "severity": str(vulnerability.get("severity", "")).upper() if isinstance(vulnerability, dict) else None,
+        "artifact_name": artifact.get("name") if isinstance(artifact, dict) else None,
+        "artifact_version": artifact.get("version") if isinstance(artifact, dict) else None,
+        "artifact_type": artifact.get("type") if isinstance(artifact, dict) else None,
+        "fix_state": fix.get("state") if isinstance(fix, dict) else None,
+        "fix_versions": sorted(fix.get("versions", [])) if isinstance(fix, dict) and isinstance(fix.get("versions", []), list) else [],
+    }
+    if not all(isinstance(projection[field], str) and projection[field] for field in ("vulnerability", "severity", "artifact_name", "artifact_version", "artifact_type")):
+        return None
+    if projection["fix_state"] is not None and not isinstance(projection["fix_state"], str):
+        return None
+    if projection["fix_versions"] is None or any(not isinstance(version, str) or not version for version in projection["fix_versions"]):
+        return None
+    return hashlib.sha256(canonical_json(projection)).hexdigest()
+
+
 
 
 
@@ -1442,7 +1463,7 @@ def validate_image_evidence(data: dict[str, Any], index: dict[str, Any], root: P
             else: high += 1
             decision = decisions.get(key)
             expiry = timestamp(decision.get("expires_at"), f"{path}.vulnerability_acceptance.decisions.{key}.expires_at", errors) if isinstance(decision, dict) else None
-            accepted = isinstance(decision, dict) and set(decision) == {"reason", "expires_at", "finding_sha256"} and isinstance(decision.get("reason"), str) and bool(decision["reason"]) and decision.get("finding_sha256") == hashlib.sha256(canonical_json(finding)).hexdigest() and expiry is not None and expiry > as_of
+            accepted = isinstance(decision, dict) and set(decision) == {"reason", "expires_at", "finding_sha256"} and isinstance(decision.get("reason"), str) and bool(decision["reason"]) and decision.get("finding_sha256") == finding_digest(finding) and expiry is not None and expiry > as_of
             if not accepted:
                 if severity == "CRITICAL": unaccepted_critical += 1
                 else: unaccepted_high += 1

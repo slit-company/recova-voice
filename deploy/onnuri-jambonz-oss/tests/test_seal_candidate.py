@@ -727,6 +727,12 @@ secrets:
             with self.subTest(acceptances=acceptances), self.assertRaises(seal.Refusal):
                 seal.vulnerabilities("freeswitch", json.dumps({"matches":[finding]}).encode(), acceptances)
 
+    def test_acceptance_digest_ignores_nondeterministic_grype_metadata(self) -> None:
+        finding = {"vulnerability":{"id":"CVE-1", "severity":"High", "fix":{"state":"fixed", "versions":["2.0", "1.5"]}}, "artifact":{"name":"package", "version":"1.0", "type":"deb"}, "matchDetails":[{"searchedBy":"distro"}]}
+        changed = {**finding, "matchDetails":[{"searchedBy":"cpe"}], "relatedVulnerabilities":[{"id":"GHSA-1"}]}
+        self.assertEqual(seal.finding_acceptance_digest(finding), seal.finding_acceptance_digest(changed))
+        self.assertEqual(seal.vulnerabilities("freeswitch", json.dumps({"matches":[changed]}).encode(), {seal.finding_acceptance_key("freeswitch", finding): self.acceptance(finding)}), (0, 1))
+
     def test_zero_critical_and_high_findings_are_valid(self) -> None:
         finding = {"vulnerability":{"id":"CVE-1", "severity":"Medium"}, "artifact":{"name":"package", "version":"1.0", "type":"deb"}}
         self.assertEqual(seal.vulnerabilities("freeswitch", json.dumps({"matches":[finding]}).encode(), {}), (0, 0))
@@ -743,7 +749,7 @@ secrets:
 
     @staticmethod
     def acceptance(finding: dict[str, object]) -> dict[str, str]:
-        return {"reason":"reviewed exception", "expires_at":"2999-01-01T00:00:00Z", "finding_sha256":seal.sha(seal.canonical(finding))}
+        return {"reason":"reviewed exception", "expires_at":"2999-01-01T00:00:00Z", "finding_sha256":seal.finding_acceptance_digest(finding)}
 
     def test_evidence_is_hashed_read_only_and_idempotent_for_identical_bytes(self) -> None:
         from tempfile import TemporaryDirectory
