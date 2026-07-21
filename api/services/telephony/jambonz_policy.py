@@ -99,6 +99,50 @@ def _canonical_assigned_inventory_id(extra_metadata: dict | None) -> int | None:
     return _metadata_inventory_id(metadata)
 
 
+_MISSING_ONNURI_CLASSIFICATION = object()
+
+
+async def _has_current_onnuri_staging_proof(
+    *,
+    inventory,
+    organization_id: int,
+    telephony_phone_number_id: int,
+    telephony_configuration_id: int | None,
+    address_normalized: str,
+) -> bool:
+    """Fail closed for classified Onnuri inventory while retaining other inventory."""
+    candidate_id = getattr(
+        inventory, "onnuri_staging_candidate_id", _MISSING_ONNURI_CLASSIFICATION
+    )
+    if candidate_id is _MISSING_ONNURI_CLASSIFICATION:
+        return False
+    if candidate_id is None:
+        return True
+
+    proof_id = getattr(inventory, "onnuri_preflight_proof_id", None)
+    proof_hash = getattr(inventory, "onnuri_preflight_proof_hash", None)
+    if proof_id is None or not isinstance(proof_hash, str) or not proof_hash:
+        return False
+
+    lookup = getattr(
+        db_client, "get_current_onnuri_staging_routable_inventory", None
+    )
+    if lookup is None:
+        return False
+
+    current = await lookup(
+        inventory_id=inventory.id,
+        candidate_id=candidate_id,
+        proof_id=proof_id,
+        proof_hash=proof_hash,
+        organization_id=organization_id,
+        telephony_phone_number_id=telephony_phone_number_id,
+        provider=JAMBONZ_PROVIDER,
+        telephony_configuration_id=telephony_configuration_id,
+        address_normalized=address_normalized,
+    )
+    return current is not None
+
 async def is_assigned_recova_jambonz_070(row) -> bool:
     """Return whether a phone-number row is valid for V1 core use."""
     if row is None or not getattr(row, "is_active", False):
@@ -127,7 +171,42 @@ async def is_assigned_recova_jambonz_070(row) -> bool:
         telephony_configuration_id=getattr(row, "telephony_configuration_id", None),
         address_normalized=address,
     )
-    return inventory is not None
+    if inventory is None:
+        return False
+    return await _has_current_onnuri_staging_proof(
+        inventory=inventory,
+        organization_id=organization_id,
+        telephony_phone_number_id=phone_number_id,
+        telephony_configuration_id=getattr(row, "telephony_configuration_id", None),
+        address_normalized=address,
+    )
+
+
+async def is_current_jambonz_routable_phone_tuple(
+    *,
+    organization_id: int,
+    telephony_configuration_id: int,
+    telephony_phone_number_id: int,
+    address: str,
+) -> bool:
+    """Validate the exact inbound Jambonz phone tuple before side effects."""
+    try:
+        normalized_address = normalize_telephony_address(
+            address, country_hint="KR"
+        ).canonical
+    except ValueError:
+        return False
+
+    row = await db_client.get_phone_number_for_config(
+        telephony_phone_number_id, telephony_configuration_id
+    )
+    if (
+        row is None
+        or getattr(row, "organization_id", None) != organization_id
+        or getattr(row, "address_normalized", None) != normalized_address
+    ):
+        return False
+    return await is_assigned_recova_jambonz_070(row)
 
 
 async def assert_assigned_recova_jambonz_070(row, *, detail: str) -> None:

@@ -391,7 +391,7 @@ class TestDispatcherThreadsTelephonyConfig:
             provider.initiate_call.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_dispatch_call_rejects_jambonz_non_assigned_caller_id(self):
+    async def test_dispatch_call_rejects_jambonz_waiting_policy(self):
         org_id = 7
         config_id = 4242
         campaign = _make_campaign(
@@ -419,37 +419,19 @@ class TestDispatcherThreadsTelephonyConfig:
             patch(
                 "api.services.campaign.campaign_call_dispatcher.rate_limiter"
             ) as mock_rl,
-            patch(
-                "api.services.telephony.runtime_policy.validate_campaign_caller_id",
-                new=AsyncMock(
-                    side_effect=ValueError(
-                        "jambonz_assigned_recova_070_caller_required"
-                    )
-                ),
-            ) as validate_caller,
         ):
             mock_db.get_workflow_by_id = AsyncMock(return_value=SimpleNamespace(id=1))
             mock_db.create_workflow_run = AsyncMock()
             mock_rl.acquire_from_number = AsyncMock(return_value="+821012345678")
             mock_rl.release_concurrent_slot = AsyncMock()
-            mock_rl.release_from_number = AsyncMock()
 
             with pytest.raises(
-                ValueError, match="jambonz_assigned_recova_070_caller_required"
+                ValueError, match="does not permit campaign dispatch"
             ):
                 await dispatcher.dispatch_call(queued_run, campaign, slot_id="slot-1")
 
-            validate_caller.assert_awaited_once_with(
-                provider_name="jambonz",
-                telephony_configuration_id=config_id,
-                from_number="+821012345678",
-            )
             mock_rl.release_concurrent_slot.assert_awaited_once_with(org_id, "slot-1")
-            mock_rl.release_from_number.assert_awaited_once_with(
-                org_id,
-                "+821012345678",
-                telephony_configuration_id=config_id,
-            )
+            mock_rl.acquire_from_number.assert_not_awaited()
             mock_db.create_workflow_run.assert_not_awaited()
             provider.initiate_call.assert_not_awaited()
     @pytest.mark.asyncio

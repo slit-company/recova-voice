@@ -21,27 +21,26 @@ variable "region" {
 }
 
 variable "subnet_ipv4_cidr" {
-  description = "Future G0-approved RFC1918 /24 for the Seoul subnet."
+  description = "Approved canonical Seoul subnet CIDR."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = var.subnet_ipv4_cidr == "10.73.96.0/24"
+    error_message = "subnet_ipv4_cidr must remain fixed to the approved canonical 10.73.96.0/24."
+  }
+}
+
+variable "deployer_service_account" {
+  description = "Approved Phase B deployer service account; this source grants it no resources or roles."
   type        = string
   nullable    = false
 
   validation {
     condition = (
-      can(cidrhost(var.subnet_ipv4_cidr, 0)) &&
-      endswith(var.subnet_ipv4_cidr, "/24") &&
-      can(regex("^(10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[0-1])\\.)", var.subnet_ipv4_cidr))
+      trimspace(var.deployer_service_account) == var.deployer_service_account &&
+      can(regex("^[a-z][a-z0-9-]{4,28}[a-z0-9]@slit-497603\\.iam\\.gserviceaccount\\.com$", var.deployer_service_account))
     )
-    error_message = "subnet_ipv4_cidr must be an RFC1918 /24."
-  }
-}
-
-variable "deployer_service_account" {
-  description = "G0-gated deployer service-account placeholder; no deployer is authorized in this phase."
-  type        = string
-  nullable    = false
-
-  validation {
-    condition     = var.deployer_service_account == "REPLACE_WITH_G0_APPROVED_DEPLOYER_SERVICE_ACCOUNT"
-    error_message = "deployer_service_account must remain the G0-approved placeholder."
+    error_message = "deployer_service_account must be an approved slit-497603 service-account email with a 6-30 character lowercase account ID."
   }
 }

@@ -564,6 +564,25 @@ class TestProcessStatusUpdateCircuitBreaker:
     """Test that _process_status_update calls circuit_breaker.record_and_evaluate
     for campaign calls."""
 
+    @pytest.fixture(autouse=True)
+    def isolate_status_processor_side_effects(self):
+        """Keep circuit-breaker tests isolated from CDR, alert, and admission stores."""
+        with (
+            patch(
+                "api.services.telephony.status_processor.record_status_event_and_terminal_cdr",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "api.services.telephony.status_processor.telephony_ops_alert_sink.emit",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "api.services.telephony.status_processor.telephony_admission_controller.release",
+                new_callable=AsyncMock,
+            ),
+        ):
+            yield
+
     @pytest.mark.asyncio
     async def test_failure_status_calls_record_and_evaluate(self):
         """When a campaign call fails, record_and_evaluate should be called
@@ -581,6 +600,12 @@ class TestProcessStatusUpdateCircuitBreaker:
         mock_workflow_run.state = "running"
         mock_workflow_run.logs = {"telephony_status_callbacks": []}
         mock_workflow_run.gathered_context = {}
+        mock_workflow_run.initial_context = {}
+        mock_workflow_run.mode = "twilio"
+        mock_workflow_run.call_type = "outbound"
+        mock_workflow_run.workflow_id = 7
+        mock_workflow_run.organization_id = 1
+        mock_workflow_run.workflow = MagicMock(organization_id=1)
 
         status = StatusCallbackRequest(
             call_id="call-123",
@@ -632,6 +657,13 @@ class TestProcessStatusUpdateCircuitBreaker:
         mock_workflow_run.state = "running"
         mock_workflow_run.logs = {"telephony_status_callbacks": []}
         mock_workflow_run.gathered_context = {}
+        mock_workflow_run.initial_context = {}
+        mock_workflow_run.mode = "twilio"
+        mock_workflow_run.call_type = "outbound"
+        mock_workflow_run.workflow_id = 7
+        mock_workflow_run.queued_run_id = None
+        mock_workflow_run.organization_id = 1
+        mock_workflow_run.workflow = MagicMock(organization_id=1)
 
         status = StatusCallbackRequest(
             call_id="call-456",
@@ -671,6 +703,13 @@ class TestProcessStatusUpdateCircuitBreaker:
         mock_workflow_run.state = "running"
         mock_workflow_run.logs = {"telephony_status_callbacks": []}
         mock_workflow_run.gathered_context = {}
+        mock_workflow_run.initial_context = {}
+        mock_workflow_run.mode = "twilio"
+        mock_workflow_run.call_type = "outbound"
+        mock_workflow_run.workflow_id = 7
+        mock_workflow_run.queued_run_id = None
+        mock_workflow_run.organization_id = 1
+        mock_workflow_run.workflow = MagicMock(organization_id=1)
 
         status = StatusCallbackRequest(
             call_id="call-789",
@@ -709,6 +748,12 @@ class TestProcessStatusUpdateCircuitBreaker:
         }
         mock_workflow_run.logs = {"telephony_status_callbacks": []}
         mock_workflow_run.gathered_context = {}
+        mock_workflow_run.mode = "twilio"
+        mock_workflow_run.call_type = "outbound"
+        mock_workflow_run.workflow_id = 7
+        mock_workflow_run.queued_run_id = None
+        mock_workflow_run.organization_id = 1
+        mock_workflow_run.workflow = MagicMock(organization_id=1)
 
         status = StatusCallbackRequest(
             call_id="call-789",
@@ -723,7 +768,9 @@ class TestProcessStatusUpdateCircuitBreaker:
             },
         )
 
-        with patch("api.services.telephony.status_processor.db_client") as mock_db:
+        with (
+            patch("api.services.telephony.status_processor.db_client") as mock_db,
+        ):
             mock_db.get_workflow_run_by_id = AsyncMock(return_value=mock_workflow_run)
             mock_db.update_workflow_run = AsyncMock()
 
@@ -767,6 +814,12 @@ class TestProcessStatusUpdateCircuitBreaker:
         mock_workflow_run.gathered_context = {}
         preview_session = MagicMock()
         preview_session.id = 123
+        mock_workflow_run.mode = "twilio"
+        mock_workflow_run.call_type = "outbound"
+        mock_workflow_run.workflow_id = 7
+        mock_workflow_run.queued_run_id = None
+        mock_workflow_run.organization_id = 1
+        mock_workflow_run.workflow = MagicMock(organization_id=1)
 
         status = StatusCallbackRequest(
             call_id="call-789",

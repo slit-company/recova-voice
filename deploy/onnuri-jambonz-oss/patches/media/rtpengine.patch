@@ -1,0 +1,13 @@
+diff --git a/.dockerignore b/.dockerignore
+index f451987..a72b785 100644
+--- a/.dockerignore
++++ b/.dockerignore
+@@ -10,7 +10,7 @@ recording-daemon/rtpengine-recording
+ t/
+ tests/
+ **/*.strhash.c
+-**/.*
++.github/
+ **/*.8
+ **/*.o
+ **/core

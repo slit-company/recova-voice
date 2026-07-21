@@ -54,11 +54,23 @@ class JambonzMediaStartFrame(_ContractModel):
     event: Literal["start"] = "start"
     account_id: str
     application_id: str | None = None
+    run_id: str | None = None
+    organization_id: int | None = None
+    envelope_id: str | None = None
+    attempt_id: str | None = None
     call_id: str
     stream_id: str
     codec: Literal["PCMU", "PCMA", "L16"] = "PCMU"
     sample_rate: int = 8000
     direction: Literal["inbound", "outbound"]
+    idempotency_key: str | None = None
+    authority_receipt_id: str | None = None
+    authority_deadline: str | None = None
+    media_verification_domain: str | None = None
+    media_key_id: str | None = None
+    callback_event_nonce: str | None = None
+    request_digest: str | None = None
+    stock_call_id_digest: str | None = None
     is_contract_fixture: bool = True
 
 
@@ -74,7 +86,18 @@ class JambonzOutboundCallRequest(_ContractModel):
     workflow_run_id: int | None = None
     workflow_id: int | None = None
     user_id: int | None = None
-    timeout_seconds: int = 30
+    run_id: str | None = None
+    envelope_id: str | None = None
+    attempt_id: str | None = None
+    direction: Literal["outbound"] = "outbound"
+    idempotency_key: str | None = None
+    authority_deadline: str | None = None
+    dispatch_capability: str | None = None
+    dispatch_verification_domain: str | None = None
+    dispatch_key_id: str | None = None
+    dispatch_algorithm_policy_id: str | None = None
+    timeout_seconds: int = Field(default=30, ge=1, le=30)
+    max_call_seconds: int = Field(default=60, ge=1, le=60)
     outbound_profile_id: str | None = None
     is_contract_fixture: bool = False
 
@@ -83,8 +106,17 @@ class JambonzOutboundCallResponse(_ContractModel):
     provider: Literal["jambonz"] = JAMBONZ_PROVIDER
     contract_version: Literal["jambonz_contract_v1"] = JAMBONZ_CONTRACT_VERSION
     account_id: str
+    application_id: str | None = None
+    run_id: str | None = None
+    envelope_id: str | None = None
+    attempt_id: str | None = None
+    direction: Literal["outbound"] = "outbound"
     call_id: str
     status: Literal["queued", "initiated", "ringing", "answered"] = "initiated"
+    dispatch_receipt_id: str | None = None
+    bind_receipt_id: str | None = None
+    idempotency_key: str | None = None
+    request_digest: str | None = None
     is_contract_fixture: bool = True
 
 
@@ -94,6 +126,9 @@ class JambonzStatusCallback(_ContractModel):
     event_type: Literal["status"] = "status"
     account_id: str
     application_id: str | None = None
+    run_id: str | None = None
+    envelope_id: str | None = None
+    attempt_id: str | None = None
     call_id: str
     status: Literal[
         "initiated",
@@ -111,7 +146,9 @@ class JambonzStatusCallback(_ContractModel):
     direction: Literal["inbound", "outbound"]
     duration_seconds: int | None = None
     failure_cause: str | None = None
+    event_nonce: str | None = None
     idempotency_key: str
+    request_digest: str | None = None
     is_contract_fixture: bool = True
 
 
@@ -121,6 +158,9 @@ class JambonzCdrEvent(_ContractModel):
     event_type: Literal["cdr"] = "cdr"
     account_id: str
     application_id: str | None = None
+    run_id: str | None = None
+    envelope_id: str | None = None
+    attempt_id: str | None = None
     call_id: str
     direction: Literal["inbound", "outbound"]
     from_number: str
@@ -130,7 +170,9 @@ class JambonzCdrEvent(_ContractModel):
     ended_at: str
     duration_seconds: int
     hangup_cause: str | None = None
+    event_nonce: str | None = None
     idempotency_key: str
+    request_digest: str | None = None
     is_contract_fixture: bool = True
 
 

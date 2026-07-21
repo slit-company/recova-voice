@@ -32,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useLocale } from "@/context/LocaleContext";
 import { useAuth } from "@/lib/auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
@@ -68,10 +69,11 @@ type AssignedNumbersBinderProps = {
 export function AssignedNumbersBinder({
   targetWorkflowId,
   targetWorkflowName,
-  title = "Assigned phone numbers",
-  description = "Recova-managed numbers assigned to your organization. Bind numbers to workflows without exposing carrier credentials.",
+  title,
+  description,
 }: AssignedNumbersBinderProps) {
   const { user, getAccessToken, loading: authLoading } = useAuth();
+  const { t } = useLocale();
   const [numbers, setNumbers] = useState<AssignedNumber[]>([]);
   const [workflowInputs, setWorkflowInputs] = useState<Record<number, string>>({});
   const [workflows, setWorkflows] = useState<WorkflowSummaryResponse[]>([]);
@@ -99,11 +101,11 @@ export function AssignedNumbersBinder({
         ),
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load assigned numbers");
+      toast.error(err instanceof Error ? err.message : t("telephonyNumbers.loadAssignedFailed"));
     } finally {
       setLoading(false);
     }
-  }, [authLoading, user, getAccessToken]);
+  }, [authLoading, user, getAccessToken, t]);
 
   const fetchWorkflows = useCallback(async () => {
     if (targetWorkflowId != null) {
@@ -123,11 +125,11 @@ export function AssignedNumbersBinder({
       });
       setWorkflows(response.data ?? []);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load workflows");
+      toast.error(err instanceof Error ? err.message : t("telephonyNumbers.loadWorkflowsFailed"));
     } finally {
       setLoadingWorkflows(false);
     }
-  }, [authLoading, user, getAccessToken, targetWorkflowId]);
+  }, [authLoading, user, getAccessToken, targetWorkflowId, t]);
 
   useEffect(() => {
     void fetchNumbers();
@@ -141,7 +143,7 @@ export function AssignedNumbersBinder({
 
   const bindNumber = async (inventoryId: number, workflowId: number) => {
     if (!Number.isInteger(workflowId) || workflowId <= 0) {
-      toast.error("Select an inbound workflow");
+      toast.error(t("telephonyNumbers.selectInboundWorkflow"));
       return;
     }
     setSavingId(inventoryId);
@@ -154,10 +156,10 @@ export function AssignedNumbersBinder({
           body: JSON.stringify({ workflow_id: workflowId }),
         },
       );
-      toast.success("Inbound workflow bound");
+      toast.success(t("telephonyNumbers.bindSuccess"));
       await fetchNumbers();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to bind workflow");
+      toast.error(err instanceof Error ? err.message : t("telephonyNumbers.bindFailed"));
     } finally {
       setSavingId(null);
     }
@@ -171,10 +173,10 @@ export function AssignedNumbersBinder({
         await getAccessToken(),
         { method: "DELETE" },
       );
-      toast.success("Inbound workflow removed");
+      toast.success(t("telephonyNumbers.unbindSuccess"));
       await fetchNumbers();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to unbind workflow");
+      toast.error(err instanceof Error ? err.message : t("telephonyNumbers.unbindFailed"));
     } finally {
       setSavingId(null);
     }
@@ -188,7 +190,7 @@ export function AssignedNumbersBinder({
       return [
         {
           id: number.inbound_workflow_id,
-          name: number.inbound_workflow_name ?? `Workflow #${number.inbound_workflow_id}`,
+          name: number.inbound_workflow_name ?? t("telephonyNumbers.workflowNumber", { id: number.inbound_workflow_id }),
         },
         ...workflows,
       ];
@@ -198,7 +200,7 @@ export function AssignedNumbersBinder({
 
   const renderWorkflowCell = (number: AssignedNumber) => {
     if (!number.inbound_workflow_id) {
-      return <span className="text-muted-foreground">Unbound</span>;
+      return <span className="text-muted-foreground">{t("telephonyNumbers.unbound")}</span>;
     }
     return (
       <Link
@@ -228,7 +230,7 @@ export function AssignedNumbersBinder({
               onClick={() => unbindNumber(number.inventory_id)}
               disabled={savingId === number.inventory_id}
             >
-              <Unlink className="h-4 w-4 mr-1" /> Unbind
+              <Unlink className="h-4 w-4 mr-1" /> {t("telephonyNumbers.unbind")}
             </Button>
           ) : (
             <Button
@@ -236,12 +238,12 @@ export function AssignedNumbersBinder({
               onClick={() => bindNumber(number.inventory_id, targetWorkflowId)}
               disabled={savingId === number.inventory_id || isBoundElsewhere}
             >
-              <LinkIcon className="h-4 w-4 mr-1" /> Bind here
+              <LinkIcon className="h-4 w-4 mr-1" /> {t("telephonyNumbers.bindHere")}
             </Button>
           )}
           {isBoundElsewhere && (
             <span className="text-xs text-muted-foreground">
-              Already bound to #{number.inbound_workflow_id}
+              {t("telephonyNumbers.alreadyBound", { id: number.inbound_workflow_id ?? "" })}
             </span>
           )}
         </div>
@@ -262,17 +264,19 @@ export function AssignedNumbersBinder({
         >
           <SelectTrigger className="h-8 min-w-[220px]">
             <SelectValue
-              placeholder={loadingWorkflows ? "Loading workflows" : "Select workflow"}
+              placeholder={loadingWorkflows
+                ? t("telephonyNumbers.loadingWorkflows")
+                : t("telephonyNumbers.selectWorkflow")}
             />
           </SelectTrigger>
           <SelectContent>
             {loadingWorkflows ? (
               <SelectItem value="loading" disabled>
-                Loading workflows
+                {t("telephonyNumbers.loadingWorkflows")}
               </SelectItem>
             ) : workflowOptionsForNumber(number).length === 0 ? (
               <SelectItem value="none" disabled>
-                No active workflows
+                {t("telephonyNumbers.noActiveWorkflows")}
               </SelectItem>
             ) : (
               workflowOptionsForNumber(number).map((workflow) => (
@@ -311,13 +315,18 @@ export function AssignedNumbersBinder({
       <CardHeader>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <CardTitle>{title}</CardTitle>
-            <CardDescription className="mt-1">{description}</CardDescription>
+            <CardTitle>{title ?? t("telephonyNumbers.title")}</CardTitle>
+            <CardDescription className="mt-1">
+              {description ?? t("telephonyNumbers.description")}
+            </CardDescription>
             {workflowScoped && (
               <p className="mt-2 text-xs text-muted-foreground">
                 {boundToTargetCount > 0
-                  ? `${boundToTargetCount} number${boundToTargetCount === 1 ? "" : "s"} currently route inbound calls to ${targetWorkflowName ?? "this workflow"}.`
-                  : "No assigned number routes inbound calls to this workflow yet."}
+                  ? t("telephonyNumbers.routingCount", {
+                    count: boundToTargetCount,
+                    workflow: targetWorkflowName ?? t("telephonyNumbers.thisWorkflow"),
+                  })
+                  : t("telephonyNumbers.scopedEmpty")}
               </p>
             )}
           </div>
@@ -330,7 +339,7 @@ export function AssignedNumbersBinder({
             }}
             disabled={loading || loadingWorkflows}
           >
-            <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+            <RefreshCw className="h-4 w-4 mr-2" /> {t("telephonyNumbers.refresh")}
           </Button>
         </div>
       </CardHeader>
@@ -342,18 +351,20 @@ export function AssignedNumbersBinder({
           </div>
         ) : numbers.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No Recova-managed numbers are assigned to this organization yet.
+            {t("telephonyNumbers.empty")}
           </p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Number</TableHead>
-                <TableHead>Provider</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Inbound workflow</TableHead>
+                <TableHead>{t("telephonyNumbers.number")}</TableHead>
+                <TableHead>{t("telephonyNumbers.provider")}</TableHead>
+                <TableHead>{t("telephonyNumbers.status")}</TableHead>
+                <TableHead>{t("telephonyNumbers.inboundWorkflow")}</TableHead>
                 <TableHead className={workflowScoped ? "w-[280px]" : "w-[340px]"}>
-                  {workflowScoped ? "This workflow" : "Bind workflow"}
+                  {workflowScoped
+                    ? t("telephonyNumbers.thisWorkflow")
+                    : t("telephonyNumbers.bindWorkflow")}
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -362,9 +373,11 @@ export function AssignedNumbersBinder({
                 <TableRow key={number.inventory_id}>
                   <TableCell>
                     <div className="space-y-1">
-                      <div className="font-mono">{number.address_masked ?? "Masked"}</div>
+                      <div className="font-mono">
+                        {number.address_masked ?? t("telephonyNumbers.masked")}
+                      </div>
                       <div className="text-xs text-muted-foreground">
-                        {number.label ?? "No label"} · {number.address_type}
+                        {number.label ?? t("telephonyNumbers.noLabel")} · {number.address_type}
                       </div>
                     </div>
                   </TableCell>
@@ -374,9 +387,13 @@ export function AssignedNumbersBinder({
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
                       <Badge variant={number.is_active ? "secondary" : "outline"}>
-                        {number.is_active ? "Active" : "Inactive"}
+                        {number.is_active
+                          ? t("telephonyNumbers.active")
+                          : t("telephonyNumbers.inactive")}
                       </Badge>
-                      {number.is_default_caller_id && <Badge>Default caller</Badge>}
+                      {number.is_default_caller_id && (
+                        <Badge>{t("telephonyNumbers.defaultCaller")}</Badge>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell>{renderWorkflowCell(number)}</TableCell>

@@ -1,0 +1,336 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:recova:onnuri:jambonz-mini:candidate-manifest:v1",
+  "title": "Onnuri immutable Jambonz mini acquired-candidate manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate",
+    "runtime_contract",
+    "storage_contract",
+    "network_contract",
+    "management_exposure",
+    "artifact_acquisition_receipt",
+    "renewed_review",
+    "disqualifier_results"
+  ],
+  "properties": {
+    "schema_version": { "const": "onnuri-jambonz-candidate/v1" },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["release", "source_image", "derivative", "license", "provenance", "vulnerability_report", "supported_architectures", "component_topology"],
+      "properties": {
+        "release": { "const": "10.2.2" },
+        "source_image": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "project", "name", "immutable_image_id", "export_sha256"],
+          "properties": {
+            "provider": { "const": "gcp" },
+            "project": { "type": "string", "pattern": "^[a-z][a-z0-9-]{4,61}[a-z0-9]$" },
+            "name": { "type": "string", "pattern": "^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$" },
+            "immutable_image_id": { "const": "8849856699999487269" },
+            "export_sha256": { "const": "sha256:106c4544fdd0450d7f9c4383f0d8028c490ee949173bc0ce1c507c3339400c73" }
+          }
+        },
+        "derivative": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["final_disk_sha256", "rootfs_tree_sha256", "hardening_receipt_reference", "hardening_receipt_digest", "one_shot_receipt_reference", "one_shot_receipt_digest"],
+          "properties": {
+            "final_disk_sha256": { "$ref": "#/$defs/sha256" },
+            "rootfs_tree_sha256": { "$ref": "#/$defs/sha256" },
+            "hardening_receipt_reference": { "$ref": "#/$defs/evidence_reference" },
+            "hardening_receipt_digest": { "$ref": "#/$defs/sha256" },
+            "one_shot_receipt_reference": { "$ref": "#/$defs/evidence_reference" },
+            "one_shot_receipt_digest": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["spdx_id", "entitlement_reference", "entitlement_digest", "status"],
+          "properties": {
+            "spdx_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "entitlement_reference": { "$ref": "#/$defs/evidence_reference" },
+            "entitlement_digest": { "$ref": "#/$defs/sha256" },
+            "status": { "const": "approved" }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["publisher", "statement_reference", "statement_digest", "signature_status", "sbom_reference", "sbom_digest"],
+          "properties": {
+            "publisher": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "statement_reference": { "$ref": "#/$defs/evidence_reference" },
+            "statement_digest": { "$ref": "#/$defs/sha256" },
+            "signature_status": { "const": "verified" },
+            "sbom_reference": { "$ref": "#/$defs/evidence_reference" },
+            "sbom_digest": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "vulnerability_report": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reference", "digest", "tool", "database"],
+          "properties": {
+            "reference": { "$ref": "#/$defs/evidence_reference" },
+            "digest": { "$ref": "#/$defs/sha256" },
+            "tool": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "database": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "version", "updated_at"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "version": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "updated_at": { "type": "string", "format": "date-time" }
+              }
+            }
+          }
+        },
+        "supported_architectures": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["amd64", "arm64"] }
+        },
+        "component_topology": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["components", "connections"],
+          "properties": {
+            "components": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "role", "artifact_digest"],
+                "properties": {
+                  "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+                  "role": { "enum": ["sip_signaling", "media", "application", "database", "cache", "metrics"] },
+                  "artifact_digest": { "$ref": "#/$defs/sha256" }
+                }
+              }
+            },
+            "connections": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["from", "to", "purpose"],
+                "properties": {
+                  "from": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+                  "to": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+                  "purpose": { "enum": ["control", "signaling", "media", "state", "metrics"] }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "runtime_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hooks", "listen", "registration_secret_persistence"],
+      "properties": {
+        "hooks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["inbound_initial_application", "outbound_call"],
+          "properties": {
+            "inbound_initial_application": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["timing", "ordered_verbs", "failure_behavior", "synchronous_authority_response"],
+              "properties": {
+                "timing": { "const": "pre_answer" },
+                "ordered_verbs": { "type": "array", "prefixItems": [{"const": "answer"}, {"const": "listen"}], "items": false },
+                "failure_behavior": { "enum": ["no_answer_or_listen", "candidate_proven_reject_or_hangup"] },
+                "synchronous_authority_response": { "const": true }
+              }
+            },
+            "outbound_call": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["timing", "emits_listen_after_authority", "synchronous_authority_response"],
+              "properties": {
+                "timing": { "const": "post_answer" },
+                "emits_listen_after_authority": { "const": true },
+                "synchronous_authority_response": { "const": true }
+              }
+            }
+          }
+        },
+        "listen": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ws_auth", "sample_rate_hz", "encoding", "channels", "direction"],
+          "properties": {
+            "ws_auth": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["scheme", "username_source", "password_source"],
+              "properties": {
+                "scheme": { "const": "basic" },
+                "username_source": { "const": "fixed_non_secret" },
+                "password_source": { "const": "opaque_media_authority" }
+              }
+            },
+            "sample_rate_hz": { "const": 8000 },
+            "encoding": { "const": "L16" },
+            "channels": { "const": 1 },
+            "direction": { "const": "bidirectional" }
+          }
+        },
+        "registration_secret_persistence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["classification", "external_runtime_only", "encrypted_ephemeral_mysql", "destroy_with_process_and_disk"],
+          "properties": {
+            "classification": { "enum": ["S1", "S2"] },
+            "external_runtime_only": { "type": "boolean" },
+            "encrypted_ephemeral_mysql": { "type": "boolean" },
+            "destroy_with_process_and_disk": { "const": true }
+          }
+        }
+      }
+    },
+    "storage_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mysql", "influxdb", "redis", "logs", "cdr", "recordings"],
+      "properties": {
+        "mysql": { "$ref": "#/$defs/store" },
+        "influxdb": { "$ref": "#/$defs/store" },
+        "redis": { "$ref": "#/$defs/store" },
+        "logs": { "$ref": "#/$defs/store" },
+        "cdr": { "$ref": "#/$defs/store" },
+        "recordings": { "$ref": "#/$defs/store" }
+      }
+    },
+    "network_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local_rtp_pool"],
+      "properties": {
+        "local_rtp_pool": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["protocol", "port_start", "port_end", "bounded", "host_sdp_exact_narrowing"],
+          "properties": {
+            "protocol": { "const": "udp" },
+            "port_start": { "type": "integer", "minimum": 1024, "maximum": 65535 },
+            "port_end": { "type": "integer", "minimum": 1024, "maximum": 65535 },
+            "bounded": { "const": true },
+            "host_sdp_exact_narrowing": { "const": true }
+          }
+        }
+      }
+    },
+    "management_exposure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "public_admin", "portal_enabled"],
+      "properties": {
+        "mode": { "enum": ["disabled", "private_local_only"] },
+        "public_admin": { "const": false },
+        "portal_enabled": { "const": false }
+      }
+    },
+    "artifact_acquisition_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receipt_reference", "receipt_digest", "acquired_by", "acquired_at", "expires_at", "store_generation", "authorized_readers_reference", "signature_status", "acquisition_access_closed"],
+      "properties": {
+        "receipt_reference": { "$ref": "#/$defs/evidence_reference" },
+        "receipt_digest": { "$ref": "#/$defs/sha256" },
+        "acquired_by": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "acquired_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "store_generation": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "authorized_readers_reference": { "$ref": "#/$defs/evidence_reference" },
+        "signature_status": { "const": "verified" },
+        "acquisition_access_closed": { "const": true }
+      }
+    },
+    "renewed_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["architect", "critic", "qa"],
+      "properties": {
+        "architect": { "$ref": "#/$defs/reviewer" },
+        "critic": { "$ref": "#/$defs/reviewer" },
+        "qa": { "$ref": "#/$defs/reviewer" }
+      }
+    },
+    "disqualifier_results": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["license_provenance", "registration_secret_persistence", "raw_logging", "cdr_storage", "recording", "backup_replication_export", "public_management", "rtp_bounds", "hook_semantics", "ws_auth", "media_codec", "timer_behavior"],
+      "properties": {
+        "license_provenance": { "$ref": "#/$defs/disqualifier" },
+        "registration_secret_persistence": { "$ref": "#/$defs/disqualifier" },
+        "raw_logging": { "$ref": "#/$defs/disqualifier" },
+        "cdr_storage": { "$ref": "#/$defs/disqualifier" },
+        "recording": { "$ref": "#/$defs/disqualifier" },
+        "backup_replication_export": { "$ref": "#/$defs/disqualifier" },
+        "public_management": { "$ref": "#/$defs/disqualifier" },
+        "rtp_bounds": { "$ref": "#/$defs/disqualifier" },
+        "hook_semantics": { "$ref": "#/$defs/disqualifier" },
+        "ws_auth": { "$ref": "#/$defs/disqualifier" },
+        "media_codec": { "$ref": "#/$defs/disqualifier" },
+        "timer_behavior": { "$ref": "#/$defs/disqualifier" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "evidence_reference": { "type": "string", "pattern": "^evidence:[A-Za-z0-9._/-]{1,240}$" },
+    "store": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "persistence", "contains_registration_secret", "encrypted_at_rest", "raw_data_enabled", "backup_enabled", "replication_enabled", "export_enabled", "deletion_behavior"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "persistence": { "enum": ["disabled", "ephemeral"] },
+        "contains_registration_secret": { "type": "boolean" },
+        "encrypted_at_rest": { "type": "boolean" },
+        "raw_data_enabled": { "const": false },
+        "backup_enabled": { "const": false },
+        "replication_enabled": { "const": false },
+        "export_enabled": { "const": false },
+        "deletion_behavior": { "enum": ["not_applicable", "process_and_disk_destroy"] }
+      }
+    },
+    "disqualifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["result", "evidence_reference", "evidence_digest"],
+      "properties": {
+        "result": { "const": "pass" },
+        "evidence_reference": { "$ref": "#/$defs/evidence_reference" },
+        "evidence_digest": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "reviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "independent", "decision", "review_reference", "review_digest", "reviewed_at"],
+      "properties": {
+        "identity": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "independent": { "const": true },
+        "decision": { "const": "approved" },
+        "review_reference": { "$ref": "#/$defs/evidence_reference" },
+        "review_digest": { "$ref": "#/$defs/sha256" },
+        "reviewed_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

@@ -55,6 +55,7 @@ from api.services.telephony.jambonz_policy import (
     is_assigned_recova_jambonz_070,
     resolve_jambonz_outbound_caller,
 )
+from api.services.telephony.registry import is_dispatch_purpose_allowed
 from api.services.telephony.ops_alerts import (
     TelephonyOpsAlert,
     TelephonyOpsAlertSeverity,
@@ -166,6 +167,11 @@ async def initiate_call(
         raise HTTPException(
             status_code=400,
             detail="telephony_provider_not_supported_for_direct_calls",
+        )
+    if not is_dispatch_purpose_allowed(provider.PROVIDER_NAME, "direct"):
+        raise HTTPException(
+            status_code=403,
+            detail="telephony_provider_dispatch_not_permitted",
         )
 
     phone_number = request.phone_number or user_configuration.test_phone_number
@@ -1086,6 +1092,28 @@ async def handle_inbound_run(request: Request):
                 TelephonyError.SIGNATURE_VALIDATION_FAILED
             )
 
+        if not phone_row.inbound_workflow_id:
+            from api.services.phone_preview.service import phone_preview_service
+
+            if phone_preview_service.is_exact_classified_inbound(
+                provider_name=provider_class.PROVIDER_NAME,
+                normalized_data=normalized_data,
+                organization_id=config.organization_id,
+                telephony_configuration_id=config.id,
+                from_phone_number_id=phone_row.id,
+            ):
+                preview_response = await phone_preview_service.handle_inbound_preview(
+                    provider_instance=provider_instance,
+                    normalized_data=normalized_data,
+                    organization_id=config.organization_id,
+                    telephony_configuration_id=config.id,
+                    from_phone_number_id=phone_row.id,
+                )
+                if preview_response is not None:
+                    return preview_response
+                return provider_class.generate_validation_error_response(
+                    TelephonyError.WORKFLOW_NOT_FOUND
+                )
         if provider_class.PROVIDER_NAME == "jambonz":
             if not await is_assigned_recova_jambonz_070(phone_row):
                 logger.warning(
@@ -1127,6 +1155,18 @@ async def handle_inbound_run(request: Request):
                         dedupe_components=("jambonz-policy", "unassigned"),
                         **route_markers.as_alert_kwargs(),
                     )
+                )
+                return provider_class.generate_validation_error_response(
+                    TelephonyError.PHONE_NUMBER_NOT_CONFIGURED
+                )
+            if (
+                phone_row.inbound_workflow_id
+                and not is_dispatch_purpose_allowed(
+                    provider_class.PROVIDER_NAME, "bound_inbound"
+                )
+            ):
+                logger.warning(
+                    "/inbound/run: provider does not permit bound inbound dispatch"
                 )
                 return provider_class.generate_validation_error_response(
                     TelephonyError.PHONE_NUMBER_NOT_CONFIGURED
@@ -1178,7 +1218,7 @@ async def handle_inbound_run(request: Request):
         if not phone_row.inbound_workflow_id:
             from api.services.phone_preview.service import phone_preview_service
 
-            preview_response = await phone_preview_service.answer_inbound_preview(
+            preview_response = await phone_preview_service.handle_inbound_preview(
                 provider_instance=provider_instance,
                 normalized_data=normalized_data,
                 organization_id=config.organization_id,

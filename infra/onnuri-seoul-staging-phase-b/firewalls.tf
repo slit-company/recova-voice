@@ -9,6 +9,10 @@ resource "google_compute_firewall" "deny_all_ingress" {
   deny {
     protocol = "all"
   }
+
+  log_config {
+    metadata = "INCLUDE_ALL_METADATA"
+  }
 }
 
 resource "google_compute_firewall" "deny_all_egress" {
@@ -21,5 +25,9 @@ resource "google_compute_firewall" "deny_all_egress" {
 
   deny {
     protocol = "all"
+  }
+
+  log_config {
+    metadata = "INCLUDE_ALL_METADATA"
   }
 }

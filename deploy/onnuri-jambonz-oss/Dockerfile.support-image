@@ -1,0 +1,17 @@
+ARG BASE_IMAGE
+FROM --platform=linux/amd64 ${BASE_IMAGE}
+
+ARG BASE_IMAGE
+ARG SOURCE_REPOSITORY
+ARG SOURCE_REVISION
+ARG LICENSE_SPDX
+
+RUN test -n "$BASE_IMAGE" \
+    && test -n "$SOURCE_REPOSITORY" \
+    && test -n "$SOURCE_REVISION" \
+    && test -n "$LICENSE_SPDX"
+
+LABEL org.opencontainers.image.source="$SOURCE_REPOSITORY" \
+      org.opencontainers.image.revision="$SOURCE_REVISION" \
+      org.opencontainers.image.licenses="$LICENSE_SPDX" \
+      org.recova.base.digest="$BASE_IMAGE"

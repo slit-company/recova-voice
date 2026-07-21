@@ -1,8 +1,13 @@
 import json
-from types import SimpleNamespace
+import sys
+from datetime import datetime, timedelta, timezone
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
+
+from api.services.telephony.providers.jambonz.serializers import JambonzFrameSerializer
 
 import api.services.telephony.providers.jambonz.provider as jambonz_provider_module
 from api.services.telephony.providers.jambonz.contract import (
@@ -123,6 +128,7 @@ async def test_initiate_call_posts_outbound_contract_payload(monkeypatch):
         workflow_run_id=501,
         workflow_id=33,
         user_id=99,
+        is_contract_fixture=True,
     )
 
     assert result.call_id == "jb-out-123"
@@ -138,6 +144,149 @@ async def test_initiate_call_posts_outbound_contract_payload(monkeypatch):
     assert request.status_callback_url.endswith("/api/v1/telephony/jambonz/status/501")
     assert request.outbound_profile_id == "profile-070"
     assert captured["headers"]["Authorization"] == "Bearer secret-key"
+
+
+def _provider(*, base_url="https://jambonz.invalid"):
+    return JambonzProvider(
+        {
+            "base_url": base_url,
+            "account_id": "acct-kr",
+            "application_id": "app-voice",
+            "api_key": "secret-key",
+            "webhook_secret": "webhook-secret",
+            "outbound_profile_id": "profile-070",
+            "from_numbers": ["+827012345678"],
+        }
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "omitted",
+    ["organization_id", "attempt_id", "idempotency_key", "authority_deadline", "dispatch_capability"],
+)
+async def test_partial_live_authority_rejects_before_network(monkeypatch, omitted):
+    network = AsyncMock(side_effect=AssertionError("network must not be reached"))
+    monkeypatch.setattr(jambonz_provider_module.aiohttp, "ClientSession", network)
+    monkeypatch.setattr(
+        jambonz_provider_module,
+        "get_backend_endpoints",
+        AsyncMock(return_value=("https://api.recova.invalid", "wss://api.recova.invalid")),
+    )
+    authority = {
+        "classified_smoke": True,
+        "organization_id": 7,
+        "run_id": "run-1",
+        "attempt_id": "attempt-1",
+        "idempotency_key": "idem-0000000000000001",
+        "authority_deadline": datetime.now(timezone.utc) + timedelta(seconds=60),
+        "dispatch_capability": {"intentionally": "invalid"},
+    }
+    authority.pop(omitted)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _provider().initiate_call(
+            to_number="+821012345678",
+            from_number="+827012345678",
+            webhook_url="https://api.recova.invalid/answer",
+            workflow_run_id=501,
+            **authority,
+        )
+
+    assert exc_info.value.status_code == 400
+    network.assert_not_awaited()
+    assert "secret-key" not in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_legacy_path_requires_explicit_contract_fixture_even_on_test_hostname(
+    monkeypatch,
+):
+    network = AsyncMock(side_effect=AssertionError("network must not be reached"))
+    monkeypatch.setattr(jambonz_provider_module.aiohttp, "ClientSession", network)
+    monkeypatch.setattr(
+        jambonz_provider_module,
+        "get_backend_endpoints",
+        AsyncMock(return_value=("https://api.recova.test", "wss://api.recova.test")),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _provider(base_url="https://jambonz.recova.test").initiate_call(
+            to_number="+821012345678",
+            from_number="+827012345678",
+            webhook_url="https://api.recova.test/answer",
+            workflow_run_id=501,
+        )
+
+    assert exc_info.value.status_code == 403
+    network.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_media_authority_failure_precedes_pipeline_or_audio(monkeypatch):
+    pipeline = AsyncMock()
+    pipeline_module = ModuleType("api.services.pipecat.run_pipeline")
+    pipeline_module.run_pipeline_telephony = pipeline
+    monkeypatch.setitem(
+        sys.modules,
+        "api.services.pipecat.run_pipeline",
+        pipeline_module,
+    )
+
+    class FakeWebSocket:
+        headers = {}
+
+        def __init__(self):
+            self.closed = None
+
+        async def receive_text(self):
+            return json.dumps(
+                {
+                    "event": "start",
+                    "stream_id": "stream-1",
+                    "call_id": "call-1",
+                    "account_id": "acct-kr",
+                    "application_id": "app-voice",
+                    "sample_rate": 8000,
+                    "codec": "L16",
+                }
+            )
+
+        async def close(self, *, code, reason):
+            self.closed = (code, reason)
+
+    websocket = FakeWebSocket()
+    await _provider().handle_websocket(
+        websocket, workflow_id=33, user_id=99, workflow_run_id=501
+    )
+
+    assert websocket.closed == (4403, "Jambonz media authority required")
+    pipeline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deadline_disconnect_is_once_and_contains_no_media_token():
+    serializer = JambonzFrameSerializer(
+        stream_id="stream-1",
+        call_id="call-1",
+        params=JambonzFrameSerializer.InputParams(
+            strict_authority=True,
+            remaining_seconds=0,
+        ),
+    )
+
+    disconnect = await serializer.serialize(SimpleNamespace())
+    repeated = await serializer.serialize(SimpleNamespace())
+
+    payload = json.loads(disconnect)
+    assert payload == {
+        "type": "disconnect",
+        "stream_id": "stream-1",
+        "call_id": "call-1",
+        "reason": "authority_deadline",
+    }
+    assert repeated is None
+    assert "token" not in disconnect.lower()
 
 
 
@@ -193,7 +342,7 @@ async def test_get_call_status_uses_contract_owned_endpoint(monkeypatch):
 
     assert captured["endpoint"] == (
         "https://jambonz.recova.test/v1/jambonz-contract/accounts/"
-        "acct-kr/calls/jb-out-123/status"
+        "acct-kr/calls/jb-out-123"
     )
     assert captured["headers"]["Authorization"] == "Bearer secret-key"
     assert status["contract_version"] == JAMBONZ_CONTRACT_VERSION

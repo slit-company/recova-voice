@@ -1,0 +1,83 @@
+{
+  "control_spec_version": "onnuri-seoul-staging-phase-a-control-spec-v1",
+  "phase": "A",
+  "status": "Waiting",
+  "controls": {
+    "sip_ingress": {
+      "disabled": true,
+      "phase": "A",
+      "deployment": "forbidden",
+      "evidence_status": "waiting",
+      "fixture": {
+        "source_cidr": "61.78.32.184/32",
+        "fixture_only": true,
+        "not_supplier_authoritative": true,
+        "not_deployable": true
+      }
+    },
+    "sip_egress": {
+      "disabled": true,
+      "phase": "A",
+      "deployment": "forbidden",
+      "evidence_status": "waiting",
+      "provenance": {
+        "outbound_proxy": "61.78.32.184:5060/UDP",
+        "fixture_only": true,
+        "not_supplier_authoritative": true,
+        "not_deployable": true
+      }
+    },
+    "rtp_ingress": {
+      "disabled": true,
+      "phase": "A",
+      "deployment": "forbidden",
+      "evidence_status": "waiting",
+      "peer": null,
+      "ports": null,
+      "status": "unpopulated"
+    },
+    "rtp_egress": {
+      "disabled": true,
+      "phase": "A",
+      "deployment": "forbidden",
+      "evidence_status": "waiting",
+      "peer": null,
+      "ports": null,
+      "status": "unpopulated"
+    }
+  },
+  "actions": {
+    "contain_sip_ingress": {
+      "control_id": "sip_ingress",
+      "kind": "future_disable_or_delete",
+      "execution": "not_implemented",
+      "automatic_retry": false,
+      "re_enable": false,
+      "evidence_status": "waiting"
+    },
+    "contain_sip_egress": {
+      "control_id": "sip_egress",
+      "kind": "future_disable_or_delete",
+      "execution": "not_implemented",
+      "automatic_retry": false,
+      "re_enable": false,
+      "evidence_status": "waiting"
+    },
+    "contain_rtp_ingress": {
+      "control_id": "rtp_ingress",
+      "kind": "future_disable_or_delete",
+      "execution": "not_implemented",
+      "automatic_retry": false,
+      "re_enable": false,
+      "evidence_status": "waiting"
+    },
+    "contain_rtp_egress": {
+      "control_id": "rtp_egress",
+      "kind": "future_disable_or_delete",
+      "execution": "not_implemented",
+      "automatic_retry": false,
+      "re_enable": false,
+      "evidence_status": "waiting"
+    }
+  }
+}

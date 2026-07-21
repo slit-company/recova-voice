@@ -1,13 +1,7 @@
-"""Telephony package.
+"""Shared telephony services.
 
-Importing this package eagerly loads every provider in
-``api/services/telephony/providers/`` so each one self-registers with the
-registry before any consumer (factory, routes, schemas) runs. Python
-guarantees this ``__init__.py`` runs before any submodule of the package,
-so submodules like ``factory`` and ``registry`` can stay free of provider
-imports — no lazy flags, no cycle.
+Provider registration is initialized lazily by
+``api.services.telephony.registry``. Keeping package import free of provider
+side effects allows low-level telephony policy modules to be imported safely
+from database and campaign code.
 """
-
-from . import (
-    providers as _providers,  # noqa: F401  -- import for side effects (registration)
-)

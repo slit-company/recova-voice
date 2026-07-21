@@ -9,12 +9,13 @@ from api.services.telephony.registry import (
     register,
 )
 
-from .config import JambonzConfigurationRequest, JambonzConfigurationResponse
-from .provider import JambonzProvider
-from .transport import create_transport
 
 
 def _config_loader(value: Dict[str, Any]) -> Dict[str, Any]:
+    # Lazy import keeps provider registration independent of the facade/F12 graph.
+    from api.services.onnuri_smoke_capabilities import get_smoke_authority_runtime
+
+    runtime = get_smoke_authority_runtime()
     return {
         "provider": "jambonz",
         "base_url": value.get("base_url"),
@@ -24,6 +25,8 @@ def _config_loader(value: Dict[str, Any]) -> Dict[str, Any]:
         "webhook_secret": value.get("webhook_secret"),
         "outbound_profile_id": value.get("outbound_profile_id"),
         "from_numbers": value.get("from_numbers", []),
+        "smoke_capability_issuer": runtime.issuer,
+        "media_capability_verifier": runtime.issuer,
     }
 
 
@@ -77,27 +80,37 @@ _UI_METADATA = ProviderUIMetadata(
 )
 
 
-SPEC = ProviderSpec(
-    name="jambonz",
-    provider_cls=JambonzProvider,
-    config_loader=_config_loader,
-    transport_factory=create_transport,
-    transport_sample_rate=8000,
-    config_request_cls=JambonzConfigurationRequest,
-    config_response_cls=JambonzConfigurationResponse,
-    ui_metadata=_UI_METADATA,
-    account_id_credential_field="account_id",
-    visible_in_self_serve=False,
-)
+SPEC: ProviderSpec | None = None
 
 
-register(SPEC)
+def register_provider() -> None:
+    """Register Jambonz without importing its runtime during package discovery."""
+
+    global SPEC
+    if SPEC is not None:
+        register(SPEC)
+        return
+
+    from .config import JambonzConfigurationRequest, JambonzConfigurationResponse
+    from .provider import JambonzProvider
+    from .transport import create_transport
+
+    SPEC = ProviderSpec(
+        name="jambonz",
+        provider_cls=JambonzProvider,
+        config_loader=_config_loader,
+        transport_factory=create_transport,
+        transport_sample_rate=8000,
+        config_request_cls=JambonzConfigurationRequest,
+        config_response_cls=JambonzConfigurationResponse,
+        ui_metadata=_UI_METADATA,
+        account_id_credential_field="account_id",
+        visible_in_self_serve=False,
+        supports_public_calls=False,
+        supports_preview_smoke=True,
+        allowed_dispatch_purposes=frozenset({"phone_preview_smoke"}),
+    )
+    register(SPEC)
 
 
-__all__ = [
-    "SPEC",
-    "JambonzConfigurationRequest",
-    "JambonzConfigurationResponse",
-    "JambonzProvider",
-    "create_transport",
-]
+__all__ = ["SPEC", "register_provider"]

@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 
 RULE_MANIFEST = "MANIFEST"
@@ -57,6 +58,14 @@ def audit(repo_root, policy_path, expected_path, expected_sha):
             findings.append((RULE_HASH, path))
     active_tf = [p for p in required if p.endswith(".tf") and "/tests/" not in p]
     forbidden = tuple(policy.get("forbidden_active_tokens", []))
+    allowed_outputs = policy.get("allowed_active_outputs")
+    if (
+        not isinstance(allowed_outputs, list)
+        or not all(isinstance(name, str) and name for name in allowed_outputs)
+        or len(allowed_outputs) != len(set(allowed_outputs))
+    ):
+        findings.append((RULE_MANIFEST, "allowed-active-outputs"))
+    allowed_outputs = sorted(allowed_outputs) if isinstance(allowed_outputs, list) else []
     for path in active_tf:
         candidate = repo_root / path
         if not candidate.is_file():
@@ -66,6 +75,11 @@ def audit(repo_root, policy_path, expected_path, expected_sha):
         if any(token.lower() in lowered for token in forbidden):
             findings.append((RULE_TERRAFORM, path))
         if any(token in lowered for token in ("gcloud", "http://", "https://", "terraform apply", "terraform plan")):
+            findings.append((RULE_TERRAFORM, path))
+        output_names = re.findall(r'(?m)^\s*output\s+"([^"]+)"\s*\{', text)
+        if output_names and not path.endswith("/outputs.tf"):
+            findings.append((RULE_TERRAFORM, path))
+        if path.endswith("/outputs.tf") and sorted(output_names) != allowed_outputs:
             findings.append((RULE_TERRAFORM, path))
     for path in ("infra/onnuri-seoul-staging-phase-b/README.md", "context/006-onnuri-seoul-staging-phase-b-foundation-decision.md"):
         candidate = repo_root / path

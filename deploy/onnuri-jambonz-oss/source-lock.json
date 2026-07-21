@@ -1,0 +1,122 @@
+{
+  "schema_version": "recova-jambonz-oss-source-lock/v1",
+  "sources": [
+    {
+      "name": "jambonz-feature-server",
+      "directory": "jambonz-feature-server",
+      "repository": "https://github.com/jambonz/jambonz-feature-server",
+      "commit": "9973670a6cc009caca6cd30b179477cbe4679980",
+      "license_spdx": "MIT",
+      "license_paths": ["LICENSE"],
+      "patch": "patches/node/jambonz-feature-server.patch"
+    },
+    {
+      "name": "jambonz-api-server",
+      "directory": "jambonz-api-server",
+      "repository": "https://github.com/jambonz/jambonz-api-server",
+      "commit": "4f16aa7cabc21d9d56a735bbdf1776b0d9d96bc7",
+      "license_spdx": "MIT",
+      "license_paths": ["LICENSE"],
+      "patch": "patches/node/jambonz-api-server.patch"
+    },
+    {
+      "name": "sbc-inbound",
+      "directory": "sbc-inbound",
+      "repository": "https://github.com/jambonz/sbc-inbound",
+      "commit": "e353b751c038c886cb86501b7a3cdcc50fe07459",
+      "license_spdx": "MIT",
+      "license_paths": ["LICENSE"],
+      "patch": "patches/node/sbc-inbound.patch"
+    },
+    {
+      "name": "sbc-outbound",
+      "directory": "sbc-outbound",
+      "repository": "https://github.com/jambonz/sbc-outbound",
+      "commit": "ffec713d62dd4da8843010c8ca764b32cb75363c",
+      "license_spdx": "MIT",
+      "license_paths": ["LICENSE"],
+      "patch": "patches/node/sbc-outbound.patch"
+    },
+    {
+      "name": "sbc-call-router",
+      "directory": "sbc-call-router",
+      "repository": "https://github.com/jambonz/sbc-call-router",
+      "commit": "7cbea44ed3760bb6687ece5fb37cf72fb0470101",
+      "license_spdx": "MIT",
+      "license_paths": ["LICENSE"],
+      "patch": "patches/node/sbc-call-router.patch"
+    },
+    {
+      "name": "sbc-sip-sidecar",
+      "directory": "sbc-sip-sidecar",
+      "repository": "https://github.com/jambonz/sbc-sip-sidecar",
+      "commit": "3122de4316fa9726b877030031f739a2004201d5",
+      "license_spdx": "MIT",
+      "license_paths": ["LICENSE"],
+      "patch": "patches/node/sbc-sip-sidecar.patch"
+    },
+    {
+      "name": "sbc-rtpengine-sidecar",
+      "directory": "sbc-rtpengine-sidecar",
+      "repository": "https://github.com/jambonz/sbc-rtpengine-sidecar",
+      "commit": "ef305599cc33c67df05a98336bc534be1f4f6f95",
+      "license_spdx": "MIT",
+      "license_paths": ["LICENSE"],
+      "patch": "patches/node/sbc-rtpengine-sidecar.patch"
+    },
+    {
+      "name": "drachtio-server",
+      "directory": "drachtio-server",
+      "repository": "https://github.com/drachtio/drachtio-server",
+      "commit": "4bf0f5796b6a09e2789594a2d8f257ffd61f1d02",
+      "license_spdx": "MIT",
+      "license_paths": ["LICENSE"],
+      "patch": "patches/media/drachtio-server.patch"
+    },
+    {
+      "name": "freeswitch",
+      "directory": "freeswitch-legacy",
+      "repository": "https://github.com/jambonz/freeswitch-legacy",
+      "commit": "9b0bbeaac93ed38ade6c4b3b23baba9b0b51ab00",
+      "license_spdx": "MPL-1.1",
+      "license_paths": ["LICENSE"],
+      "patch": "patches/media/freeswitch.patch"
+    },
+    {
+      "name": "jambonz-freeswitch-modules",
+      "directory": "jambonz-freeswitch-modules",
+      "repository": "https://github.com/cyrenity/jambonz-freeswitch-modules",
+      "commit": "30f21899869fe445776078ddbc3e70dcb0ae6309",
+      "license_spdx": "MIT OR AGPL-3.0",
+      "license_paths": ["COPYING.md", "LICENSE_MIT", "LICENSE_AGPL-3.0"],
+      "patch": "patches/media/jambonz-freeswitch-modules.patch"
+    },
+    {
+      "name": "spandsp",
+      "directory": "spandsp",
+      "repository": "https://github.com/freeswitch/spandsp",
+      "commit": "e29ef78944d905b935d1306fa622e2eb2dc8ad75",
+      "license_spdx": "LGPL-2.1-only AND GPL-2.0-only",
+      "license_paths": ["COPYING"],
+      "patch": "patches/media/spandsp.patch"
+    },
+    {
+      "name": "sofia-sip",
+      "directory": "sofia-sip",
+      "repository": "https://github.com/freeswitch/sofia-sip",
+      "commit": "6198851a610b7889c17e2d98fb84617bc1dd7aec",
+      "license_spdx": "LGPL-2.1-only",
+      "license_paths": ["COPYING"],
+      "patch": "patches/media/sofia-sip.patch"
+    },
+    {
+      "name": "rtpengine",
+      "directory": "rtpengine",
+      "repository": "https://github.com/jambonz/rtpengine",
+      "commit": "46295e8781cd791778f3734c7e072de004711718",
+      "license_spdx": "GPL-3.0",
+      "license_paths": ["LICENSE"],
+      "patch": "patches/media/rtpengine.patch"
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+FROM --platform=linux/amd64 debian:12-slim@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e AS build
+
+ARG RTPENGINE_COMMIT=46295e8781cd791778f3734c7e072de004711718
+ARG SOURCE_PATCH_SHA256
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential ca-certificates git libavcodec-dev libavfilter-dev \
+        libavformat-dev libavutil-dev libcurl4-openssl-dev libevent-dev \
+        libglib2.0-dev libhiredis-dev libjson-glib-dev libjwt-dev \
+        libmariadb-dev libmariadb-dev-compat libncurses-dev libopus-dev libpcap0.8-dev \
+        libpcre2-dev libspandsp-dev libssl-dev libswresample-dev \
+        libwebsockets-dev libxtables-dev pax-utils pkg-config zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gperf \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . ./
+
+RUN test "$(git rev-parse HEAD)" = "$RTPENGINE_COMMIT" \
+    && make -C daemon -j"$(nproc)" rtpengine with_transcoding=yes without_nftables=yes \
+        RTPENGINE_VERSION="git-$RTPENGINE_COMMIT" \
+    && install -D -m 0755 daemon/rtpengine /runtime/usr/bin/rtpengine \
+    && install -D -m 0644 LICENSE /runtime/usr/share/licenses/rtpengine/LICENSE \
+    && install -D -m 0644 /etc/ssl/certs/ca-certificates.crt \
+        /runtime/etc/ssl/certs/ca-certificates.crt \
+    && lddtree -l daemon/rtpengine | while read -r library; do \
+        if test "$library" != daemon/rtpengine; then \
+            mkdir -p "/runtime$(dirname "$library")"; \
+            cp -L "$library" "/runtime$library"; \
+        fi; \
+    done
+RUN test "${#SOURCE_PATCH_SHA256}" -eq 64
+
+FROM --platform=linux/amd64 debian:12-slim@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e
+ARG SOURCE_PATCH_SHA256
+
+LABEL org.opencontainers.image.source="https://github.com/jambonz/rtpengine" \
+      org.opencontainers.image.revision="46295e8781cd791778f3734c7e072de004711718" \
+      org.opencontainers.image.licenses="GPL-3.0" \
+      org.recova.patch.sha256="sha256:$SOURCE_PATCH_SHA256" \
+      org.recova.base.digest="debian:12-slim@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e"
+
+COPY --from=build /runtime/usr/bin/rtpengine /usr/bin/rtpengine
+COPY --from=build /runtime/lib/x86_64-linux-gnu/ /usr/lib/x86_64-linux-gnu/
+COPY --from=build /runtime/lib64/ /usr/lib64/
+COPY --from=build /runtime/etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /runtime/usr/share/licenses/rtpengine/ /usr/share/licenses/rtpengine/
+
+USER 65532:65532
+EXPOSE 22222/udp 8080/tcp 40000-40099/udp
+ENTRYPOINT ["/usr/bin/rtpengine"]
+CMD ["--foreground", "--table=-1", "--interface=public/eth0", "--listen-ng=0.0.0.0:22222", "--listen-http=0.0.0.0:8080", "--port-min=40000", "--port-max=40099", "--delete-delay=0", "--log-level=0"]

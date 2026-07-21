@@ -74,6 +74,10 @@ class _InboundPreviewProviderClass:
         )
 
 
+class _BoundJambonzProviderClass(_InboundPreviewProviderClass):
+    PROVIDER_NAME = "jambonz"
+
+
 def test_initiate_call_executes_as_workflow_owner_for_shared_org_workflow():
     app = _make_test_app()
     client = TestClient(app)
@@ -158,7 +162,7 @@ def test_initiate_call_executes_as_workflow_owner_for_shared_org_workflow():
     assert initiate_kwargs["user_id"] == workflow.user_id
     assert "user_id=99" in initiate_kwargs["webhook_url"]
 
-def test_initiate_call_jambonz_uses_assigned_recova_070_default_caller():
+def test_initiate_call_rejects_jambonz_while_provider_is_waiting():
     app = _make_test_app()
     client = TestClient(app)
 
@@ -222,18 +226,12 @@ def test_initiate_call_jambonz_uses_assigned_recova_070_default_caller():
             json={"workflow_id": workflow.id, "phone_number": "+821012345678"},
         )
 
-    assert response.status_code == 200
-    resolve_caller.assert_awaited_once_with(
-        telephony_configuration_id=55,
-        from_phone_number_id=None,
-    )
-    initiate_kwargs = provider.initiate_call.await_args.kwargs
-    assert initiate_kwargs["from_number"] == "+827012345678"
-    assert "/telephony/jambonz/answer" in initiate_kwargs["webhook_url"]
-
-    update_context = mock_db.update_workflow_run.await_args.kwargs["initial_context"]
-    assert update_context["caller_number"] == "+15550001111"
-    assert update_context["from_phone_number_id"] == 902
+    assert response.status_code == 403
+    assert response.json()["detail"] == "telephony_provider_dispatch_not_permitted"
+    resolve_caller.assert_not_awaited()
+    mock_db.get_workflow.assert_not_awaited()
+    mock_db.create_workflow_run.assert_not_awaited()
+    provider.initiate_call.assert_not_awaited()
 
 def test_initiate_call_rejects_existing_run_for_different_workflow():
     app = _make_test_app()
@@ -347,7 +345,7 @@ def test_inbound_run_routes_unassigned_recova_number_to_preview_reservation():
             new=AsyncMock(return_value=provider_instance),
         ) as get_provider,
         patch(
-            "api.services.phone_preview.service.phone_preview_service.answer_inbound_preview",
+            "api.services.phone_preview.service.phone_preview_service.handle_inbound_preview",
             new=AsyncMock(return_value=preview_response),
         ) as answer_preview,
     ):
@@ -382,4 +380,56 @@ def test_inbound_run_routes_unassigned_recova_number_to_preview_reservation():
     assert preview_kwargs["organization_id"] == 900
     assert preview_kwargs["telephony_configuration_id"] == 901
     assert preview_kwargs["from_phone_number_id"] == 902
+    mock_db.get_workflow.assert_not_awaited()
+
+
+def test_inbound_run_denies_bound_jambonz_before_workflow_lookup():
+    app = _make_test_app()
+    client = TestClient(app)
+    provider_instance = SimpleNamespace(
+        PROVIDER_NAME="jambonz",
+        verify_inbound_signature=AsyncMock(return_value=True),
+    )
+
+    with (
+        patch(
+            "api.routes.telephony.get_all_telephony_providers",
+            new=AsyncMock(return_value=[_BoundJambonzProviderClass]),
+        ),
+        patch("api.routes.telephony.db_client") as mock_db,
+        patch(
+            "api.routes.telephony.get_telephony_provider_by_id",
+            new=AsyncMock(return_value=provider_instance),
+        ),
+        patch(
+            "api.routes.telephony.is_assigned_recova_jambonz_070",
+            new=AsyncMock(return_value=True),
+        ),
+        patch(
+            "api.routes.telephony.is_dispatch_purpose_allowed",
+            return_value=False,
+        ),
+    ):
+        config = SimpleNamespace(id=901, organization_id=900)
+        phone_row = SimpleNamespace(id=902, inbound_workflow_id=33)
+        mock_db.find_inbound_route_by_account = AsyncMock(
+            return_value=(config, phone_row)
+        )
+        mock_db.get_workflow = AsyncMock()
+
+        response = client.post(
+            "/telephony/inbound/run",
+            data={
+                "CallId": "JB123",
+                "AccountId": "AC123",
+                "From": "01012345678",
+                "To": "07000000000",
+                "CallStatus": "in-progress",
+                "Direction": "inbound",
+            },
+            headers={"X-Signature": "valid"},
+        )
+
+    assert response.status_code == 200
+    assert "PHONE_NUMBER_NOT_CONFIGURED" in response.text
     mock_db.get_workflow.assert_not_awaited()

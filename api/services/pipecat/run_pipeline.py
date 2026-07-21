@@ -1,5 +1,7 @@
 import asyncio
 from datetime import UTC, datetime
+import math
+import time
 from typing import Optional
 
 from fastapi import HTTPException
@@ -104,6 +106,36 @@ from pipecat.utils.run_context import set_current_org_id, set_current_run_id
 
 # Setup tracing if enabled
 ensure_tracing()
+
+
+def _resolve_classified_runtime_budget(
+    context: dict | None,
+) -> tuple[int, float] | None:
+    context = context or {}
+    if not context.get("classified_smoke"):
+        return None
+    if context.get("authority_signature_verified") is not True:
+        raise ValueError("classified_authority_signature_unverified")
+    budget = context.get("remaining_seconds")
+    deadline_value = context.get("authority_deadline")
+    if isinstance(budget, bool) or not isinstance(budget, int) or not 1 <= budget <= 60:
+        raise ValueError("classified_authority_budget_invalid")
+    if not isinstance(deadline_value, str):
+        raise ValueError("classified_authority_deadline_missing")
+    if context.get("authority_budget_seconds") not in (None, budget):
+        raise ValueError("classified_authority_budget_mismatch")
+    try:
+        deadline = datetime.fromisoformat(deadline_value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("classified_authority_deadline_invalid") from exc
+    if deadline.tzinfo is None:
+        raise ValueError("classified_authority_deadline_invalid")
+    remaining = math.floor(
+        (deadline.astimezone(UTC) - datetime.now(UTC)).total_seconds()
+    )
+    if remaining <= 0:
+        raise ValueError("classified_authority_deadline_expired")
+    return min(budget, remaining), time.monotonic()
 
 
 def _create_realtime_user_turn_config(
@@ -504,6 +536,27 @@ async def _run_pipeline(
                     term.strip() for term in dictionary.split(",") if term.strip()
                 ]
 
+    classified_runtime_budget = None
+    try:
+        classified_runtime_budget = _resolve_classified_runtime_budget(
+            merged_call_context_vars
+        )
+    except ValueError as exc:
+        attempt_uuid = (merged_call_context_vars or {}).get("smoke_attempt_uuid")
+        organization_id = getattr(workflow, "organization_id", None)
+        if attempt_uuid and organization_id:
+            from api.services import onnuri_staging_preflight
+
+            await onnuri_staging_preflight.set_smoke_terminal(
+                attempt_uuid,
+                organization_id=organization_id,
+                terminal_class="authority_uncertain",
+                terminal_reason=str(exc),
+                contain=True,
+            )
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if classified_runtime_budget is not None:
+        max_call_duration_seconds = classified_runtime_budget[0]
     # Resolve model overrides from the version onto global user config (skip
     # when the caller already resolved it).
     if resolved_user_config is None:
@@ -761,6 +814,27 @@ async def _run_pipeline(
         context, assistant_params=assistant_params, user_params=user_params
     )
 
+    if classified_runtime_budget is not None:
+        authority_budget, authority_timer_started = classified_runtime_budget
+        remaining_authority_budget = math.floor(
+            authority_budget - (time.monotonic() - authority_timer_started)
+        )
+        if remaining_authority_budget <= 0:
+            attempt_uuid = (merged_call_context_vars or {}).get("smoke_attempt_uuid")
+            if attempt_uuid:
+                from api.services import onnuri_staging_preflight
+
+                await onnuri_staging_preflight.set_smoke_terminal(
+                    attempt_uuid,
+                    organization_id=workflow.organization_id,
+                    terminal_class="authority_deadline_expired",
+                    terminal_reason="authority deadline elapsed before media startup",
+                    contain=True,
+                )
+            raise HTTPException(
+                status_code=403, detail="classified_authority_deadline_expired"
+            )
+        max_call_duration_seconds = remaining_authority_budget
     # Create usage metrics aggregator with engine's callback
     pipeline_engine_callback_processor = PipelineEngineCallbacksProcessor(
         max_call_duration_seconds=max_call_duration_seconds,

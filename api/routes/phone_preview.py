@@ -37,6 +37,14 @@ class PhonePreviewVerifyRequest(BaseModel):
 
 class PhonePreviewCallRequest(BaseModel):
     session_id: int
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=200)
+    manual_acknowledgement: str | None = Field(default=None, max_length=500)
+
+
+class PhonePreviewContainRequest(BaseModel):
+    session_id: int
+    terminal_class: str = Field(..., min_length=1, max_length=100)
+    terminal_reason: str = Field(..., min_length=1, max_length=500)
 
 
 class PhonePreviewLatencySummary(BaseModel):
@@ -61,6 +69,13 @@ class PhonePreviewResponse(BaseModel):
     dev_otp_code: str | None = None
     inbound_phone_number: str | None = None
     latency_summary: PhonePreviewLatencySummary | None = None
+    gate_states: dict[str, bool] | None = None
+    remaining_attempts: int | None = None
+    proof_current: bool | None = None
+    registration_fresh: bool | None = None
+    media_fresh: bool | None = None
+    contained: bool | None = None
+    terminal_class: str | None = None
 
 
 @router.post("/start", response_model=PhonePreviewResponse)
@@ -95,9 +110,27 @@ async def call_phone_preview(
     request: PhonePreviewCallRequest,
     user: UserModel = Depends(get_phone_preview_user),
 ):
-    result = await phone_preview_service.call(user=user, session_id=request.session_id)
+    result = await phone_preview_service.call(
+        user=user,
+        session_id=request.session_id,
+        idempotency_key=request.idempotency_key,
+        manual_acknowledgement=request.manual_acknowledgement,
+    )
     return result.as_dict()
 
+
+@router.post("/contain", response_model=PhonePreviewResponse)
+async def contain_phone_preview(
+    request: PhonePreviewContainRequest,
+    user: UserModel = Depends(get_phone_preview_user),
+):
+    result = await phone_preview_service.contain(
+        user=user,
+        session_id=request.session_id,
+        terminal_class=request.terminal_class,
+        terminal_reason=request.terminal_reason,
+    )
+    return result.as_dict()
 
 @router.post("/wait-inbound", response_model=PhonePreviewResponse)
 async def wait_for_inbound_phone_preview(

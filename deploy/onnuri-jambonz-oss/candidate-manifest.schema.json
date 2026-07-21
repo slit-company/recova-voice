@@ -1,0 +1,1994 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:recova:onnuri:jambonz-oss:candidate-manifest:v1",
+  "title": "Onnuri source-built Jambonz OSS candidate manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_generation",
+    "source_lock_sha256",
+    "sources",
+    "images",
+    "support_images",
+    "review_payload_digest",
+    "license_policy",
+    "runtime_contract",
+    "management_exposure",
+    "storage_contract",
+    "acquisition_receipt",
+    "approvals",
+    "disqualifier_results",
+    "evidence_index"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "onnuri-jambonz-oss-candidate/v1"
+    },
+    "candidate_generation": {
+      "const": "jambonz-oss-0.9.x"
+    },
+    "source_lock_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 13,
+      "maxItems": 13,
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "jambonz-feature-server"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "jambonz-api-server"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "sbc-inbound"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "sbc-outbound"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "sbc-call-router"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "sbc-sip-sidecar"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "sbc-rtpengine-sidecar"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "drachtio-server"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "freeswitch"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "jambonz-freeswitch-modules"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "spandsp"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "sofia-sip"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "rtpengine"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ],
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "images": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "jambonz-feature-server"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "jambonz-api-server"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "sbc-inbound"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "sbc-outbound"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "sbc-call-router"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "sbc-sip-sidecar"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "sbc-rtpengine-sidecar"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "drachtio-server"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "freeswitch"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "rtpengine"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ],
+      "items": {
+        "$ref": "#/$defs/image"
+      }
+    },
+    "support_images": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "mariadb"
+              },
+              "license_spdx": {
+                "const": "GPL-2.0-only"
+              }
+            },
+            "required": [
+              "name",
+              "license_spdx"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "redis"
+              },
+              "license_spdx": {
+                "const": "BSD-3-Clause"
+              }
+            },
+            "required": [
+              "name",
+              "license_spdx"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "facade"
+              },
+              "license_spdx": {
+                "const": "LicenseRef-Recova-Proprietary"
+              }
+            },
+            "required": [
+              "name",
+              "license_spdx"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "recova-backend"
+              },
+              "license_spdx": {
+                "const": "LicenseRef-Recova-Proprietary"
+              }
+            },
+            "required": [
+              "name",
+              "license_spdx"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "postgres"
+              },
+              "license_spdx": {
+                "const": "PostgreSQL"
+              }
+            },
+            "required": [
+              "name",
+              "license_spdx"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "recova-redis"
+              },
+              "license_spdx": {
+                "const": "BSD-3-Clause"
+              }
+            },
+            "required": [
+              "name",
+              "license_spdx"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "f12-ingress"
+              },
+              "license_spdx": {
+                "const": "BSD-2-Clause"
+              }
+            },
+            "required": [
+              "name",
+              "license_spdx"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ],
+      "items": {
+        "$ref": "#/$defs/support_image"
+      }
+    },
+    "review_payload_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "license_policy": {
+      "$ref": "#/$defs/license_policy"
+    },
+    "runtime_contract": {
+      "$ref": "#/$defs/runtime_contract"
+    },
+    "management_exposure": {
+      "$ref": "#/$defs/management"
+    },
+    "storage_contract": {
+      "$ref": "#/$defs/storage"
+    },
+    "acquisition_receipt": {
+      "$ref": "#/$defs/receipt"
+    },
+    "approvals": {
+      "$ref": "#/$defs/approvals"
+    },
+    "disqualifier_results": {
+      "type": "object",
+      "minProperties": 1,
+      "required": [
+        "candidate_input_g008_live_smoke_runner",
+        "candidate_input_phase_c_live_preflight_trusted_keyset",
+        "candidate_input_runtime_compose",
+        "candidate_input_bootstrap_binding",
+        "candidate_input_sealed_secret_wrapper",
+
+        "candidate_input_conformance",
+        "candidate_input_conformance_output_offline_default_deny",
+        "candidate_input_conformance_output_registration_request_cardinality",
+        "candidate_input_conformance_output_registration_no_retry_concurrency",
+        "candidate_input_conformance_output_media_contract",
+        "candidate_input_conformance_output_call_deadline",
+        "candidate_input_phase_c_configuration_startup-g008.sh",
+        "candidate_input_phase_c_configuration_backend.tf",
+        "candidate_input_phase_c_configuration_containment.tf",
+        "candidate_input_phase_c_configuration_crypto_gate.tf",
+        "candidate_input_phase_c_configuration_firewalls.tf",
+        "candidate_input_phase_c_configuration_iam.tf",
+        "candidate_input_phase_c_configuration_locals.tf",
+        "candidate_input_phase_c_configuration_network.tf",
+        "candidate_input_phase_c_configuration_observability.tf",
+        "candidate_input_phase_c_configuration_outputs.tf",
+        "candidate_input_phase_c_configuration_providers.tf",
+        "candidate_input_phase_c_configuration_secrets.tf",
+        "candidate_input_phase_c_configuration_variables.tf",
+        "candidate_input_phase_c_configuration_versions.tf",
+        "candidate_input_phase_c_configuration_workload.tf"
+      ],
+      "properties": {
+        "candidate_input_g008_live_smoke_runner": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result",
+            "reference",
+            "sha256"
+          ],
+          "properties": {
+            "result": {
+              "const": "pass"
+            },
+            "reference": {
+              "const": "evidence:evidence/g008-live-smoke-runner.py"
+            },
+            "sha256": {
+              "const": "sha256:13b9b5b801a4ffb00bb410623b673bb8b493096d0403500a4627f9c7f28d21a3"
+
+            }
+          }
+        },
+        "candidate_input_sealed_secret_wrapper": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["result", "reference", "sha256"],
+          "properties": {
+            "result": {"const": "pass"},
+            "reference": {"const": "evidence:evidence/sealed-secret-wrapper.sh"},
+            "sha256": {"const": "sha256:2a09aba9970da289794b09400bfd72bf17a2f98ff6a9e311015ab828d7376b07"}
+          }
+        },
+
+        "candidate_input_runtime_compose": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["result", "reference", "sha256"],
+          "properties": {
+            "result": {"const": "pass"},
+            "reference": {"const": "evidence:evidence/runtime-compose.yaml"},
+            "sha256": {"const": "sha256:340086636e82286f094db7b8c755a6c8191378d5c37db23c58b774fffeb1b95b"}
+          }
+        },
+        "candidate_input_bootstrap_binding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["result", "reference", "sha256"],
+          "properties": {
+            "result": {"const": "pass"},
+            "reference": {"const": "evidence:evidence/phase-c-startup-g008.sh"},
+            "sha256": {"const": "sha256:181d7df7975679bd8fc5d80f8e6fc7df55ccaa5aefd41fefa2d7ad362ad5fdff"}
+
+          }
+        },
+        "candidate_input_phase_c_live_preflight_trusted_keyset": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result",
+            "reference",
+            "sha256"
+          ],
+          "properties": {
+            "result": {
+              "const": "pass"
+            },
+            "reference": {
+              "const": "evidence:evidence/runtime-phase-c-live-preflight-trusted-keyset.json"
+            },
+            "sha256": {
+              "const": "sha256:00645f3af8230c742951c12f17a713afde209de12182cd6e3722ac59445507aa"
+            }
+          }
+        },
+        "candidate_input_conformance": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_conformance_output_offline_default_deny": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_conformance_output_registration_request_cardinality": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_conformance_output_registration_no_retry_concurrency": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_conformance_output_media_contract": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_conformance_output_call_deadline": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_phase_c_configuration_startup-g008.sh": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_phase_c_configuration_backend.tf": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_phase_c_configuration_containment.tf": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_phase_c_configuration_crypto_gate.tf": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["result", "reference", "sha256"],
+          "properties": {
+            "result": {"const": "pass"},
+            "reference": {"const": "evidence:evidence/phase-c-crypto_gate.tf"},
+            "sha256": {"const": "sha256:1450c556687d2ffe189c45b5796209cbffff39314926d3f48eb770a331c214a7"}
+          }
+        },
+        "candidate_input_phase_c_configuration_firewalls.tf": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_phase_c_configuration_iam.tf": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_phase_c_configuration_locals.tf": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_phase_c_configuration_network.tf": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_phase_c_configuration_observability.tf": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_phase_c_configuration_outputs.tf": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_phase_c_configuration_providers.tf": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_phase_c_configuration_secrets.tf": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["result", "reference", "sha256"],
+          "properties": {
+            "result": {"const": "pass"},
+            "reference": {"const": "evidence:evidence/phase-c-secrets.tf"},
+            "sha256": {"const": "sha256:c18c551e42960ff57a3a18e1837e61fdde4ff2ad7cdcbeb5a163d978e59c8743"}
+          }
+        },
+        "candidate_input_phase_c_configuration_variables.tf": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_phase_c_configuration_versions.tf": {
+          "$ref": "#/$defs/disqualifier"
+        },
+        "candidate_input_phase_c_configuration_workload.tf": {
+          "$ref": "#/$defs/disqualifier"
+        }
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/disqualifier"
+      }
+    },
+    "evidence_index": {
+      "type": "object",
+      "minProperties": 1,
+      "required": [
+        "evidence:evidence/g008-live-smoke-runner.py",
+        "evidence:evidence/runtime-compose.yaml",
+        "evidence:evidence/phase-c-startup-g008.sh",
+        "evidence:evidence/sealed-secret-wrapper.sh",
+
+        "evidence:evidence/runtime-phase-c-live-preflight-trusted-keyset.json",
+        "evidence:evidence/conformance-receipt.json",
+        "evidence:evidence/conformance-offline_default_deny.raw",
+        "evidence:evidence/conformance-registration_request_cardinality.raw",
+        "evidence:evidence/conformance-registration_no_retry_concurrency.raw",
+        "evidence:evidence/conformance-media_contract.raw",
+        "evidence:evidence/conformance-call_deadline.raw",
+        "evidence:evidence/phase-c-backend.tf",
+        "evidence:evidence/phase-c-containment.tf",
+        "evidence:evidence/phase-c-crypto_gate.tf",
+        "evidence:evidence/phase-c-firewalls.tf",
+        "evidence:evidence/phase-c-iam.tf",
+        "evidence:evidence/phase-c-locals.tf",
+        "evidence:evidence/phase-c-network.tf",
+        "evidence:evidence/phase-c-observability.tf",
+        "evidence:evidence/phase-c-outputs.tf",
+        "evidence:evidence/phase-c-providers.tf",
+        "evidence:evidence/phase-c-secrets.tf",
+        "evidence:evidence/phase-c-variables.tf",
+        "evidence:evidence/phase-c-versions.tf",
+        "evidence:evidence/phase-c-workload.tf"
+      ],
+      "properties": {
+        "evidence:evidence/g008-live-smoke-runner.py": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "sha256",
+            "content_type"
+          ],
+          "properties": {
+            "path": {
+              "const": "evidence/g008-live-smoke-runner.py"
+            },
+            "sha256": {
+              "const": "13b9b5b801a4ffb00bb410623b673bb8b493096d0403500a4627f9c7f28d21a3"
+
+            },
+            "content_type": {
+              "const": "text"
+            }
+          }
+        },
+        "evidence:evidence/sealed-secret-wrapper.sh": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "content_type"],
+          "properties": {
+            "path": {"const": "evidence/sealed-secret-wrapper.sh"},
+            "sha256": {"const": "2a09aba9970da289794b09400bfd72bf17a2f98ff6a9e311015ab828d7376b07"},
+            "content_type": {"const": "text"}
+          }
+        },
+
+        "evidence:evidence/runtime-compose.yaml": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "content_type"],
+          "properties": {
+            "path": {"const": "evidence/runtime-compose.yaml"},
+            "sha256": {"const": "340086636e82286f094db7b8c755a6c8191378d5c37db23c58b774fffeb1b95b"},
+            "content_type": {"const": "text"}
+          }
+        },
+        "evidence:evidence/phase-c-startup-g008.sh": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "content_type"],
+          "properties": {
+            "path": {"const": "evidence/phase-c-startup-g008.sh"},
+            "sha256": {"const": "181d7df7975679bd8fc5d80f8e6fc7df55ccaa5aefd41fefa2d7ad362ad5fdff"},
+            "content_type": {"const": "text"}
+          }
+        },
+        "evidence:evidence/runtime-phase-c-live-preflight-trusted-keyset.json": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "sha256",
+            "content_type"
+          ],
+          "properties": {
+            "path": {
+              "const": "evidence/runtime-phase-c-live-preflight-trusted-keyset.json"
+            },
+            "sha256": {
+              "const": "00645f3af8230c742951c12f17a713afde209de12182cd6e3722ac59445507aa"
+            },
+            "content_type": {
+              "const": "text"
+            }
+          }
+        },
+        "evidence:evidence/phase-c-crypto_gate.tf": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "content_type"],
+          "properties": {
+            "path": {"const": "evidence/phase-c-crypto_gate.tf"},
+            "sha256": {"const": "1450c556687d2ffe189c45b5796209cbffff39314926d3f48eb770a331c214a7"},
+            "content_type": {"const": "text"}
+          }
+        },
+        "evidence:evidence/phase-c-secrets.tf": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "content_type"],
+          "properties": {
+            "path": {"const": "evidence/phase-c-secrets.tf"},
+            "sha256": {"const": "c18c551e42960ff57a3a18e1837e61fdde4ff2ad7cdcbeb5a163d978e59c8743"},
+            "content_type": {"const": "text"}
+          }
+        }
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/evidence"
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "reference": {
+      "type": "string",
+      "pattern": "^evidence:[A-Za-z0-9][A-Za-z0-9._/-]{0,239}$"
+    },
+    "source_provenance": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "type",
+            "value"
+          ],
+          "properties": {
+            "label": {
+              "const": "org.opencontainers.image.revision"
+            },
+            "type": {
+              "const": "git_revision"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "type",
+            "value"
+          ],
+          "properties": {
+            "label": {
+              "enum": [
+                "org.opencontainers.image.revision",
+                "org.recova.source-tree.sha256"
+              ]
+            },
+            "type": {
+              "const": "source_tree_sha256"
+            },
+            "value": {
+              "$ref": "#/$defs/digest"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "type",
+            "value"
+          ],
+          "properties": {
+            "label": {
+              "const": "org.opencontainers.image.revision"
+            },
+            "type": {
+              "const": "source_image_digest"
+            },
+            "value": {
+              "$ref": "#/$defs/digest"
+            }
+          }
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "repository",
+        "commit",
+        "upstream_tree_sha256",
+        "source_tree_reference",
+        "source_tree_sha256",
+        "submodules_reference",
+        "submodules_sha256",
+        "submodules",
+        "license_spdx",
+        "license_reference",
+        "license_sha256",
+        "patch_reference",
+        "patch_sha256",
+        "patch_content_sha256"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\\.git)?$"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "upstream_tree_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "source_tree_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "source_tree_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "submodules_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "submodules_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "submodules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/submodule"
+          }
+        },
+        "license_spdx": {
+          "enum": [
+            "MIT",
+            "MPL-1.1",
+            "GPL-3.0",
+            "MIT OR AGPL-3.0",
+            "LGPL-2.1-only AND GPL-2.0-only",
+            "LGPL-2.1-only"
+          ]
+        },
+        "license_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "license_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "patch_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "patch_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "patch_content_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "conditional_mit": {
+          "$ref": "#/$defs/conditional_mit"
+        }
+      }
+    },
+    "submodule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "commit",
+        "tree_sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "tree_sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "conditional_mit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selected_license",
+        "dedicated_freeswitch",
+        "dynamic_load",
+        "incoming_call_control",
+        "reference",
+        "sha256",
+        "topology_reference",
+        "topology_sha256"
+      ],
+      "properties": {
+        "selected_license": {
+          "const": "MIT"
+        },
+        "dedicated_freeswitch": {
+          "const": true
+        },
+        "dynamic_load": {
+          "const": "mod_audio_fork"
+        },
+        "incoming_call_control": {
+          "const": "jambonz-feature-server/outbound-esl"
+        },
+        "reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "topology_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "topology_sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "source_name",
+        "source_commit",
+        "platform",
+        "image",
+        "base_images",
+        "build_mode",
+        "build_recipe_reference",
+        "build_recipe_sha256",
+        "build_provenance_reference",
+        "build_provenance_sha256",
+        "network_archive_reference",
+        "network_archive_sha256",
+        "network_archive_record_reference",
+        "network_archive_record_sha256",
+        "source_contributions",
+        "notices_reference",
+        "notices_sha256",
+        "sbom_reference",
+        "sbom_sha256",
+        "vulnerability_reference",
+        "vulnerability_sha256",
+        "scanner",
+        "vulnerability_acceptance_reference",
+        "vulnerability_acceptance_sha256",
+        "vulnerability_summary"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "source_name": {
+          "type": "string"
+        },
+        "source_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "platform": {
+          "const": "linux/amd64"
+        },
+        "image": {
+          "type": "string",
+          "pattern": "^.+@sha256:[0-9a-f]{64}$"
+        },
+        "base_images": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^.+@sha256:[0-9a-f]{64}$"
+          }
+        },
+        "build_mode": {
+          "const": "source_only"
+        },
+        "build_recipe_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "build_recipe_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "build_provenance_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "build_provenance_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "network_archive_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "network_archive_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "network_archive_record_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "network_archive_record_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "source_contributions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/contribution"
+          }
+        },
+        "notices_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "notices_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "sbom_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "sbom_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "vulnerability_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "vulnerability_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "scanner": {
+          "$ref": "#/$defs/scanner"
+        },
+        "vulnerability_acceptance_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "vulnerability_acceptance_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "vulnerability_summary": {
+          "$ref": "#/$defs/vulnerability_summary"
+        }
+      }
+    },
+    "support_image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "image",
+        "platform",
+        "source",
+        "source_provenance",
+        "source_provenance_reference",
+        "source_provenance_sha256",
+        "base_images",
+        "license_spdx",
+        "oci_license_reference",
+        "oci_license_sha256",
+        "notices_reference",
+        "notices_sha256",
+        "sbom_reference",
+        "sbom_sha256",
+        "vulnerability_reference",
+        "vulnerability_sha256",
+        "scanner",
+        "vulnerability_acceptance_reference",
+        "vulnerability_acceptance_sha256",
+        "vulnerability_summary",
+        "network_archive_reference",
+        "network_archive_sha256",
+        "network_archive_record_reference",
+        "network_archive_record_sha256"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "mariadb",
+            "redis",
+            "facade",
+            "recova-backend",
+            "postgres",
+            "recova-redis",
+            "f12-ingress"
+          ]
+        },
+        "image": {
+          "type": "string",
+          "pattern": "^.+@sha256:[0-9a-f]{64}$"
+        },
+        "platform": {
+          "const": "linux/amd64"
+        },
+        "source": {
+          "type": "string",
+          "pattern": "^https://[^@/?#]+/[^?#]+$"
+        },
+        "source_provenance": {
+          "$ref": "#/$defs/source_provenance"
+        },
+        "source_provenance_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "source_provenance_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "base_images": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^.+@sha256:[0-9a-f]{64}$"
+          }
+        },
+        "license_spdx": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oci_license_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "oci_license_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "notices_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "notices_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "sbom_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "sbom_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "vulnerability_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "vulnerability_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "scanner": {
+          "$ref": "#/$defs/scanner"
+        },
+        "vulnerability_acceptance_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "vulnerability_acceptance_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "vulnerability_summary": {
+          "$ref": "#/$defs/vulnerability_summary"
+        },
+        "network_archive_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "network_archive_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "network_archive_record_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "network_archive_record_sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "facade"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source": {
+                "const": "https://github.com/slit-company/recova-voice"
+              },
+              "source_provenance": {
+                "properties": {
+                  "label": {
+                    "const": "org.opencontainers.image.revision"
+                  },
+                  "type": {
+                    "const": "source_tree_sha256"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "recova-backend"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source": {
+                "const": "https://github.com/slit-company/recova-voice"
+              },
+              "source_provenance": {
+                "properties": {
+                  "label": {
+                    "const": "org.opencontainers.image.revision"
+                  },
+                  "type": {
+                    "const": "source_tree_sha256"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "enum": [
+                  "mariadb",
+                  "redis",
+                  "postgres",
+                  "recova-redis",
+                  "f12-ingress"
+                ]
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source_provenance": {
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "git_revision",
+                      "source_image_digest"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "scanner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "syft_version",
+        "grype_version",
+        "grype_db_identity_reference",
+        "grype_db_identity_sha256"
+      ],
+      "properties": {
+        "syft_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "grype_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "grype_db_identity_reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "grype_db_identity_sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "contribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_name",
+        "source_commit",
+        "contribution",
+        "license_mode",
+        "reference",
+        "sha256"
+      ],
+      "properties": {
+        "source_name": {
+          "type": "string"
+        },
+        "source_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "contribution": {
+          "type": "string"
+        },
+        "license_mode": {
+          "type": "string"
+        },
+        "reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "vulnerability_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "critical",
+        "high",
+        "unaccepted_critical",
+        "unaccepted_high"
+      ],
+      "properties": {
+        "critical": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "high": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unaccepted_critical": {
+          "const": 0
+        },
+        "unaccepted_high": {
+          "const": 0
+        }
+      }
+    },
+    "license_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "all_third_party_components_open_source",
+        "first_party_support_boundary",
+        "runtime_license_key_required",
+        "activation_service_required",
+        "trial_or_paid_entitlement_used",
+        "commercial_image_used",
+        "circumvention_used"
+      ],
+      "properties": {
+        "all_third_party_components_open_source": {
+          "const": true
+        },
+        "first_party_support_boundary": {
+          "const": "LicenseRef-Recova-Proprietary"
+        },
+        "runtime_license_key_required": {
+          "const": false
+        },
+        "activation_service_required": {
+          "const": false
+        },
+        "trial_or_paid_entitlement_used": {
+          "const": false
+        },
+        "commercial_image_used": {
+          "const": false
+        },
+        "circumvention_used": {
+          "const": false
+        }
+      }
+    },
+    "runtime_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inbound",
+        "outbound",
+        "listen",
+        "receipt_signing",
+        "registration",
+        "calls",
+        "timers"
+      ],
+      "properties": {
+        "inbound": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "timing",
+            "verbs"
+          ],
+          "properties": {
+            "timing": {
+              "const": "pre_answer"
+            },
+            "verbs": {
+              "const": [
+                "answer",
+                "listen"
+              ]
+            }
+          }
+        },
+        "outbound": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "timing",
+            "verbs"
+          ],
+          "properties": {
+            "timing": {
+              "const": "post_answer"
+            },
+            "verbs": {
+              "const": [
+                "listen"
+              ]
+            }
+          }
+        },
+        "listen": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ws_auth",
+            "encoding",
+            "sample_rate_hz",
+            "channels",
+            "direction"
+          ],
+          "properties": {
+            "ws_auth": {
+              "const": "Basic"
+            },
+            "encoding": {
+              "const": "L16"
+            },
+            "sample_rate_hz": {
+              "const": 8000
+            },
+            "channels": {
+              "const": 1
+            },
+            "direction": {
+              "const": "bidirectional"
+            }
+          }
+        },
+        "receipt_signing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dispatch",
+            "media"
+          ],
+          "properties": {
+            "dispatch": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "algorithm",
+                "key_id",
+                "trust_domain"
+              ],
+              "properties": {
+                "algorithm": {
+                  "const": "ES256"
+                },
+                "key_id": {
+                  "const": "dispatch-es256"
+                },
+                "trust_domain": {
+                  "const": "recova.dispatch"
+                }
+              }
+            },
+            "media": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "algorithm",
+                "key_id",
+                "trust_domain"
+              ],
+              "properties": {
+                "algorithm": {
+                  "const": "ES256"
+                },
+                "key_id": {
+                  "const": "media-es256"
+                },
+                "trust_domain": {
+                  "const": "recova.media"
+                }
+              }
+            }
+          }
+        },
+        "registration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "automatic_retry",
+            "max_concurrency",
+            "receipt_binding_fields",
+            "operations"
+          ],
+          "properties": {
+            "mode": {
+              "const": "one_register_then_unregister"
+            },
+            "automatic_retry": {
+              "const": false
+            },
+            "max_concurrency": {
+              "const": 1
+            },
+            "receipt_binding_fields": {
+              "const": [
+                "tenant_digest",
+                "account_digest",
+                "envelope_digest",
+                "candidate_digest",
+                "operation",
+                "prior_receipt_digest"
+              ]
+            },
+            "operations": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "prefixItems": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "operation",
+                    "challenge_aware",
+                    "max_wire_transmissions",
+                    "automatic_retry",
+                    "max_concurrency",
+                    "terminal_deadline_seconds",
+                    "causal_predecessor"
+                  ],
+                  "properties": {
+                    "operation": {
+                      "const": "register"
+                    },
+                    "challenge_aware": {
+                      "const": true
+                    },
+                    "max_wire_transmissions": {
+                      "const": 2,
+                      "description": "One initial SIP request plus at most one authenticated request responding to a challenge. UDP retransmissions of the same transaction do not consume another logical request and remain separately bounded by runtime logic."
+                    },
+                    "automatic_retry": {
+                      "const": false
+                    },
+                    "max_concurrency": {
+                      "const": 1
+                    },
+                    "terminal_deadline_seconds": {
+                      "const": 32
+                    },
+                    "causal_predecessor": {
+                      "const": "authority_receipt_digest"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "operation",
+                    "challenge_aware",
+                    "max_wire_transmissions",
+                    "automatic_retry",
+                    "max_concurrency",
+                    "terminal_deadline_seconds",
+                    "causal_predecessor"
+                  ],
+                  "properties": {
+                    "operation": {
+                      "const": "unregister"
+                    },
+                    "challenge_aware": {
+                      "const": true
+                    },
+                    "max_wire_transmissions": {
+                      "const": 2,
+                      "description": "One initial SIP request plus at most one authenticated request responding to a challenge. UDP retransmissions of the same transaction do not consume another logical request and remain separately bounded by runtime logic."
+                    },
+                    "automatic_retry": {
+                      "const": false
+                    },
+                    "max_concurrency": {
+                      "const": 1
+                    },
+                    "terminal_deadline_seconds": {
+                      "const": 32
+                    },
+                    "causal_predecessor": {
+                      "const": "register_receipt_digest"
+                    }
+                  }
+                }
+              ],
+              "items": false
+            }
+          }
+        },
+        "calls": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "automatic_retry",
+            "max_concurrency",
+            "maximum_attempts",
+            "contingency_attempts",
+            "contingency_authority_required",
+            "contingency_direction_bound"
+          ],
+          "properties": {
+            "automatic_retry": {
+              "const": false
+            },
+            "max_concurrency": {
+              "const": 1
+            },
+            "maximum_attempts": {
+              "const": 3
+            },
+            "contingency_attempts": {
+              "const": 1
+            },
+            "contingency_authority_required": {
+              "const": true
+            },
+            "contingency_direction_bound": {
+              "const": true
+            }
+          }
+        },
+        "timers": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "register_terminal_deadline_seconds",
+            "call_deadline_seconds"
+          ],
+          "properties": {
+            "register_terminal_deadline_seconds": {
+              "const": 32
+            },
+            "call_deadline_seconds": {
+              "const": 60
+            }
+          }
+        }
+      }
+    },
+    "management": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default_deny",
+        "local_only"
+      ],
+      "properties": {
+        "default_deny": {
+          "const": true
+        },
+        "local_only": {
+          "const": true
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ephemeral",
+        "raw_logs",
+        "cdr",
+        "recordings",
+        "backups",
+        "exports"
+      ],
+      "properties": {
+        "ephemeral": {
+          "const": true
+        },
+        "raw_logs": {
+          "const": false
+        },
+        "cdr": {
+          "const": false
+        },
+        "recordings": {
+          "const": false
+        },
+        "backups": {
+          "const": false
+        },
+        "exports": {
+          "const": false
+        }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reference",
+        "sha256",
+        "acquired_at",
+        "expires_at"
+      ],
+      "properties": {
+        "reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "acquired_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "approvals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "architect",
+        "critic",
+        "qa"
+      ],
+      "properties": {
+        "architect": {
+          "$ref": "#/$defs/approval"
+        },
+        "critic": {
+          "$ref": "#/$defs/approval"
+        },
+        "qa": {
+          "$ref": "#/$defs/approval"
+        }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity",
+        "independent",
+        "decision",
+        "reference",
+        "sha256"
+      ],
+      "properties": {
+        "identity": {
+          "type": "string"
+        },
+        "independent": {
+          "const": true
+        },
+        "decision": {
+          "const": "approved"
+        },
+        "reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "disqualifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "result",
+        "reference",
+        "sha256"
+      ],
+      "properties": {
+        "result": {
+          "const": "pass"
+        },
+        "reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "content_type"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "content_type": {
+          "enum": [
+            "text",
+            "application/x-tar",
+            "application/vnd.cyclonedx+json",
+            "application/vnd.anchore.syft+json",
+            "application/vnd.anchore.grype+json"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,21 @@
+<configuration name="sofia.conf" description="Private Jambonz SIP endpoint">
+  <global_settings>
+    <param name="log-level" value="0"/>
+  </global_settings>
+  <profiles>
+    <profile name="drachtio_mrf">
+      <settings>
+        <param name="sip-ip" value="127.0.0.1"/>
+        <param name="rtp-ip" value="127.0.0.1"/>
+        <param name="sip-port" value="5080"/>
+        <param name="rtp-start-port" value="40000"/>
+        <param name="rtp-end-port" value="40099"/>
+        <param name="dbname" value="/run/freeswitch/sofia-drachtio-mrf.db"/>
+        <param name="context" value="jambonz"/>
+        <param name="dialplan" value="XML"/>
+        <param name="disable-register" value="true"/>
+        <param name="auth-calls" value="false"/>
+      </settings>
+    </profile>
+  </profiles>
+</configuration>

@@ -19,3 +19,7 @@ coturn/
 *.wav
 dograh_pcm_cache/
 node_modules/
+# Generated local Terraform caches and state.
+**/.terraform/
+*.tfstate
+*.tfstate.*

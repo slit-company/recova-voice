@@ -61,7 +61,7 @@ def test_trigger_route_executes_as_workflow_owner():
             new=quota_mock,
         ),
         patch(
-            "api.routes.public_agent.get_default_telephony_provider",
+            "api.routes.public_agent.get_telephony_provider_by_id",
             new=AsyncMock(return_value=provider),
         ),
         patch(
@@ -111,6 +111,54 @@ def test_trigger_route_executes_as_workflow_owner():
     assert initiate_kwargs["user_id"] == workflow.user_id
 
 
+def test_public_jambonz_call_is_denied_while_provider_is_waiting():
+    app = _make_test_app()
+    client = TestClient(app)
+
+    workflow = _active_workflow()
+    provider = _provider()
+    provider.PROVIDER_NAME = "jambonz"
+    resolve_caller = AsyncMock()
+
+    with (
+        patch("api.routes.public_agent.db_client") as mock_db,
+        patch(
+            "api.routes.public_agent.check_dograh_quota_by_user_id",
+            new=AsyncMock(
+                return_value=SimpleNamespace(has_quota=True, error_message="")
+            ),
+        ),
+        patch(
+            "api.routes.public_agent.get_telephony_provider_by_id",
+            new=AsyncMock(return_value=provider),
+        ),
+        patch(
+            "api.routes.public_agent.resolve_jambonz_outbound_caller",
+            new=resolve_caller,
+        ),
+    ):
+        mock_db.validate_api_key = AsyncMock(
+            return_value=SimpleNamespace(id=7, organization_id=11, created_by=22)
+        )
+        mock_db.get_workflow_by_uuid = AsyncMock(return_value=workflow)
+        mock_db.get_default_telephony_configuration = AsyncMock(
+            return_value=SimpleNamespace(id=55)
+        )
+        mock_db.create_workflow_run = AsyncMock()
+
+        response = client.post(
+            f"/public/agent/workflow/{workflow.workflow_uuid}",
+            headers={"X-API-Key": "test-api-key"},
+            json={"phone_number": "+82101234567"},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "telephony_provider_public_calls_not_permitted"
+    resolve_caller.assert_not_awaited()
+    mock_db.create_workflow_run.assert_not_awaited()
+    provider.initiate_call.assert_not_awaited()
+
+
 def test_workflow_uuid_route_uses_scoped_lookup_and_shared_execution():
     app = _make_test_app()
     client = TestClient(app)
@@ -128,7 +176,7 @@ def test_workflow_uuid_route_uses_scoped_lookup_and_shared_execution():
             new=quota_mock,
         ),
         patch(
-            "api.routes.public_agent.get_default_telephony_provider",
+            "api.routes.public_agent.get_telephony_provider_by_id",
             new=AsyncMock(return_value=provider),
         ),
         patch(
@@ -187,7 +235,7 @@ def test_workflow_uuid_route_rejects_default_outbound_control_only_provider():
             new=quota_mock,
         ),
         patch(
-            "api.routes.public_agent.get_default_telephony_provider",
+            "api.routes.public_agent.get_telephony_provider_by_id",
             new=AsyncMock(return_value=provider),
         ),
     ):

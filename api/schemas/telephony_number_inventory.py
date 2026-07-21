@@ -39,6 +39,68 @@ class TelephonyNumberInventoryImportItem(BaseModel):
 class TelephonyNumberInventoryImportRequest(BaseModel):
     numbers: list[TelephonyNumberInventoryImportItem] = Field(..., min_length=1)
 
+class OnnuriStagingCandidateImportRequest(BaseModel):
+    numbers: list[TelephonyNumberInventoryImportItem] = Field(..., min_length=1)
+
+
+class OnnuriStagingCandidateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    candidate_uuid: str
+    inventory_id: int
+    provider: str
+    normalized_did: str
+    classification: str
+    environment: str
+    state: str
+    created_at: datetime
+
+
+class OnnuriStagingPreflightProofApproveRequest(BaseModel):
+    candidate_id: int
+    organization_id: int
+    predicate_class: Literal["exception_waiting", "retain_standard"]
+    canonical_input: dict[str, Any]
+    expires_at: datetime
+
+
+class OnnuriStagingPreflightProofReserveRequest(BaseModel):
+    proof_id: int
+    organization_id: int
+    reservation_expires_at: datetime | None = None
+    note: str | None = Field(default=None, max_length=500)
+class OnnuriStagingPreflightProofAssignRequest(
+    OnnuriStagingPreflightProofReserveRequest
+):
+    telephony_configuration_id: int | None = None
+    inbound_workflow_id: int | None = None
+    label: str | None = Field(default=None, max_length=64)
+    set_default_caller_id: bool = False
+
+
+class OnnuriStagingPreflightProofRevokeRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+class OnnuriStagingPreflightProofResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    candidate_id: int
+    organization_id: int
+    inventory_id: int | None = None
+    scope_key: str
+    revision: int
+    canonical_hash: str
+    approved: bool
+    passed: bool
+    predicate_class: str
+    expires_at: datetime
+    revoked_at: datetime | None = None
+    invalidated_at: datetime | None = None
+    is_current: bool
+    created_at: datetime
 
 class TelephonyNumberInventorySkippedItem(BaseModel):
     provider: str

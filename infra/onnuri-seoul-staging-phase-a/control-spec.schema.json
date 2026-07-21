@@ -1,0 +1,378 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "onnuri-seoul-staging-phase-a/control-spec.schema.json",
+  "title": "Onnuri Seoul staging Phase A provider-free control specification",
+  "type": "object",
+  "required": [
+    "control_spec_version",
+    "phase",
+    "status",
+    "controls",
+    "actions"
+  ],
+  "properties": {
+    "control_spec_version": {
+      "const": "onnuri-seoul-staging-phase-a-control-spec-v1"
+    },
+    "phase": {
+      "const": "A"
+    },
+    "status": {
+      "const": "Waiting"
+    },
+    "controls": {
+      "type": "object",
+      "required": [
+        "sip_ingress",
+        "sip_egress",
+        "rtp_ingress",
+        "rtp_egress"
+      ],
+      "properties": {
+        "sip_ingress": {
+          "$ref": "#/$defs/sipIngressControl"
+        },
+        "sip_egress": {
+          "$ref": "#/$defs/sipEgressControl"
+        },
+        "rtp_ingress": {
+          "$ref": "#/$defs/rtpControl"
+        },
+        "rtp_egress": {
+          "$ref": "#/$defs/rtpControl"
+        }
+      },
+      "additionalProperties": false
+    },
+    "actions": {
+      "type": "object",
+      "required": [
+        "contain_sip_ingress",
+        "contain_sip_egress",
+        "contain_rtp_ingress",
+        "contain_rtp_egress"
+      ],
+      "properties": {
+        "contain_sip_ingress": {
+          "$ref": "#/$defs/sipIngressAction"
+        },
+        "contain_sip_egress": {
+          "$ref": "#/$defs/sipEgressAction"
+        },
+        "contain_rtp_ingress": {
+          "$ref": "#/$defs/rtpIngressAction"
+        },
+        "contain_rtp_egress": {
+          "$ref": "#/$defs/rtpEgressAction"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "disabledControl": {
+      "type": "object",
+      "required": [
+        "disabled",
+        "phase",
+        "deployment",
+        "evidence_status"
+      ],
+      "properties": {
+        "disabled": {
+          "const": true
+        },
+        "phase": {
+          "const": "A"
+        },
+        "deployment": {
+          "const": "forbidden"
+        },
+        "evidence_status": {
+          "const": "waiting"
+        }
+      }
+    },
+    "sipIngressControl": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/disabledControl"
+        }
+      ],
+      "required": [
+        "fixture"
+      ],
+      "properties": {
+        "disabled": {
+          "const": true
+        },
+        "phase": {
+          "const": "A"
+        },
+        "deployment": {
+          "const": "forbidden"
+        },
+        "evidence_status": {
+          "const": "waiting"
+        },
+        "fixture": {
+          "$ref": "#/$defs/sourceFixture"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sipEgressControl": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/disabledControl"
+        }
+      ],
+      "required": [
+        "provenance"
+      ],
+      "properties": {
+        "disabled": {
+          "const": true
+        },
+        "phase": {
+          "const": "A"
+        },
+        "deployment": {
+          "const": "forbidden"
+        },
+        "evidence_status": {
+          "const": "waiting"
+        },
+        "provenance": {
+          "$ref": "#/$defs/outboundProxyProvenance"
+        }
+      },
+      "additionalProperties": false
+    },
+    "rtpControl": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/disabledControl"
+        }
+      ],
+      "required": [
+        "peer",
+        "ports",
+        "status"
+      ],
+      "properties": {
+        "disabled": {
+          "const": true
+        },
+        "phase": {
+          "const": "A"
+        },
+        "deployment": {
+          "const": "forbidden"
+        },
+        "evidence_status": {
+          "const": "waiting"
+        },
+        "peer": {
+          "type": "null"
+        },
+        "ports": {
+          "type": "null"
+        },
+        "status": {
+          "const": "unpopulated"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sourceFixture": {
+      "type": "object",
+      "required": [
+        "source_cidr",
+        "fixture_only",
+        "not_supplier_authoritative",
+        "not_deployable"
+      ],
+      "properties": {
+        "source_cidr": {
+          "const": "61.78.32.184/32"
+        },
+        "fixture_only": {
+          "const": true
+        },
+        "not_supplier_authoritative": {
+          "const": true
+        },
+        "not_deployable": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "outboundProxyProvenance": {
+      "type": "object",
+      "required": [
+        "outbound_proxy",
+        "fixture_only",
+        "not_supplier_authoritative",
+        "not_deployable"
+      ],
+      "properties": {
+        "outbound_proxy": {
+          "const": "61.78.32.184:5060/UDP"
+        },
+        "fixture_only": {
+          "const": true
+        },
+        "not_supplier_authoritative": {
+          "const": true
+        },
+        "not_deployable": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "action": {
+      "type": "object",
+      "required": [
+        "control_id",
+        "kind",
+        "execution",
+        "automatic_retry",
+        "re_enable",
+        "evidence_status"
+      ],
+      "properties": {
+        "kind": {
+          "const": "future_disable_or_delete"
+        },
+        "execution": {
+          "const": "not_implemented"
+        },
+        "automatic_retry": {
+          "const": false
+        },
+        "re_enable": {
+          "const": false
+        },
+        "evidence_status": {
+          "const": "waiting"
+        }
+      }
+    },
+    "sipIngressAction": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/action"
+        }
+      ],
+      "properties": {
+        "control_id": {
+          "const": "sip_ingress"
+        },
+        "kind": {
+          "const": "future_disable_or_delete"
+        },
+        "execution": {
+          "const": "not_implemented"
+        },
+        "automatic_retry": {
+          "const": false
+        },
+        "re_enable": {
+          "const": false
+        },
+        "evidence_status": {
+          "const": "waiting"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sipEgressAction": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/action"
+        }
+      ],
+      "properties": {
+        "control_id": {
+          "const": "sip_egress"
+        },
+        "kind": {
+          "const": "future_disable_or_delete"
+        },
+        "execution": {
+          "const": "not_implemented"
+        },
+        "automatic_retry": {
+          "const": false
+        },
+        "re_enable": {
+          "const": false
+        },
+        "evidence_status": {
+          "const": "waiting"
+        }
+      },
+      "additionalProperties": false
+    },
+    "rtpIngressAction": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/action"
+        }
+      ],
+      "properties": {
+        "control_id": {
+          "const": "rtp_ingress"
+        },
+        "kind": {
+          "const": "future_disable_or_delete"
+        },
+        "execution": {
+          "const": "not_implemented"
+        },
+        "automatic_retry": {
+          "const": false
+        },
+        "re_enable": {
+          "const": false
+        },
+        "evidence_status": {
+          "const": "waiting"
+        }
+      },
+      "additionalProperties": false
+    },
+    "rtpEgressAction": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/action"
+        }
+      ],
+      "properties": {
+        "control_id": {
+          "const": "rtp_egress"
+        },
+        "kind": {
+          "const": "future_disable_or_delete"
+        },
+        "execution": {
+          "const": "not_implemented"
+        },
+        "automatic_retry": {
+          "const": false
+        },
+        "re_enable": {
+          "const": false
+        },
+        "evidence_status": {
+          "const": "waiting"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

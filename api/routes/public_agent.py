@@ -16,9 +16,13 @@ from api.db import db_client
 from api.enums import TriggerState, WorkflowStatus
 from api.services.quota_service import check_dograh_quota_by_user_id
 from api.services.telephony.factory import (
-    get_default_telephony_provider,
     get_telephony_provider_by_id,
 )
+from api.services.telephony.jambonz_policy import (
+    JAMBONZ_PROVIDER,
+    resolve_jambonz_outbound_caller,
+)
+from api.services.telephony.registry import is_dispatch_purpose_allowed
 from api.utils.common import get_backend_endpoints
 
 router = APIRouter(prefix="/public/agent")
@@ -209,17 +213,24 @@ async def _execute_resolved_target(
             )
         resolved_cfg_id = cfg.id
     else:
+        default_cfg = await db_client.get_default_telephony_configuration(
+            target.organization_id
+        )
+        if not default_cfg:
+            raise HTTPException(
+                status_code=400,
+                detail="Telephony provider not configured for this organization",
+            )
         try:
-            provider = await get_default_telephony_provider(target.organization_id)
+            provider = await get_telephony_provider_by_id(
+                default_cfg.id, target.organization_id
+            )
         except ValueError:
             raise HTTPException(
                 status_code=400,
                 detail="Telephony provider not configured for this organization",
             )
-        default_cfg = await db_client.get_default_telephony_configuration(
-            target.organization_id
-        )
-        resolved_cfg_id = default_cfg.id if default_cfg else None
+        resolved_cfg_id = default_cfg.id
 
     # Validate provider is configured
     if not provider.validate_config():
@@ -232,6 +243,24 @@ async def _execute_resolved_target(
             status_code=400,
             detail="telephony_provider_not_supported_for_public_agent_calls",
         )
+    if not is_dispatch_purpose_allowed(provider.PROVIDER_NAME, "public"):
+        raise HTTPException(
+            status_code=403,
+            detail="telephony_provider_public_calls_not_permitted",
+        )
+
+    from_number: str | None = None
+    if provider.PROVIDER_NAME == JAMBONZ_PROVIDER:
+        if resolved_cfg_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="jambonz_telephony_configuration_required",
+            )
+        caller = await resolve_jambonz_outbound_caller(
+            telephony_configuration_id=resolved_cfg_id,
+            from_phone_number_id=None,
+        )
+        from_number = caller.from_number
 
     # 7. Determine the workflow run mode based on provider type
     workflow_run_mode = provider.PROVIDER_NAME
@@ -239,7 +268,9 @@ async def _execute_resolved_target(
     # 8. Create workflow run
     mode_label = "TEST" if use_draft else "API"
     workflow_run_name = f"WR-{mode_label}-{random.randint(1000, 9999)}"
+    caller_context = request.initial_context or {}
     initial_context = {
+        **caller_context,
         "provider": provider.PROVIDER_NAME,
         "phone_number": request.phone_number,
         "trigger_mode": "test" if use_draft else "production",
@@ -254,7 +285,6 @@ async def _execute_resolved_target(
         initial_context["api_key_id"] = api_key_id
     if api_key_created_by is not None:
         initial_context["api_key_created_by"] = api_key_created_by
-    initial_context.update(request.initial_context or {})
 
     workflow_run = await db_client.create_workflow_run(
         name=workflow_run_name,
@@ -296,6 +326,7 @@ async def _execute_resolved_target(
             workflow_run_id=workflow_run.id,
             workflow_id=target.workflow.id,
             user_id=execution_user_id,
+            from_number=from_number,
         )
     except Exception as e:
         logger.warning(

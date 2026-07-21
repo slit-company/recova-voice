@@ -1,0 +1,132 @@
+# syntax=docker/dockerfile:1
+# Public, reproducible source build for the dedicated Jambonz FreeSWITCH media server.
+# mod_audio_fork is dynamically loaded only in a FreeSWITCH instance whose calls are
+# controlled through outbound ESL by jambonz-feature-server; see the copied COPYING.md.
+FROM --platform=linux/amd64 debian:12-slim@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e AS build
+
+ARG FREESWITCH_COMMIT=9b0bbeaac93ed38ade6c4b3b23baba9b0b51ab00
+ARG JAMBONZ_MODULES_COMMIT=30f21899869fe445776078ddbc3e70dcb0ae6309
+ARG SPANDSP_COMMIT=e29ef78944d905b935d1306fa622e2eb2dc8ad75
+ARG SOFIA_SIP_COMMIT=6198851a610b7889c17e2d98fb84617bc1dd7aec
+ARG SOURCE_PATCH_SHA256
+ARG MODULES_PATCH_SHA256
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        autoconf automake build-essential ca-certificates git libboost-system-dev \
+        libboost-thread-dev libcurl4-openssl-dev libldns-dev libpcre2-dev \
+        libjpeg-dev libspeex-dev libspeexdsp-dev libssl-dev libtiff-dev libtool \
+        libtool-bin libwebsockets-dev pkg-config uuid-dev libsqlite3-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends clang \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+RUN git clone --recurse-submodules https://github.com/jambonz/freeswitch-legacy.git freeswitch \
+    && git -C freeswitch checkout --detach "$FREESWITCH_COMMIT" \
+    && git -C freeswitch submodule update --init --recursive \
+    && test "$(git -C freeswitch rev-parse HEAD)" = "$FREESWITCH_COMMIT" \
+    && git clone https://github.com/cyrenity/jambonz-freeswitch-modules.git jambonz-freeswitch-modules \
+    && git -C jambonz-freeswitch-modules checkout --detach "$JAMBONZ_MODULES_COMMIT" \
+    && test "$(git -C jambonz-freeswitch-modules rev-parse HEAD)" = "$JAMBONZ_MODULES_COMMIT" \
+    && git clone https://github.com/freeswitch/spandsp.git freeswitch/libs/spandsp \
+    && git -C freeswitch/libs/spandsp checkout --detach "$SPANDSP_COMMIT" \
+    && test "$(git -C freeswitch/libs/spandsp rev-parse HEAD)" = "$SPANDSP_COMMIT" \
+    && git clone https://github.com/freeswitch/sofia-sip.git freeswitch/libs/sofia-sip \
+    && git -C freeswitch/libs/sofia-sip checkout --detach "$SOFIA_SIP_COMMIT" \
+    && test "$(git -C freeswitch/libs/sofia-sip rev-parse HEAD)" = "$SOFIA_SIP_COMMIT" \
+    && test "${#SOURCE_PATCH_SHA256}" -eq 64 \
+    && cp -a jambonz-freeswitch-modules/mod_audio_fork freeswitch/src/mod/applications/ \
+    && sed -i '/mod_commands\/Makefile/a\        src/mod/applications/mod_audio_fork/Makefile' freeswitch/configure.ac
+COPY patches/media/jambonz-freeswitch-modules.patch /tmp/jambonz-freeswitch-modules.patch
+RUN test "${#MODULES_PATCH_SHA256}" -eq 64 \
+    && printf '%s  %s\n' "$MODULES_PATCH_SHA256" /tmp/jambonz-freeswitch-modules.patch | sha256sum -c - \
+    && git -C jambonz-freeswitch-modules apply /tmp/jambonz-freeswitch-modules.patch \
+    && cp jambonz-freeswitch-modules/mod_audio_fork/Makefile.am \
+        freeswitch/src/mod/applications/mod_audio_fork/Makefile.am
+
+RUN cd freeswitch/libs/spandsp \
+    && ./bootstrap.sh \
+    && CC=clang CXX=clang++ ./configure --prefix=/usr/local \
+    && make -j"$(nproc)" \
+    && make install \
+    && cd ../sofia-sip \
+    && ./bootstrap.sh \
+    && CC=clang CXX=clang++ ./configure --prefix=/usr/local \
+    && make -j"$(nproc)" \
+    && make install \
+    && ldconfig
+
+# Build only the SIP endpoint, outbound-ESL application, dialplan, and the audio
+# websocket module. Omit CDR, recording, database, and XML-RPC modules.
+RUN printf '%s\n' \
+        'applications/mod_commands' \
+        'applications/mod_dptools' \
+        'applications/mod_expr' \
+        'applications/mod_hash' \
+        'applications/mod_audio_fork' \
+        'dialplans/mod_dialplan_xml' \
+        'endpoints/mod_sofia' \
+        'event_handlers/mod_event_socket' \
+        'loggers/mod_console' \
+        > freeswitch/modules.conf \
+    && cd freeswitch \
+    && PKG_CONFIG_PATH=/usr/local/lib/pkgconfig ./bootstrap.sh \
+    && CC=clang CXX=clang++ PKG_CONFIG_PATH=/usr/local/lib/pkgconfig ./configure \
+        --prefix=/usr/local/freeswitch --enable-core-odbc-support=no \
+        --disable-core-libedit-support --disable-debug --disable-libvpx --disable-libyuv \
+    && make -j"$(nproc)" \
+    && make install DESTDIR=/out \
+    && mkdir -p /out/usr/local/lib \
+    && cp -a /usr/local/lib/libsofia-sip-ua.so* /out/usr/local/lib/ \
+    && cp -a /usr/local/lib/libspandsp.so* /out/usr/local/lib/
+
+FROM --platform=linux/amd64 debian:12-slim@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e
+ARG SOURCE_PATCH_SHA256
+ARG MODULES_PATCH_SHA256
+
+LABEL org.opencontainers.image.source="https://github.com/jambonz/freeswitch-legacy" \
+      org.opencontainers.image.revision="9b0bbeaac93ed38ade6c4b3b23baba9b0b51ab00" \
+      org.opencontainers.image.licenses="MPL-1.1 AND MIT AND LGPL-2.1-only" \
+      org.jambonz.freeswitch-modules.source="https://github.com/cyrenity/jambonz-freeswitch-modules.git" \
+      org.jambonz.freeswitch-modules.revision="30f21899869fe445776078ddbc3e70dcb0ae6309" \
+      org.jambonz.freeswitch-modules.patch.sha256="sha256:$MODULES_PATCH_SHA256" \
+      org.freeswitch.spandsp.source="https://github.com/freeswitch/spandsp" \
+      org.freeswitch.spandsp.revision="e29ef78944d905b935d1306fa622e2eb2dc8ad75" \
+      org.freeswitch.sofia-sip.source="https://github.com/freeswitch/sofia-sip" \
+      org.freeswitch.sofia-sip.revision="6198851a610b7889c17e2d98fb84617bc1dd7aec" \
+      org.recova.patch.sha256="sha256:$SOURCE_PATCH_SHA256" \
+      org.recova.base.digest="debian:12-slim@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libboost-system1.74.0 libboost-thread1.74.0 libcurl4 libjpeg62-turbo \
+        libldns3 libpcre2-8-0 libspeex1 libspeexdsp1 libssl3 libsqlite3-0 libtiff6 \
+        libuuid1 libwebsockets17 zlib1g \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system freeswitch \
+    && useradd --system --gid freeswitch --home-dir /usr/local/freeswitch --shell /usr/sbin/nologin freeswitch
+
+COPY --from=build /out/usr/local/freeswitch/ /usr/local/freeswitch/
+COPY --from=build /out/usr/local/lib/ /usr/local/lib/
+RUN rm -rf /usr/local/freeswitch/conf \
+    && mkdir -p /usr/local/freeswitch/conf/autoload_configs /run/freeswitch
+COPY freeswitch-modules.conf.xml /usr/local/freeswitch/conf/autoload_configs/modules.conf.xml
+COPY freeswitch-conf/ /usr/local/freeswitch/conf/
+COPY --from=build /src/freeswitch/LICENSE /usr/local/share/licenses/freeswitch/LICENSE
+COPY --from=build /src/jambonz-freeswitch-modules/COPYING.md /usr/local/share/licenses/jambonz-freeswitch-modules/COPYING.md
+COPY --from=build /src/jambonz-freeswitch-modules/LICENSE_MIT /usr/local/share/licenses/jambonz-freeswitch-modules/LICENSE_MIT
+COPY --from=build /src/jambonz-freeswitch-modules/LICENSE_AGPL-3.0 /usr/local/share/licenses/jambonz-freeswitch-modules/LICENSE_AGPL-3.0
+COPY --from=build /src/freeswitch/libs/spandsp/COPYING /usr/local/share/licenses/spandsp/COPYING
+COPY --from=build /src/freeswitch/libs/sofia-sip/COPYING /usr/local/share/licenses/sofia-sip/COPYING
+
+RUN chown -R freeswitch:freeswitch /usr/local/freeswitch /run/freeswitch
+
+ENV LD_LIBRARY_PATH=/usr/local/lib \
+    TMPDIR=/run/freeswitch
+
+USER freeswitch
+WORKDIR /usr/local/freeswitch
+ENTRYPOINT ["sh", "-ec", ": \"${FREESWITCH_EVENT_SOCKET_PASSWORD:?FREESWITCH_EVENT_SOCKET_PASSWORD must be set}\"; test \"${#FREESWITCH_EVENT_SOCKET_PASSWORD}\" -ge 16; test -w /tmp; mkdir -p /run/freeswitch; test -w /run/freeswitch; exec /usr/local/freeswitch/bin/freeswitch \"$@\"", "--"]
+CMD ["-nonat", "-nf", "-np", "-run", "/run/freeswitch", "-conf", "/usr/local/freeswitch/conf", "-log", "/run/freeswitch", "-db", "/run/freeswitch"]

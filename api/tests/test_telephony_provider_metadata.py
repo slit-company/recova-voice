@@ -55,10 +55,12 @@ def test_recova_owned_clawops_provider_allows_preview_smoke_only():
     assert spec.supports_media_transport is True
 
 
-def test_operator_owned_jambonz_provider_is_hidden_but_media_capable():
+def test_operator_owned_jambonz_provider_is_hidden_and_preview_smoke_bounded():
     spec = get("jambonz")
 
     assert spec.visible_in_self_serve is False
-    assert spec.supports_preview_smoke is False
+    assert spec.supports_public_calls is False
+    assert spec.supports_preview_smoke is True
     assert spec.supports_media_transport is True
+    assert spec.allowed_dispatch_purposes == frozenset({"phone_preview_smoke"})
     assert spec.account_id_credential_field == "account_id"

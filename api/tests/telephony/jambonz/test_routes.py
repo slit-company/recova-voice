@@ -1,11 +1,28 @@
+import json
+import base64
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI, Response
 from fastapi.testclient import TestClient
+import pytest
+from pydantic import SecretStr
+from starlette.websockets import WebSocketDisconnect
 
 from api.routes.telephony import router
 from api.services.telephony.providers.jambonz.contract import JambonzContractSimulator
+from api.services.telephony.providers.jambonz.facade.app import (
+    _jambonz_verbs,
+    create_facade_app,
+)
+from api.services.telephony.providers.jambonz.facade.auth import VerificationPolicy
+from api.services.telephony.providers.jambonz.facade.models import (
+    HookResponse,
+    ListenVerb,
+    WsAuth,
+)
+import api.services.telephony.providers.jambonz.routes as jambonz_routes
 
 
 class _InboundJambonzProviderClass:
@@ -42,6 +59,99 @@ def _app() -> FastAPI:
     app = FastAPI()
     app.include_router(router)
     return app
+
+
+def _facade_app() -> FastAPI:
+    dependency = SimpleNamespace(ready=AsyncMock(return_value=True))
+    verifier = SimpleNamespace(verify=lambda **_kwargs: True)
+    return create_facade_app(
+        f12_client=dependency,
+        stock_client=dependency,
+        signature_verifier=verifier,
+        verification_policy=VerificationPolicy(
+            dispatch_key_id="dispatch-key", media_key_id="media-key"
+        ),
+        media_websocket_url="wss://media.recova.invalid/calls",
+    )
+
+
+def test_facade_validation_failure_is_redacted_and_returns_no_call_verbs():
+    raw_capability = "raw-dispatch-capability-must-not-leak"
+    raw_address = "+821012345678"
+    response = TestClient(_facade_app()).post(
+        "/v1/jambonz-contract/hooks/outbound/record-answer-and-mint-media",
+        json={
+            "context": {
+                "account_id": "other-tenant",
+                "application_id": "application-1",
+                "run_id": "run-1",
+                "attempt_id": "attempt-1",
+                "direction": "inbound",
+                "stock_call_id": "stock-call",
+                "authority_deadline": "not-a-deadline",
+            },
+            "stock_call_id": "changed-call",
+            "idempotency_key": "idem-0000000000000001",
+            "request_digest": "a" * 64,
+            "event_nonce": raw_capability,
+            "observed_wall_time": "invalid",
+            "proposed_deadline": "invalid",
+            "candidate_digest": "b" * 64,
+            "to_address": raw_address,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"category": "contract_mismatch"}
+    serialized = response.text
+    assert raw_capability not in serialized
+    assert raw_address not in serialized
+    assert "answer" not in serialized
+    assert "listen" not in serialized
+
+
+def test_facade_has_no_docs_or_ambient_readiness_authority():
+    client = TestClient(_facade_app())
+
+    assert client.get("/openapi.json").status_code == 404
+    assert client.get("/docs").status_code == 404
+    assert client.get("/readyz").json() == {"status": "ready"}
+
+
+def test_facade_renders_official_ws_auth_without_serializing_other_authority():
+    response = HookResponse(
+        organization_id=7,
+        verbs=(
+            ListenVerb(
+                url="wss://media.recova.invalid/calls",
+                ws_auth=WsAuth(password=SecretStr("opaque-media-token")),
+            ),
+        ),
+        authority_receipt_id="media-receipt",
+        idempotency_key="idem-0000000000000001",
+        request_digest="a" * 64,
+    )
+
+    rendered = _jambonz_verbs(response)
+
+    assert rendered == [
+        {
+            "verb": "listen",
+            "url": "wss://media.recova.invalid/calls",
+            "wsAuth": {
+                "username": "recova-media",
+                "password": "opaque-media-token",
+            },
+            "sampleRate": 8000,
+            "mixType": "mono",
+            "bidirectionalAudio": {
+                "enabled": True,
+                "streaming": True,
+                "sampleRate": 8000,
+            },
+        }
+    ]
+    assert "media-receipt" not in json.dumps(rendered)
 
 
 def _assigned_phone_row(*, inbound_workflow_id):
@@ -215,6 +325,10 @@ def test_inbound_run_accepts_signed_contract_fixture_for_bound_workflow():
             new=AsyncMock(return_value=True),
         ),
         patch(
+            "api.routes.telephony.is_dispatch_purpose_allowed",
+            return_value=True,
+        ),
+        patch(
             "api.routes.telephony.check_dograh_quota_by_user_id",
             new=AsyncMock(return_value=SimpleNamespace(has_quota=True)),
         ),
@@ -268,3 +382,237 @@ def test_inbound_run_accepts_signed_contract_fixture_for_bound_workflow():
     assert event.inventory_id == 1234
     assert event.artifact_payload["evidence_markers"]["is_contract_fixture"] is True
     assert event.artifact_payload["evidence_markers"]["live_trunk_validated"] is False
+
+
+def _media_token(*, expires_delta=timedelta(seconds=45), **claim_overrides):
+    now = datetime.now(timezone.utc)
+    expires_at = now + expires_delta
+    claims = {
+        "account_id": "acct-kr",
+        "application_id": "app-voice",
+        "attempt_id": "attempt-uuid",
+        "authority_deadline": expires_at.isoformat(),
+        "callback_event_nonce": "event-nonce",
+        "candidate_digest": "a" * 64,
+        "contract_version": "recova-jambonz-facade-v1",
+        "direction": "outbound",
+        "gate_envelope_digest": "b" * 64,
+        "idempotency_key": "idem-0000000000000001",
+        "observed_event_wall_time": now.isoformat(),
+        "organization_id": 7,
+        "request_digest": "c" * 64,
+        "run_id": "501",
+        "stock_call_id": "stock-call-1",
+    }
+    claims.update(claim_overrides)
+    payload = {
+        "algorithm": "ES256",
+        "claims": claims,
+        "contract_version": "recova-jambonz-facade-v1",
+        "expires_at": expires_at.isoformat(),
+        "issued_at": now.isoformat(),
+        "key_id": "media-key",
+        "nonce": "media-nonce",
+        "signature": "media-signature",
+        "verification_domain": "recova.onnuri.smoke.media.v1",
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _media_auth(token, *, username="recova-media"):
+    encoded = base64.b64encode(f"{username}:{token}".encode()).decode()
+    return {"authorization": f"Basic {encoded}"}
+
+
+def test_jambonz_media_rejects_missing_duplicate_and_wrong_basic_auth():
+    client = TestClient(_app())
+    token = _media_token()
+    authorization = _media_auth(token)["authorization"].encode()
+    duplicate = SimpleNamespace(
+        scope={
+            "headers": [
+                (b"authorization", authorization),
+                (b"authorization", authorization),
+            ]
+        }
+    )
+    assert jambonz_routes._basic_media_capability(duplicate) is None
+
+    for headers in ({}, _media_auth(token, username="other-user")):
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect(
+                "/telephony/jambonz/onnuri-smoke/media",
+                headers=headers,
+            ):
+                pass
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "not-json",
+        _media_token(run_id="0"),
+        _media_token(run_id="smoke-envelope-uuid"),
+        _media_token(expires_delta=timedelta(seconds=-1)),
+        _media_token(candidate_digest="wrong"),
+    ],
+)
+def test_jambonz_media_rejects_malformed_misbound_or_expired_capability(token):
+    pipeline = AsyncMock()
+    with patch(
+        "api.services.telephony.providers.jambonz.routes._run_media_pipeline", new=pipeline
+    ):
+        with pytest.raises(WebSocketDisconnect):
+            with TestClient(_app()).websocket_connect(
+                "/telephony/jambonz/onnuri-smoke/media",
+                headers=_media_auth(token),
+            ):
+                pass
+    pipeline.assert_not_awaited()
+
+
+def test_jambonz_media_rejects_wrong_stock_metadata_before_consume():
+    consume = AsyncMock()
+    pipeline = AsyncMock()
+    with (
+        patch.object(jambonz_routes.onnuri_smoke_f12, "consume_media", consume),
+        patch(
+            "api.services.telephony.providers.jambonz.routes._run_media_pipeline", new=pipeline
+        ),
+        TestClient(_app()).websocket_connect(
+            "/telephony/jambonz/onnuri-smoke/media",
+            headers=_media_auth(_media_token()),
+        ) as websocket,
+    ):
+        websocket.send_json({"callSid": "different-stock-call"})
+        with pytest.raises(WebSocketDisconnect):
+            websocket.receive_json()
+
+    consume.assert_not_awaited()
+    pipeline.assert_not_awaited()
+
+
+@pytest.mark.parametrize("consume_error", [RuntimeError("replay"), RuntimeError("terminal")])
+def test_jambonz_media_rejects_replay_or_consume_failure(consume_error):
+    consume = AsyncMock(side_effect=consume_error)
+    pipeline = AsyncMock()
+    with (
+        patch.object(jambonz_routes.onnuri_smoke_f12, "consume_media", consume),
+        patch(
+            "api.services.telephony.providers.jambonz.routes._run_media_pipeline", new=pipeline
+        ),
+        TestClient(_app()).websocket_connect(
+            "/telephony/jambonz/onnuri-smoke/media",
+            headers=_media_auth(_media_token()),
+        ) as websocket,
+    ):
+        websocket.send_json({"callSid": "stock-call-1"})
+        with pytest.raises(WebSocketDisconnect):
+            websocket.receive_json()
+
+    consume.assert_awaited_once()
+    pipeline.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("organization_id", "state", "is_completed"),
+    [(8, "initialized", False), (7, "completed", True)],
+)
+def test_jambonz_media_rejects_cross_tenant_or_terminal_run(
+    organization_id, state, is_completed
+):
+    workflow_run = SimpleNamespace(
+        id=501,
+        workflow_id=33,
+        state=state,
+        call_type="outbound",
+        is_completed=is_completed,
+        gathered_context={"call_id": "stock-call-1"},
+    )
+    workflow = SimpleNamespace(id=33, organization_id=organization_id, user_id=99)
+    pipeline = AsyncMock()
+    with (
+        patch.object(
+            jambonz_routes.onnuri_smoke_f12,
+            "consume_media",
+            new=AsyncMock(return_value={}),
+        ),
+        patch.object(
+            jambonz_routes.db_client,
+            "get_workflow_run_by_id",
+            new=AsyncMock(return_value=workflow_run),
+        ),
+        patch.object(
+            jambonz_routes.db_client,
+            "get_workflow_by_id",
+            new=AsyncMock(return_value=workflow),
+        ),
+        patch(
+            "api.services.telephony.providers.jambonz.routes._run_media_pipeline", new=pipeline
+        ),
+        TestClient(_app()).websocket_connect(
+            "/telephony/jambonz/onnuri-smoke/media",
+            headers=_media_auth(_media_token()),
+        ) as websocket,
+    ):
+        websocket.send_json({"callSid": "stock-call-1"})
+        with pytest.raises(WebSocketDisconnect):
+            websocket.receive_json()
+
+    pipeline.assert_not_awaited()
+
+
+def test_jambonz_media_happy_path_consumes_once_and_runs_shared_pipeline_once():
+    workflow_run = SimpleNamespace(
+        id=501,
+        workflow_id=33,
+        state="initialized",
+        call_type="outbound",
+        is_completed=False,
+        gathered_context={"call_id": "stock-call-1"},
+        initial_context={"telephony_preview": True},
+    )
+    workflow = SimpleNamespace(id=33, organization_id=7, user_id=99)
+    provider = SimpleNamespace(
+        PROVIDER_NAME="jambonz",
+        account_id="acct-kr",
+        application_id="app-voice",
+    )
+    consume = AsyncMock(return_value={})
+    pipeline = AsyncMock()
+    update = AsyncMock()
+    with (
+        patch.object(jambonz_routes.onnuri_smoke_f12, "consume_media", consume),
+        patch.object(
+            jambonz_routes.db_client,
+            "get_workflow_run_by_id",
+            new=AsyncMock(return_value=workflow_run),
+        ),
+        patch.object(
+            jambonz_routes.db_client,
+            "get_workflow_by_id",
+            new=AsyncMock(return_value=workflow),
+        ),
+        patch.object(jambonz_routes.db_client, "update_workflow_run", new=update),
+        patch.object(
+            jambonz_routes,
+            "get_telephony_provider_for_run",
+            new=AsyncMock(return_value=provider),
+        ),
+        patch(
+            "api.services.telephony.providers.jambonz.routes._run_media_pipeline", new=pipeline
+        ),
+        TestClient(_app()).websocket_connect(
+            "/telephony/jambonz/onnuri-smoke/media",
+            headers=_media_auth(_media_token()),
+        ) as websocket,
+    ):
+        websocket.send_json({"callSid": "stock-call-1"})
+
+    consume.assert_awaited_once()
+    pipeline.assert_awaited_once()
+    kwargs = pipeline.await_args.kwargs
+    assert kwargs["workflow_id"] == 33
+    assert kwargs["workflow_run_id"] == 501
+    assert kwargs["user_id"] == 99
+    assert kwargs["transport_kwargs"]["jambonz_sample_rate"] == 8000

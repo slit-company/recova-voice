@@ -943,7 +943,7 @@ async def test_phone_preview_inbound_workflow_run_initial_context_carries_runtim
         mock_db.attach_phone_preview_call = AsyncMock(return_value=attached_session)
         mock_db.update_phone_preview_session_status = AsyncMock()
 
-        response = await service.answer_inbound_preview(
+        response = await service.handle_inbound_preview(
             provider_instance=provider,
             normalized_data=normalized_data,
             organization_id=11,
@@ -1966,7 +1966,7 @@ async def test_status_returns_stored_inbound_preview_number():
 
 
 @pytest.mark.asyncio
-async def test_answer_inbound_preview_claims_verified_caller_and_uses_latest_draft(
+async def test_handle_inbound_preview_claims_verified_caller_and_uses_latest_draft(
     monkeypatch,
 ):
     monkeypatch.setenv("ENVIRONMENT", "test")
@@ -2046,7 +2046,7 @@ async def test_answer_inbound_preview_claims_verified_caller_and_uses_latest_dra
         mock_db.attach_phone_preview_call = AsyncMock(return_value=attached_session)
         mock_db.update_phone_preview_session_status = AsyncMock()
 
-        response = await service.answer_inbound_preview(
+        response = await service.handle_inbound_preview(
             provider_instance=provider,
             normalized_data=normalized_data,
             organization_id=11,
@@ -2086,7 +2086,7 @@ async def test_answer_inbound_preview_claims_verified_caller_and_uses_latest_dra
 
 
 @pytest.mark.asyncio
-async def test_answer_inbound_preview_requires_model_configuration_before_stream(
+async def test_handle_inbound_preview_requires_model_configuration_before_stream(
     monkeypatch,
 ):
     monkeypatch.setenv("ENVIRONMENT", "test")
@@ -2138,7 +2138,7 @@ async def test_answer_inbound_preview_requires_model_configuration_before_stream
         mock_db.update_phone_preview_session_status = AsyncMock()
 
         with pytest.raises(HTTPException) as exc:
-            await service.answer_inbound_preview(
+            await service.handle_inbound_preview(
                 provider_instance=provider,
                 normalized_data=normalized_data,
                 organization_id=11,
@@ -2157,3 +2157,207 @@ async def test_answer_inbound_preview_requires_model_configuration_before_stream
         status="failed",
         failure_reason="inbound_preview_failed",
     )
+
+@pytest.mark.asyncio
+async def test_wait_for_jambonz_inbound_requires_current_proof_before_reservation(
+    monkeypatch,
+):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_CONFIGURATION_ID", "901")
+    monkeypatch.setenv("RECOVA_PREVIEW_FROM_PHONE_NUMBER_ID", "902")
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+    provider = SimpleNamespace(
+        PROVIDER_NAME="jambonz",
+        validate_config=Mock(return_value=True),
+    )
+    phone_row = SimpleNamespace(
+        id=902,
+        address="070-0000-0000",
+        address_normalized="+827000000000",
+        is_active=True,
+        inbound_workflow_id=None,
+    )
+
+    with (
+        patch("api.services.phone_preview.service.db_client") as mock_db,
+        patch(
+            "api.services.phone_preview.service._get_preview_telephony_provider_by_id",
+            new=AsyncMock(return_value=provider),
+        ),
+        patch(
+            "api.services.phone_preview.service.is_current_jambonz_routable_phone_tuple",
+            new=AsyncMock(return_value=False),
+        ) as proof_gate,
+    ):
+        mock_db.get_phone_number_for_config = AsyncMock(return_value=phone_row)
+        mock_db.begin_phone_preview_inbound_wait = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await service.wait_for_inbound(user=user, session_id=123)
+
+    assert exc.value.detail == "preview_jambonz_current_proof_required"
+    proof_gate.assert_awaited_once_with(
+        organization_id=900,
+        telephony_configuration_id=901,
+        telephony_phone_number_id=902,
+        address="+827000000000",
+    )
+    mock_db.begin_phone_preview_inbound_wait.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_jambonz_inbound_preview_rechecks_proof_before_stream():
+    service = PhonePreviewService()
+    provider = SimpleNamespace(PROVIDER_NAME="jambonz")
+    normalized_data = SimpleNamespace(
+        from_number="+821012345678",
+        to_number="+827000000000",
+    )
+    claimed_session = SimpleNamespace(id=123)
+
+    with (
+        patch("api.services.phone_preview.service.db_client") as mock_db,
+        patch(
+            "api.services.phone_preview.service.is_current_jambonz_routable_phone_tuple",
+            new=AsyncMock(side_effect=[True, False]),
+        ) as proof_gate,
+    ):
+        mock_db.claim_phone_preview_inbound_session = AsyncMock(
+            return_value=claimed_session
+        )
+        mock_db.update_phone_preview_session_status = AsyncMock()
+
+        response = await service.handle_inbound_preview(
+            provider_instance=provider,
+            normalized_data=normalized_data,
+            organization_id=11,
+            telephony_configuration_id=901,
+            from_phone_number_id=902,
+        )
+
+    assert response is None
+    assert proof_gate.await_count == 2
+    mock_db.claim_phone_preview_inbound_session.assert_awaited_once()
+    mock_db.update_phone_preview_session_status.assert_awaited_once_with(
+        123,
+        status="failed",
+        failure_reason="inbound_preview_proof_required",
+    )
+
+
+@pytest.mark.asyncio
+async def test_wait_for_jambonz_inbound_uses_server_config_and_tenant_session_owners(
+    monkeypatch,
+):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_ORGANIZATION_ID", "900")
+    monkeypatch.setenv("RECOVA_PREVIEW_TELEPHONY_CONFIGURATION_ID", "901")
+    monkeypatch.setenv("RECOVA_PREVIEW_FROM_PHONE_NUMBER_ID", "902")
+    service = PhonePreviewService()
+    user = SimpleNamespace(id=7, selected_organization_id=11)
+    waiting_session = SimpleNamespace(
+        id=123,
+        organization_id=11,
+        user_id=7,
+        workflow_id=33,
+        status="awaiting_inbound",
+        phone_number_masked="+82****5678",
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        workflow_run_id=None,
+        provider_call_id=None,
+        failure_reason=None,
+    )
+    provider = SimpleNamespace(
+        PROVIDER_NAME="jambonz",
+        validate_config=Mock(return_value=True),
+    )
+    phone_row = SimpleNamespace(
+        id=902,
+        address="070-0000-0000",
+        address_normalized="+827000000000",
+        is_active=True,
+        inbound_workflow_id=None,
+    )
+
+    with (
+        patch("api.services.phone_preview.service.db_client") as mock_db,
+        patch(
+            "api.services.phone_preview.service._get_preview_telephony_provider_by_id",
+            new=AsyncMock(return_value=provider),
+        ),
+        patch(
+            "api.services.phone_preview.service.is_current_jambonz_routable_phone_tuple",
+            new=AsyncMock(return_value=True),
+        ) as proof_gate,
+    ):
+        mock_db.get_phone_number_for_config = AsyncMock(return_value=phone_row)
+        mock_db.begin_phone_preview_inbound_wait = AsyncMock(
+            return_value=(waiting_session, True)
+        )
+        mock_db.get_workflow = AsyncMock(
+            return_value=SimpleNamespace(id=33, user_id=99, organization_id=11)
+        )
+        mock_db.get_draft_version = AsyncMock(
+            return_value=SimpleNamespace(
+                id=44,
+                template_context_variables={},
+                workflow_configurations={},
+            )
+        )
+        mock_db.get_user_configurations = AsyncMock(
+            return_value=_valid_voice_user_config()
+        )
+        mock_db.update_phone_preview_session_status = AsyncMock()
+
+        result = await service.wait_for_inbound(user=user, session_id=123)
+
+    assert result.status == "awaiting_inbound"
+    proof_gate.assert_awaited_once_with(
+        organization_id=900,
+        telephony_configuration_id=901,
+        telephony_phone_number_id=902,
+        address="+827000000000",
+    )
+    mock_db.begin_phone_preview_inbound_wait.assert_awaited_once_with(
+        123,
+        organization_id=11,
+        user_id=7,
+        provider="jambonz",
+        telephony_configuration_id=901,
+        from_phone_number_id=902,
+    )
+
+@pytest.mark.asyncio
+async def test_jambonz_preview_final_authorization_rejects_bound_phone():
+    service = PhonePreviewService()
+    settings = SimpleNamespace(
+        organization_id=900,
+        configuration_id=901,
+        from_phone_number_id=902,
+    )
+    phone = SimpleNamespace(
+        id=902,
+        organization_id=900,
+        is_active=True,
+        inbound_workflow_id=123,
+        extra_metadata={"inventory_id": 903},
+    )
+
+    with patch("api.services.phone_preview.service.db_client") as mock_db:
+        mock_db.get_phone_number_for_config = AsyncMock(return_value=phone)
+        mock_db.get_assigned_inventory_for_phone_number = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await service._consume_jambonz_application_smoke_lease(
+                settings=settings,
+                workflow=SimpleNamespace(user_id=7),
+                workflow_run=SimpleNamespace(id=501),
+                session=SimpleNamespace(max_duration_seconds=30),
+                attempt_kind="outbound",
+            )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "jambonz_application_smoke_authorization_required"
+    mock_db.get_assigned_inventory_for_phone_number.assert_not_awaited()

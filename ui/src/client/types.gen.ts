@@ -137,6 +137,90 @@ export type AriConfigurationResponse = {
 };
 
 /**
+ * AWSConnectConfigurationRequest
+ *
+ * Request schema for Amazon Connect outbound configuration.
+ */
+export type AwsConnectConfigurationRequest = {
+    /**
+     * Provider
+     */
+    provider?: 'aws_connect';
+    /**
+     * Region
+     *
+     * AWS region for the Amazon Connect instance
+     */
+    region: string;
+    /**
+     * Instance Id
+     *
+     * Amazon Connect instance ID
+     */
+    instance_id: string;
+    /**
+     * Contact Flow Id
+     *
+     * Published CONTACT_FLOW ID used by StartOutboundVoiceContact
+     */
+    contact_flow_id: string;
+    /**
+     * Queue Id
+     *
+     * Optional Amazon Connect queue ID. Recova preview calls prefer an explicit SourcePhoneNumber from the selected phone number row.
+     */
+    queue_id?: string | null;
+    /**
+     * Ring Timeout Seconds
+     *
+     * Optional ring timeout. Leave blank for the Amazon Connect default; some accounts require CAMPAIGN traffic to set a custom timer.
+     */
+    ring_timeout_seconds?: number | null;
+    /**
+     * From Numbers
+     *
+     * E.164 Amazon Connect phone numbers managed by this config.
+     */
+    from_numbers?: Array<string>;
+};
+
+/**
+ * AWSConnectConfigurationResponse
+ *
+ * Response schema for Amazon Connect configuration.
+ */
+export type AwsConnectConfigurationResponse = {
+    /**
+     * Provider
+     */
+    provider?: 'aws_connect';
+    /**
+     * Region
+     */
+    region: string;
+    /**
+     * Instance Id
+     */
+    instance_id: string;
+    /**
+     * Contact Flow Id
+     */
+    contact_flow_id: string;
+    /**
+     * Queue Id
+     */
+    queue_id?: string | null;
+    /**
+     * Ring Timeout Seconds
+     */
+    ring_timeout_seconds?: number | null;
+    /**
+     * From Numbers
+     */
+    from_numbers?: Array<string>;
+};
+
+/**
  * AmbientNoiseUploadRequest
  */
 export type AmbientNoiseUploadRequest = {
@@ -334,6 +418,18 @@ export type CampaignDefaultsResponse = {
      * From Numbers Count
      */
     from_numbers_count: number;
+    /**
+     * Default Telephony Configuration Id
+     */
+    default_telephony_configuration_id?: number | null;
+    /**
+     * Default Telephony Configuration Name
+     */
+    default_telephony_configuration_name?: string | null;
+    /**
+     * Default Telephony Configuration Provider
+     */
+    default_telephony_configuration_provider?: string | null;
     default_retry_config: RetryConfigResponse;
     last_campaign_settings?: LastCampaignSettingsResponse | null;
 };
@@ -706,6 +802,70 @@ export type CircuitBreakerConfigResponse = {
      * Min Calls In Window
      */
     min_calls_in_window?: number;
+};
+
+/**
+ * ClawOpsConfigurationRequest
+ *
+ * Request schema for ClawOps configuration.
+ */
+export type ClawOpsConfigurationRequest = {
+    /**
+     * Provider
+     */
+    provider?: 'clawops';
+    /**
+     * Account Id
+     *
+     * ClawOps Account ID
+     */
+    account_id: string;
+    /**
+     * Api Key
+     *
+     * ClawOps API key
+     */
+    api_key: string;
+    /**
+     * Signing Key
+     *
+     * ClawOps webhook signing key from dashboard settings
+     */
+    signing_key: string;
+    /**
+     * From Numbers
+     *
+     * List of ClawOps-owned Korean 070 numbers
+     */
+    from_numbers?: Array<string>;
+};
+
+/**
+ * ClawOpsConfigurationResponse
+ *
+ * Response schema for ClawOps configuration with masked sensitive fields.
+ */
+export type ClawOpsConfigurationResponse = {
+    /**
+     * Provider
+     */
+    provider?: 'clawops';
+    /**
+     * Account Id
+     */
+    account_id: string;
+    /**
+     * Api Key
+     */
+    api_key: string;
+    /**
+     * Signing Key
+     */
+    signing_key: string;
+    /**
+     * From Numbers
+     */
+    from_numbers: Array<string>;
 };
 
 /**
@@ -1162,6 +1322,89 @@ export type CurrentUsageResponse = {
      * Price Per Second Usd
      */
     price_per_second_usd?: number | null;
+};
+
+/**
+ * CustomerAssignedNumberBindRequest
+ */
+export type CustomerAssignedNumberBindRequest = {
+    /**
+     * Workflow Id
+     */
+    workflow_id: number;
+};
+
+/**
+ * CustomerAssignedNumberListResponse
+ */
+export type CustomerAssignedNumberListResponse = {
+    /**
+     * Numbers
+     */
+    numbers: Array<CustomerAssignedNumberResponse>;
+};
+
+/**
+ * CustomerAssignedNumberResponse
+ */
+export type CustomerAssignedNumberResponse = {
+    /**
+     * Inventory Id
+     */
+    inventory_id: number;
+    /**
+     * Provider
+     */
+    provider: string;
+    /**
+     * Address Masked
+     */
+    address_masked?: string | null;
+    /**
+     * Address Type
+     */
+    address_type: string;
+    /**
+     * Country Code
+     */
+    country_code?: string | null;
+    /**
+     * Label
+     */
+    label?: string | null;
+    status: TelephonyNumberInventoryStatus;
+    /**
+     * Telephony Configuration Id
+     */
+    telephony_configuration_id?: number | null;
+    /**
+     * Telephony Phone Number Id
+     */
+    telephony_phone_number_id?: number | null;
+    /**
+     * Inbound Workflow Id
+     */
+    inbound_workflow_id?: number | null;
+    /**
+     * Inbound Workflow Name
+     */
+    inbound_workflow_name?: string | null;
+    /**
+     * Is Active
+     */
+    is_active: boolean;
+    /**
+     * Is Default Caller Id
+     */
+    is_default_caller_id: boolean;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
 };
 
 /**
@@ -2013,6 +2256,100 @@ export type InitiateCallRequest = {
 export type ItemKind = 'node' | 'edge' | 'workflow';
 
 /**
+ * JambonzConfigurationRequest
+ *
+ * Request schema for Recova-owned Jambonz configuration.
+ */
+export type JambonzConfigurationRequest = {
+    /**
+     * Provider
+     */
+    provider?: 'jambonz';
+    /**
+     * Base Url
+     *
+     * Jambonz REST API base URL
+     */
+    base_url: string;
+    /**
+     * Account Id
+     *
+     * Jambonz account identifier
+     */
+    account_id: string;
+    /**
+     * Application Id
+     *
+     * Jambonz application identifier
+     */
+    application_id: string;
+    /**
+     * Api Key
+     *
+     * Jambonz REST API key
+     */
+    api_key: string;
+    /**
+     * Webhook Secret
+     *
+     * Shared secret for signed callbacks
+     */
+    webhook_secret: string;
+    /**
+     * Outbound Profile Id
+     *
+     * Optional Jambonz outbound SIP profile identifier
+     */
+    outbound_profile_id?: string | null;
+    /**
+     * From Numbers
+     *
+     * Assigned Recova 070 caller IDs managed by operators
+     */
+    from_numbers?: Array<string>;
+};
+
+/**
+ * JambonzConfigurationResponse
+ *
+ * Response schema for Jambonz configuration with masked sensitive fields.
+ */
+export type JambonzConfigurationResponse = {
+    /**
+     * Provider
+     */
+    provider?: 'jambonz';
+    /**
+     * Base Url
+     */
+    base_url: string;
+    /**
+     * Account Id
+     */
+    account_id: string;
+    /**
+     * Application Id
+     */
+    application_id: string;
+    /**
+     * Api Key
+     */
+    api_key: string;
+    /**
+     * Webhook Secret
+     */
+    webhook_secret: string;
+    /**
+     * Outbound Profile Id
+     */
+    outbound_profile_id?: string | null;
+    /**
+     * From Numbers
+     */
+    from_numbers: Array<string>;
+};
+
+/**
  * LangfuseCredentialsRequest
  */
 export type LangfuseCredentialsRequest = {
@@ -2295,6 +2632,222 @@ export type NodeTypesResponse = {
 };
 
 /**
+ * OnnuriStagingCandidateImportRequest
+ */
+export type OnnuriStagingCandidateImportRequest = {
+    /**
+     * Numbers
+     */
+    numbers: Array<TelephonyNumberInventoryImportItem>;
+};
+
+/**
+ * OnnuriStagingCandidateResponse
+ */
+export type OnnuriStagingCandidateResponse = {
+    /**
+     * Id
+     */
+    id: number;
+    /**
+     * Candidate Uuid
+     */
+    candidate_uuid: string;
+    /**
+     * Inventory Id
+     */
+    inventory_id: number;
+    /**
+     * Provider
+     */
+    provider: string;
+    /**
+     * Normalized Did
+     */
+    normalized_did: string;
+    /**
+     * Classification
+     */
+    classification: string;
+    /**
+     * Environment
+     */
+    environment: string;
+    /**
+     * State
+     */
+    state: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+};
+
+/**
+ * OnnuriStagingPreflightProofApproveRequest
+ */
+export type OnnuriStagingPreflightProofApproveRequest = {
+    /**
+     * Candidate Id
+     */
+    candidate_id: number;
+    /**
+     * Organization Id
+     */
+    organization_id: number;
+    /**
+     * Predicate Class
+     */
+    predicate_class: 'exception_waiting' | 'retain_standard';
+    /**
+     * Canonical Input
+     */
+    canonical_input: {
+        [key: string]: unknown;
+    };
+    /**
+     * Expires At
+     */
+    expires_at: string;
+};
+
+/**
+ * OnnuriStagingPreflightProofAssignRequest
+ */
+export type OnnuriStagingPreflightProofAssignRequest = {
+    /**
+     * Proof Id
+     */
+    proof_id: number;
+    /**
+     * Organization Id
+     */
+    organization_id: number;
+    /**
+     * Reservation Expires At
+     */
+    reservation_expires_at?: string | null;
+    /**
+     * Note
+     */
+    note?: string | null;
+    /**
+     * Telephony Configuration Id
+     */
+    telephony_configuration_id?: number | null;
+    /**
+     * Inbound Workflow Id
+     */
+    inbound_workflow_id?: number | null;
+    /**
+     * Label
+     */
+    label?: string | null;
+    /**
+     * Set Default Caller Id
+     */
+    set_default_caller_id?: boolean;
+};
+
+/**
+ * OnnuriStagingPreflightProofReserveRequest
+ */
+export type OnnuriStagingPreflightProofReserveRequest = {
+    /**
+     * Proof Id
+     */
+    proof_id: number;
+    /**
+     * Organization Id
+     */
+    organization_id: number;
+    /**
+     * Reservation Expires At
+     */
+    reservation_expires_at?: string | null;
+    /**
+     * Note
+     */
+    note?: string | null;
+};
+
+/**
+ * OnnuriStagingPreflightProofResponse
+ */
+export type OnnuriStagingPreflightProofResponse = {
+    /**
+     * Id
+     */
+    id: number;
+    /**
+     * Candidate Id
+     */
+    candidate_id: number;
+    /**
+     * Organization Id
+     */
+    organization_id: number;
+    /**
+     * Inventory Id
+     */
+    inventory_id?: number | null;
+    /**
+     * Scope Key
+     */
+    scope_key: string;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Canonical Hash
+     */
+    canonical_hash: string;
+    /**
+     * Approved
+     */
+    approved: boolean;
+    /**
+     * Passed
+     */
+    passed: boolean;
+    /**
+     * Predicate Class
+     */
+    predicate_class: string;
+    /**
+     * Expires At
+     */
+    expires_at: string;
+    /**
+     * Revoked At
+     */
+    revoked_at?: string | null;
+    /**
+     * Invalidated At
+     */
+    invalidated_at?: string | null;
+    /**
+     * Is Current
+     */
+    is_current: boolean;
+    /**
+     * Created At
+     */
+    created_at: string;
+};
+
+/**
+ * OnnuriStagingPreflightProofRevokeRequest
+ */
+export type OnnuriStagingPreflightProofRevokeRequest = {
+    /**
+     * Reason
+     */
+    reason: string;
+};
+
+/**
  * PhoneNumberCreateRequest
  *
  * Create a new phone number under a telephony configuration.
@@ -2454,6 +3007,70 @@ export type PhonePreviewCallRequest = {
      * Session Id
      */
     session_id: number;
+    /**
+     * Idempotency Key
+     */
+    idempotency_key?: string | null;
+    /**
+     * Manual Acknowledgement
+     */
+    manual_acknowledgement?: string | null;
+};
+
+/**
+ * PhonePreviewContainRequest
+ */
+export type PhonePreviewContainRequest = {
+    /**
+     * Session Id
+     */
+    session_id: number;
+    /**
+     * Terminal Class
+     */
+    terminal_class: string;
+    /**
+     * Terminal Reason
+     */
+    terminal_reason: string;
+};
+
+/**
+ * PhonePreviewLatencySummary
+ */
+export type PhonePreviewLatencySummary = {
+    /**
+     * Workflow Run Id
+     */
+    workflow_run_id: number;
+    /**
+     * Latency Profile
+     */
+    latency_profile?: string | null;
+    /**
+     * User Stop To Bot Started Ms
+     */
+    user_stop_to_bot_started_ms?: number | null;
+    /**
+     * Stt Final Ms
+     */
+    stt_final_ms?: number | null;
+    /**
+     * Llm Ttfb Ms
+     */
+    llm_ttfb_ms?: number | null;
+    /**
+     * Tts Ttfb Ms
+     */
+    tts_ttfb_ms?: number | null;
+    /**
+     * First Response Ms
+     */
+    first_response_ms?: number | null;
+    /**
+     * Updated At
+     */
+    updated_at?: string | null;
 };
 
 /**
@@ -2492,6 +3109,41 @@ export type PhonePreviewResponse = {
      * Dev Otp Code
      */
     dev_otp_code?: string | null;
+    /**
+     * Inbound Phone Number
+     */
+    inbound_phone_number?: string | null;
+    latency_summary?: PhonePreviewLatencySummary | null;
+    /**
+     * Gate States
+     */
+    gate_states?: {
+        [key: string]: boolean;
+    } | null;
+    /**
+     * Remaining Attempts
+     */
+    remaining_attempts?: number | null;
+    /**
+     * Proof Current
+     */
+    proof_current?: boolean | null;
+    /**
+     * Registration Fresh
+     */
+    registration_fresh?: boolean | null;
+    /**
+     * Media Fresh
+     */
+    media_fresh?: boolean | null;
+    /**
+     * Contained
+     */
+    contained?: boolean | null;
+    /**
+     * Terminal Class
+     */
+    terminal_class?: string | null;
 };
 
 /**
@@ -3357,8 +4009,14 @@ export type TelephonyConfigurationCreateRequest = {
     config: ({
         provider: 'ari';
     } & AriConfigurationRequest) | ({
+        provider: 'aws_connect';
+    } & AwsConnectConfigurationRequest) | ({
+        provider: 'clawops';
+    } & ClawOpsConfigurationRequest) | ({
         provider: 'cloudonix';
     } & CloudonixConfigurationRequest) | ({
+        provider: 'jambonz';
+    } & JambonzConfigurationRequest) | ({
         provider: 'plivo';
     } & PlivoConfigurationRequest) | ({
         provider: 'telnyx';
@@ -3470,7 +4128,10 @@ export type TelephonyConfigurationResponse = {
     vonage?: VonageConfigurationResponse | null;
     vobiz?: VobizConfigurationResponse | null;
     cloudonix?: CloudonixConfigurationResponse | null;
+    clawops?: ClawOpsConfigurationResponse | null;
     ari?: AriConfigurationResponse | null;
+    jambonz?: JambonzConfigurationResponse | null;
+    aws_connect?: AwsConnectConfigurationResponse | null;
     telnyx?: TelnyxConfigurationResponse | null;
 };
 
@@ -3490,8 +4151,14 @@ export type TelephonyConfigurationUpdateRequest = {
     config?: ({
         provider: 'ari';
     } & AriConfigurationRequest) | ({
+        provider: 'aws_connect';
+    } & AwsConnectConfigurationRequest) | ({
+        provider: 'clawops';
+    } & ClawOpsConfigurationRequest) | ({
         provider: 'cloudonix';
     } & CloudonixConfigurationRequest) | ({
+        provider: 'jambonz';
+    } & JambonzConfigurationRequest) | ({
         provider: 'plivo';
     } & PlivoConfigurationRequest) | ({
         provider: 'telnyx';
@@ -3503,6 +4170,396 @@ export type TelephonyConfigurationUpdateRequest = {
         provider: 'vonage';
     } & VonageConfigurationRequest) | null;
 };
+
+/**
+ * TelephonyNumberInventoryAssignRequest
+ */
+export type TelephonyNumberInventoryAssignRequest = {
+    /**
+     * Organization Id
+     */
+    organization_id: number;
+    /**
+     * Telephony Configuration Id
+     */
+    telephony_configuration_id?: number | null;
+    /**
+     * Inbound Workflow Id
+     */
+    inbound_workflow_id?: number | null;
+    /**
+     * Label
+     */
+    label?: string | null;
+    /**
+     * Set Default Caller Id
+     */
+    set_default_caller_id?: boolean;
+    /**
+     * Note
+     */
+    note?: string | null;
+};
+
+/**
+ * TelephonyNumberInventoryAssignmentMetadata
+ */
+export type TelephonyNumberInventoryAssignmentMetadata = {
+    /**
+     * Managed By
+     */
+    managed_by?: string | null;
+    /**
+     * Recova Inventory State
+     */
+    recova_inventory_state?: string | null;
+    /**
+     * Inventory Id
+     */
+    inventory_id?: number | null;
+    /**
+     * Binding Metadata Consistent
+     */
+    binding_metadata_consistent?: boolean;
+};
+
+/**
+ * TelephonyNumberInventoryAuditListResponse
+ */
+export type TelephonyNumberInventoryAuditListResponse = {
+    /**
+     * Audit
+     */
+    audit: Array<TelephonyNumberInventoryAuditResponse>;
+};
+
+/**
+ * TelephonyNumberInventoryAuditResponse
+ */
+export type TelephonyNumberInventoryAuditResponse = {
+    /**
+     * Id
+     */
+    id: number;
+    /**
+     * Inventory Id
+     */
+    inventory_id: number;
+    /**
+     * Actor User Id
+     */
+    actor_user_id?: number | null;
+    /**
+     * Organization Id
+     */
+    organization_id?: number | null;
+    /**
+     * Action
+     */
+    action: string;
+    /**
+     * From Status
+     */
+    from_status?: string | null;
+    /**
+     * To Status
+     */
+    to_status?: string | null;
+    /**
+     * Details
+     */
+    details: {
+        [key: string]: unknown;
+    };
+    /**
+     * Created At
+     */
+    created_at: string;
+};
+
+/**
+ * TelephonyNumberInventoryImportItem
+ */
+export type TelephonyNumberInventoryImportItem = {
+    /**
+     * Address
+     */
+    address: string;
+    /**
+     * Provider
+     */
+    provider?: string;
+    /**
+     * Country Code
+     */
+    country_code?: string | null;
+    /**
+     * Label
+     */
+    label?: string | null;
+    /**
+     * Trunk Group
+     */
+    trunk_group?: string | null;
+    /**
+     * Extra Metadata
+     */
+    extra_metadata?: {
+        [key: string]: unknown;
+    };
+};
+
+/**
+ * TelephonyNumberInventoryImportRequest
+ */
+export type TelephonyNumberInventoryImportRequest = {
+    /**
+     * Numbers
+     */
+    numbers: Array<TelephonyNumberInventoryImportItem>;
+};
+
+/**
+ * TelephonyNumberInventoryImportResponse
+ */
+export type TelephonyNumberInventoryImportResponse = {
+    /**
+     * Imported
+     */
+    imported: Array<TelephonyNumberInventoryResponse>;
+    /**
+     * Skipped
+     */
+    skipped: Array<TelephonyNumberInventorySkippedItem>;
+};
+
+/**
+ * TelephonyNumberInventoryListResponse
+ */
+export type TelephonyNumberInventoryListResponse = {
+    /**
+     * Numbers
+     */
+    numbers: Array<TelephonyNumberInventoryResponse>;
+    /**
+     * Total Count
+     */
+    total_count: number;
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Offset
+     */
+    offset: number;
+};
+
+/**
+ * TelephonyNumberInventoryLiveValidationRequest
+ */
+export type TelephonyNumberInventoryLiveValidationRequest = {
+    /**
+     * Live Validation Source
+     */
+    live_validation_source?: 'operator_attestation' | 'live_validation_tool';
+    /**
+     * Live Validation Evidence Id
+     */
+    live_validation_evidence_id: string;
+    /**
+     * Contract Version
+     */
+    contract_version?: string | null;
+    /**
+     * Call Attempt Id
+     */
+    call_attempt_id?: string | null;
+    /**
+     * Note
+     */
+    note?: string | null;
+};
+
+/**
+ * TelephonyNumberInventoryReadinessMetadata
+ */
+export type TelephonyNumberInventoryReadinessMetadata = {
+    /**
+     * Contract Version
+     */
+    contract_version?: string | null;
+    /**
+     * Is Contract Fixture
+     */
+    is_contract_fixture?: boolean;
+    /**
+     * Live Trunk Validated
+     */
+    live_trunk_validated?: boolean;
+    /**
+     * Live Validation Source
+     */
+    live_validation_source?: string | null;
+    /**
+     * Live Validation Evidence Id
+     */
+    live_validation_evidence_id?: string | null;
+    /**
+     * Provider Config Id
+     */
+    provider_config_id?: string | null;
+    /**
+     * Phone Number Id
+     */
+    phone_number_id?: number | null;
+    /**
+     * Telephony Configuration Id
+     */
+    telephony_configuration_id?: number | null;
+    /**
+     * Telephony Phone Number Id
+     */
+    telephony_phone_number_id?: number | null;
+    /**
+     * Inventory Id
+     */
+    inventory_id?: number | null;
+    /**
+     * Call Attempt Id
+     */
+    call_attempt_id?: string | null;
+};
+
+/**
+ * TelephonyNumberInventoryReserveRequest
+ */
+export type TelephonyNumberInventoryReserveRequest = {
+    /**
+     * Organization Id
+     */
+    organization_id: number;
+    /**
+     * Reservation Expires At
+     */
+    reservation_expires_at?: string | null;
+    /**
+     * Note
+     */
+    note?: string | null;
+};
+
+/**
+ * TelephonyNumberInventoryResponse
+ */
+export type TelephonyNumberInventoryResponse = {
+    /**
+     * Id
+     */
+    id: number;
+    /**
+     * Provider
+     */
+    provider: string;
+    /**
+     * Trunk Group
+     */
+    trunk_group?: string | null;
+    /**
+     * Organization Id
+     */
+    organization_id?: number | null;
+    /**
+     * Telephony Configuration Id
+     */
+    telephony_configuration_id?: number | null;
+    /**
+     * Telephony Phone Number Id
+     */
+    telephony_phone_number_id?: number | null;
+    /**
+     * Address Masked
+     */
+    address_masked?: string | null;
+    /**
+     * Address Type
+     */
+    address_type: string;
+    /**
+     * Country Code
+     */
+    country_code?: string | null;
+    /**
+     * Label
+     */
+    label?: string | null;
+    status: TelephonyNumberInventoryStatus;
+    /**
+     * Reservation Expires At
+     */
+    reservation_expires_at?: string | null;
+    /**
+     * Quarantined Reason
+     */
+    quarantined_reason?: string | null;
+    /**
+     * Retired Reason
+     */
+    retired_reason?: string | null;
+    /**
+     * Extra Metadata
+     */
+    extra_metadata: {
+        [key: string]: unknown;
+    };
+    assignment_metadata?: TelephonyNumberInventoryAssignmentMetadata;
+    readiness_metadata?: TelephonyNumberInventoryReadinessMetadata;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
+ * TelephonyNumberInventorySkippedItem
+ */
+export type TelephonyNumberInventorySkippedItem = {
+    /**
+     * Provider
+     */
+    provider: string;
+    /**
+     * Address Masked
+     */
+    address_masked: string;
+    /**
+     * Reason
+     */
+    reason: string;
+    /**
+     * Inventory Id
+     */
+    inventory_id?: number | null;
+};
+
+/**
+ * TelephonyNumberInventoryStateChangeRequest
+ */
+export type TelephonyNumberInventoryStateChangeRequest = {
+    /**
+     * Reason
+     */
+    reason: string;
+};
+
+/**
+ * TelephonyNumberInventoryStatus
+ */
+export type TelephonyNumberInventoryStatus = 'available' | 'reserved' | 'assigned' | 'quarantined' | 'retired';
 
 /**
  * TelephonyProviderMetadata
@@ -4117,31 +5174,31 @@ export type UserConfigurationRequestResponseSchema = {
      * Llm
      */
     llm?: {
-        [key: string]: string | number | Array<string> | null;
+        [key: string]: string | number | boolean | Array<string> | null;
     } | null;
     /**
      * Tts
      */
     tts?: {
-        [key: string]: string | number | Array<string> | null;
+        [key: string]: string | number | boolean | Array<string> | null;
     } | null;
     /**
      * Stt
      */
     stt?: {
-        [key: string]: string | number | Array<string> | null;
+        [key: string]: string | number | boolean | Array<string> | null;
     } | null;
     /**
      * Embeddings
      */
     embeddings?: {
-        [key: string]: string | number | Array<string> | null;
+        [key: string]: string | number | boolean | Array<string> | null;
     } | null;
     /**
      * Realtime
      */
     realtime?: {
-        [key: string]: string | number | Array<string> | null;
+        [key: string]: string | number | boolean | Array<string> | null;
     } | null;
     /**
      * Is Realtime
@@ -5134,6 +6191,38 @@ export type CompleteTransferFunctionCallApiV1TelephonyTransferResultTransferIdPo
     200: unknown;
 };
 
+export type HandleClawopsStatusCallbackApiV1TelephonyClawopsStatusCallbackWorkflowRunIdPostData = {
+    body?: never;
+    path: {
+        /**
+         * Workflow Run Id
+         */
+        workflow_run_id: number;
+    };
+    query?: never;
+    url: '/api/v1/telephony/clawops/status-callback/{workflow_run_id}';
+};
+
+export type HandleClawopsStatusCallbackApiV1TelephonyClawopsStatusCallbackWorkflowRunIdPostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type HandleClawopsStatusCallbackApiV1TelephonyClawopsStatusCallbackWorkflowRunIdPostError = HandleClawopsStatusCallbackApiV1TelephonyClawopsStatusCallbackWorkflowRunIdPostErrors[keyof HandleClawopsStatusCallbackApiV1TelephonyClawopsStatusCallbackWorkflowRunIdPostErrors];
+
+export type HandleClawopsStatusCallbackApiV1TelephonyClawopsStatusCallbackWorkflowRunIdPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};
+
 export type HandleCloudonixStatusCallbackApiV1TelephonyCloudonixStatusCallbackWorkflowRunIdPostData = {
     body?: never;
     path: {
@@ -5181,6 +6270,70 @@ export type HandleCloudonixCdrApiV1TelephonyCloudonixCdrPostErrors = {
 };
 
 export type HandleCloudonixCdrApiV1TelephonyCloudonixCdrPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};
+
+export type HandleJambonzStatusApiV1TelephonyJambonzCdrWorkflowRunIdPostData = {
+    body?: never;
+    path: {
+        /**
+         * Workflow Run Id
+         */
+        workflow_run_id: number;
+    };
+    query?: never;
+    url: '/api/v1/telephony/jambonz/cdr/{workflow_run_id}';
+};
+
+export type HandleJambonzStatusApiV1TelephonyJambonzCdrWorkflowRunIdPostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type HandleJambonzStatusApiV1TelephonyJambonzCdrWorkflowRunIdPostError = HandleJambonzStatusApiV1TelephonyJambonzCdrWorkflowRunIdPostErrors[keyof HandleJambonzStatusApiV1TelephonyJambonzCdrWorkflowRunIdPostErrors];
+
+export type HandleJambonzStatusApiV1TelephonyJambonzCdrWorkflowRunIdPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};
+
+export type HandleJambonzStatusApiV1TelephonyJambonzStatusWorkflowRunIdPostData = {
+    body?: never;
+    path: {
+        /**
+         * Workflow Run Id
+         */
+        workflow_run_id: number;
+    };
+    query?: never;
+    url: '/api/v1/telephony/jambonz/status/{workflow_run_id}';
+};
+
+export type HandleJambonzStatusApiV1TelephonyJambonzStatusWorkflowRunIdPostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type HandleJambonzStatusApiV1TelephonyJambonzStatusWorkflowRunIdPostError = HandleJambonzStatusApiV1TelephonyJambonzStatusWorkflowRunIdPostErrors[keyof HandleJambonzStatusApiV1TelephonyJambonzStatusWorkflowRunIdPostErrors];
+
+export type HandleJambonzStatusApiV1TelephonyJambonzStatusWorkflowRunIdPostResponses = {
     /**
      * Successful Response
      */
@@ -5505,6 +6658,752 @@ export type HandleVonageEventsApiV1TelephonyVonageEventsWorkflowRunIdPostRespons
     200: unknown;
 };
 
+export type ImportTelephonyNumberInventoryApiV1TelephonyNumberInventoryImportPostData = {
+    body: TelephonyNumberInventoryImportRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/telephony-number-inventory/import';
+};
+
+export type ImportTelephonyNumberInventoryApiV1TelephonyNumberInventoryImportPostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ImportTelephonyNumberInventoryApiV1TelephonyNumberInventoryImportPostError = ImportTelephonyNumberInventoryApiV1TelephonyNumberInventoryImportPostErrors[keyof ImportTelephonyNumberInventoryApiV1TelephonyNumberInventoryImportPostErrors];
+
+export type ImportTelephonyNumberInventoryApiV1TelephonyNumberInventoryImportPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: TelephonyNumberInventoryImportResponse;
+};
+
+export type ImportTelephonyNumberInventoryApiV1TelephonyNumberInventoryImportPostResponse = ImportTelephonyNumberInventoryApiV1TelephonyNumberInventoryImportPostResponses[keyof ImportTelephonyNumberInventoryApiV1TelephonyNumberInventoryImportPostResponses];
+
+export type ImportOnnuriStagingCandidatesApiV1TelephonyNumberInventoryOnnuriStagingCandidatesImportPostData = {
+    body: OnnuriStagingCandidateImportRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/telephony-number-inventory/onnuri-staging/candidates/import';
+};
+
+export type ImportOnnuriStagingCandidatesApiV1TelephonyNumberInventoryOnnuriStagingCandidatesImportPostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ImportOnnuriStagingCandidatesApiV1TelephonyNumberInventoryOnnuriStagingCandidatesImportPostError = ImportOnnuriStagingCandidatesApiV1TelephonyNumberInventoryOnnuriStagingCandidatesImportPostErrors[keyof ImportOnnuriStagingCandidatesApiV1TelephonyNumberInventoryOnnuriStagingCandidatesImportPostErrors];
+
+export type ImportOnnuriStagingCandidatesApiV1TelephonyNumberInventoryOnnuriStagingCandidatesImportPostResponses = {
+    /**
+     * Response Import Onnuri Staging Candidates Api V1 Telephony Number Inventory Onnuri Staging Candidates Import Post
+     *
+     * Successful Response
+     */
+    200: Array<OnnuriStagingCandidateResponse>;
+};
+
+export type ImportOnnuriStagingCandidatesApiV1TelephonyNumberInventoryOnnuriStagingCandidatesImportPostResponse = ImportOnnuriStagingCandidatesApiV1TelephonyNumberInventoryOnnuriStagingCandidatesImportPostResponses[keyof ImportOnnuriStagingCandidatesApiV1TelephonyNumberInventoryOnnuriStagingCandidatesImportPostResponses];
+
+export type ApproveOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsApprovePostData = {
+    body: OnnuriStagingPreflightProofApproveRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/telephony-number-inventory/onnuri-staging/proofs/approve';
+};
+
+export type ApproveOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsApprovePostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ApproveOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsApprovePostError = ApproveOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsApprovePostErrors[keyof ApproveOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsApprovePostErrors];
+
+export type ApproveOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsApprovePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: OnnuriStagingPreflightProofResponse;
+};
+
+export type ApproveOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsApprovePostResponse = ApproveOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsApprovePostResponses[keyof ApproveOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsApprovePostResponses];
+
+export type ReserveOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdReservePostData = {
+    body: OnnuriStagingPreflightProofReserveRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path: {
+        /**
+         * Inventory Id
+         */
+        inventory_id: number;
+    };
+    query?: never;
+    url: '/api/v1/telephony-number-inventory/onnuri-staging/inventory/{inventory_id}/reserve';
+};
+
+export type ReserveOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdReservePostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReserveOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdReservePostError = ReserveOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdReservePostErrors[keyof ReserveOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdReservePostErrors];
+
+export type ReserveOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdReservePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: TelephonyNumberInventoryResponse;
+};
+
+export type ReserveOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdReservePostResponse = ReserveOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdReservePostResponses[keyof ReserveOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdReservePostResponses];
+
+export type AssignOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdAssignPostData = {
+    body: OnnuriStagingPreflightProofAssignRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path: {
+        /**
+         * Inventory Id
+         */
+        inventory_id: number;
+    };
+    query?: never;
+    url: '/api/v1/telephony-number-inventory/onnuri-staging/inventory/{inventory_id}/assign';
+};
+
+export type AssignOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdAssignPostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type AssignOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdAssignPostError = AssignOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdAssignPostErrors[keyof AssignOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdAssignPostErrors];
+
+export type AssignOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdAssignPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: TelephonyNumberInventoryResponse;
+};
+
+export type AssignOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdAssignPostResponse = AssignOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdAssignPostResponses[keyof AssignOnnuriStagingInventoryApiV1TelephonyNumberInventoryOnnuriStagingInventoryInventoryIdAssignPostResponses];
+
+export type RetireOnnuriStagingCandidateApiV1TelephonyNumberInventoryOnnuriStagingCandidatesCandidateIdRetirePostData = {
+    body: TelephonyNumberInventoryStateChangeRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path: {
+        /**
+         * Candidate Id
+         */
+        candidate_id: number;
+    };
+    query?: never;
+    url: '/api/v1/telephony-number-inventory/onnuri-staging/candidates/{candidate_id}/retire';
+};
+
+export type RetireOnnuriStagingCandidateApiV1TelephonyNumberInventoryOnnuriStagingCandidatesCandidateIdRetirePostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type RetireOnnuriStagingCandidateApiV1TelephonyNumberInventoryOnnuriStagingCandidatesCandidateIdRetirePostError = RetireOnnuriStagingCandidateApiV1TelephonyNumberInventoryOnnuriStagingCandidatesCandidateIdRetirePostErrors[keyof RetireOnnuriStagingCandidateApiV1TelephonyNumberInventoryOnnuriStagingCandidatesCandidateIdRetirePostErrors];
+
+export type RetireOnnuriStagingCandidateApiV1TelephonyNumberInventoryOnnuriStagingCandidatesCandidateIdRetirePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: OnnuriStagingCandidateResponse;
+};
+
+export type RetireOnnuriStagingCandidateApiV1TelephonyNumberInventoryOnnuriStagingCandidatesCandidateIdRetirePostResponse = RetireOnnuriStagingCandidateApiV1TelephonyNumberInventoryOnnuriStagingCandidatesCandidateIdRetirePostResponses[keyof RetireOnnuriStagingCandidateApiV1TelephonyNumberInventoryOnnuriStagingCandidatesCandidateIdRetirePostResponses];
+
+export type RevokeOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsProofIdRevokePostData = {
+    body: OnnuriStagingPreflightProofRevokeRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path: {
+        /**
+         * Proof Id
+         */
+        proof_id: number;
+    };
+    query?: never;
+    url: '/api/v1/telephony-number-inventory/onnuri-staging/proofs/{proof_id}/revoke';
+};
+
+export type RevokeOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsProofIdRevokePostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type RevokeOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsProofIdRevokePostError = RevokeOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsProofIdRevokePostErrors[keyof RevokeOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsProofIdRevokePostErrors];
+
+export type RevokeOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsProofIdRevokePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: OnnuriStagingPreflightProofResponse;
+};
+
+export type RevokeOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsProofIdRevokePostResponse = RevokeOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsProofIdRevokePostResponses[keyof RevokeOnnuriStagingPreflightProofApiV1TelephonyNumberInventoryOnnuriStagingProofsProofIdRevokePostResponses];
+
+export type ListTelephonyNumberInventoryApiV1TelephonyNumberInventoryGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path?: never;
+    query?: {
+        /**
+         * Status
+         */
+        status?: TelephonyNumberInventoryStatus | null;
+        /**
+         * Provider
+         */
+        provider?: string | null;
+        /**
+         * Organization Id
+         */
+        organization_id?: number | null;
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/v1/telephony-number-inventory';
+};
+
+export type ListTelephonyNumberInventoryApiV1TelephonyNumberInventoryGetErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ListTelephonyNumberInventoryApiV1TelephonyNumberInventoryGetError = ListTelephonyNumberInventoryApiV1TelephonyNumberInventoryGetErrors[keyof ListTelephonyNumberInventoryApiV1TelephonyNumberInventoryGetErrors];
+
+export type ListTelephonyNumberInventoryApiV1TelephonyNumberInventoryGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: TelephonyNumberInventoryListResponse;
+};
+
+export type ListTelephonyNumberInventoryApiV1TelephonyNumberInventoryGetResponse = ListTelephonyNumberInventoryApiV1TelephonyNumberInventoryGetResponses[keyof ListTelephonyNumberInventoryApiV1TelephonyNumberInventoryGetResponses];
+
+export type ReserveTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdReservePostData = {
+    body: TelephonyNumberInventoryReserveRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path: {
+        /**
+         * Inventory Id
+         */
+        inventory_id: number;
+    };
+    query?: never;
+    url: '/api/v1/telephony-number-inventory/{inventory_id}/reserve';
+};
+
+export type ReserveTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdReservePostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReserveTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdReservePostError = ReserveTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdReservePostErrors[keyof ReserveTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdReservePostErrors];
+
+export type ReserveTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdReservePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: TelephonyNumberInventoryResponse;
+};
+
+export type ReserveTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdReservePostResponse = ReserveTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdReservePostResponses[keyof ReserveTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdReservePostResponses];
+
+export type AssignTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdAssignPostData = {
+    body: TelephonyNumberInventoryAssignRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path: {
+        /**
+         * Inventory Id
+         */
+        inventory_id: number;
+    };
+    query?: never;
+    url: '/api/v1/telephony-number-inventory/{inventory_id}/assign';
+};
+
+export type AssignTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdAssignPostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type AssignTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdAssignPostError = AssignTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdAssignPostErrors[keyof AssignTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdAssignPostErrors];
+
+export type AssignTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdAssignPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: TelephonyNumberInventoryResponse;
+};
+
+export type AssignTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdAssignPostResponse = AssignTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdAssignPostResponses[keyof AssignTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdAssignPostResponses];
+
+export type QuarantineTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdQuarantinePostData = {
+    body: TelephonyNumberInventoryStateChangeRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path: {
+        /**
+         * Inventory Id
+         */
+        inventory_id: number;
+    };
+    query?: never;
+    url: '/api/v1/telephony-number-inventory/{inventory_id}/quarantine';
+};
+
+export type QuarantineTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdQuarantinePostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type QuarantineTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdQuarantinePostError = QuarantineTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdQuarantinePostErrors[keyof QuarantineTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdQuarantinePostErrors];
+
+export type QuarantineTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdQuarantinePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: TelephonyNumberInventoryResponse;
+};
+
+export type QuarantineTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdQuarantinePostResponse = QuarantineTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdQuarantinePostResponses[keyof QuarantineTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdQuarantinePostResponses];
+
+export type RetireTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdRetirePostData = {
+    body: TelephonyNumberInventoryStateChangeRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path: {
+        /**
+         * Inventory Id
+         */
+        inventory_id: number;
+    };
+    query?: never;
+    url: '/api/v1/telephony-number-inventory/{inventory_id}/retire';
+};
+
+export type RetireTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdRetirePostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type RetireTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdRetirePostError = RetireTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdRetirePostErrors[keyof RetireTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdRetirePostErrors];
+
+export type RetireTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdRetirePostResponses = {
+    /**
+     * Successful Response
+     */
+    200: TelephonyNumberInventoryResponse;
+};
+
+export type RetireTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdRetirePostResponse = RetireTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdRetirePostResponses[keyof RetireTelephonyNumberInventoryApiV1TelephonyNumberInventoryInventoryIdRetirePostResponses];
+
+export type AttestTelephonyNumberInventoryLiveValidationApiV1TelephonyNumberInventoryInventoryIdLiveValidationPostData = {
+    body: TelephonyNumberInventoryLiveValidationRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path: {
+        /**
+         * Inventory Id
+         */
+        inventory_id: number;
+    };
+    query?: never;
+    url: '/api/v1/telephony-number-inventory/{inventory_id}/live-validation';
+};
+
+export type AttestTelephonyNumberInventoryLiveValidationApiV1TelephonyNumberInventoryInventoryIdLiveValidationPostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type AttestTelephonyNumberInventoryLiveValidationApiV1TelephonyNumberInventoryInventoryIdLiveValidationPostError = AttestTelephonyNumberInventoryLiveValidationApiV1TelephonyNumberInventoryInventoryIdLiveValidationPostErrors[keyof AttestTelephonyNumberInventoryLiveValidationApiV1TelephonyNumberInventoryInventoryIdLiveValidationPostErrors];
+
+export type AttestTelephonyNumberInventoryLiveValidationApiV1TelephonyNumberInventoryInventoryIdLiveValidationPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: TelephonyNumberInventoryResponse;
+};
+
+export type AttestTelephonyNumberInventoryLiveValidationApiV1TelephonyNumberInventoryInventoryIdLiveValidationPostResponse = AttestTelephonyNumberInventoryLiveValidationApiV1TelephonyNumberInventoryInventoryIdLiveValidationPostResponses[keyof AttestTelephonyNumberInventoryLiveValidationApiV1TelephonyNumberInventoryInventoryIdLiveValidationPostResponses];
+
+export type ListTelephonyNumberInventoryAuditApiV1TelephonyNumberInventoryInventoryIdAuditGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path: {
+        /**
+         * Inventory Id
+         */
+        inventory_id: number;
+    };
+    query?: never;
+    url: '/api/v1/telephony-number-inventory/{inventory_id}/audit';
+};
+
+export type ListTelephonyNumberInventoryAuditApiV1TelephonyNumberInventoryInventoryIdAuditGetErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ListTelephonyNumberInventoryAuditApiV1TelephonyNumberInventoryInventoryIdAuditGetError = ListTelephonyNumberInventoryAuditApiV1TelephonyNumberInventoryInventoryIdAuditGetErrors[keyof ListTelephonyNumberInventoryAuditApiV1TelephonyNumberInventoryInventoryIdAuditGetErrors];
+
+export type ListTelephonyNumberInventoryAuditApiV1TelephonyNumberInventoryInventoryIdAuditGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: TelephonyNumberInventoryAuditListResponse;
+};
+
+export type ListTelephonyNumberInventoryAuditApiV1TelephonyNumberInventoryInventoryIdAuditGetResponse = ListTelephonyNumberInventoryAuditApiV1TelephonyNumberInventoryInventoryIdAuditGetResponses[keyof ListTelephonyNumberInventoryAuditApiV1TelephonyNumberInventoryInventoryIdAuditGetResponses];
+
+export type ListCustomerAssignedTelephonyNumbersApiV1OrganizationsTelephonyNumbersAssignedGetData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/organizations/telephony-numbers/assigned';
+};
+
+export type ListCustomerAssignedTelephonyNumbersApiV1OrganizationsTelephonyNumbersAssignedGetErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ListCustomerAssignedTelephonyNumbersApiV1OrganizationsTelephonyNumbersAssignedGetError = ListCustomerAssignedTelephonyNumbersApiV1OrganizationsTelephonyNumbersAssignedGetErrors[keyof ListCustomerAssignedTelephonyNumbersApiV1OrganizationsTelephonyNumbersAssignedGetErrors];
+
+export type ListCustomerAssignedTelephonyNumbersApiV1OrganizationsTelephonyNumbersAssignedGetResponses = {
+    /**
+     * Successful Response
+     */
+    200: CustomerAssignedNumberListResponse;
+};
+
+export type ListCustomerAssignedTelephonyNumbersApiV1OrganizationsTelephonyNumbersAssignedGetResponse = ListCustomerAssignedTelephonyNumbersApiV1OrganizationsTelephonyNumbersAssignedGetResponses[keyof ListCustomerAssignedTelephonyNumbersApiV1OrganizationsTelephonyNumbersAssignedGetResponses];
+
+export type UnbindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindDeleteData = {
+    body?: never;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path: {
+        /**
+         * Inventory Id
+         */
+        inventory_id: number;
+    };
+    query?: never;
+    url: '/api/v1/organizations/telephony-numbers/assigned/{inventory_id}/bind';
+};
+
+export type UnbindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindDeleteErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type UnbindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindDeleteError = UnbindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindDeleteErrors[keyof UnbindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindDeleteErrors];
+
+export type UnbindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: CustomerAssignedNumberResponse;
+};
+
+export type UnbindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindDeleteResponse = UnbindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindDeleteResponses[keyof UnbindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindDeleteResponses];
+
+export type BindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindPostData = {
+    body: CustomerAssignedNumberBindRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+        /**
+         * X-Api-Key
+         */
+        'X-API-Key'?: string | null;
+    };
+    path: {
+        /**
+         * Inventory Id
+         */
+        inventory_id: number;
+    };
+    query?: never;
+    url: '/api/v1/organizations/telephony-numbers/assigned/{inventory_id}/bind';
+};
+
+export type BindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindPostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type BindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindPostError = BindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindPostErrors[keyof BindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindPostErrors];
+
+export type BindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: CustomerAssignedNumberResponse;
+};
+
+export type BindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindPostResponse = BindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindPostResponses[keyof BindCustomerAssignedTelephonyNumberApiV1OrganizationsTelephonyNumbersAssignedInventoryIdBindPostResponses];
+
 export type StartPhonePreviewApiV1PhonePreviewStartPostData = {
     body: PhonePreviewStartRequest;
     headers?: {
@@ -5609,6 +7508,76 @@ export type CallPhonePreviewApiV1PhonePreviewCallPostResponses = {
 };
 
 export type CallPhonePreviewApiV1PhonePreviewCallPostResponse = CallPhonePreviewApiV1PhonePreviewCallPostResponses[keyof CallPhonePreviewApiV1PhonePreviewCallPostResponses];
+
+export type ContainPhonePreviewApiV1PhonePreviewContainPostData = {
+    body: PhonePreviewContainRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/phone-preview/contain';
+};
+
+export type ContainPhonePreviewApiV1PhonePreviewContainPostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ContainPhonePreviewApiV1PhonePreviewContainPostError = ContainPhonePreviewApiV1PhonePreviewContainPostErrors[keyof ContainPhonePreviewApiV1PhonePreviewContainPostErrors];
+
+export type ContainPhonePreviewApiV1PhonePreviewContainPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: PhonePreviewResponse;
+};
+
+export type ContainPhonePreviewApiV1PhonePreviewContainPostResponse = ContainPhonePreviewApiV1PhonePreviewContainPostResponses[keyof ContainPhonePreviewApiV1PhonePreviewContainPostResponses];
+
+export type WaitForInboundPhonePreviewApiV1PhonePreviewWaitInboundPostData = {
+    body: PhonePreviewCallRequest;
+    headers?: {
+        /**
+         * Authorization
+         */
+        authorization?: string | null;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/phone-preview/wait-inbound';
+};
+
+export type WaitForInboundPhonePreviewApiV1PhonePreviewWaitInboundPostErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type WaitForInboundPhonePreviewApiV1PhonePreviewWaitInboundPostError = WaitForInboundPhonePreviewApiV1PhonePreviewWaitInboundPostErrors[keyof WaitForInboundPhonePreviewApiV1PhonePreviewWaitInboundPostErrors];
+
+export type WaitForInboundPhonePreviewApiV1PhonePreviewWaitInboundPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: PhonePreviewResponse;
+};
+
+export type WaitForInboundPhonePreviewApiV1PhonePreviewWaitInboundPostResponse = WaitForInboundPhonePreviewApiV1PhonePreviewWaitInboundPostResponses[keyof WaitForInboundPhonePreviewApiV1PhonePreviewWaitInboundPostResponses];
 
 export type GetPhonePreviewStatusByStatusPathApiV1PhonePreviewStatusSessionIdGetData = {
     body?: never;
@@ -9083,8 +11052,14 @@ export type SaveTelephonyConfigurationApiV1OrganizationsTelephonyConfigPostData 
     body: ({
         provider: 'ari';
     } & AriConfigurationRequest) | ({
+        provider: 'aws_connect';
+    } & AwsConnectConfigurationRequest) | ({
+        provider: 'clawops';
+    } & ClawOpsConfigurationRequest) | ({
         provider: 'cloudonix';
     } & CloudonixConfigurationRequest) | ({
+        provider: 'jambonz';
+    } & JambonzConfigurationRequest) | ({
         provider: 'plivo';
     } & PlivoConfigurationRequest) | ({
         provider: 'telnyx';

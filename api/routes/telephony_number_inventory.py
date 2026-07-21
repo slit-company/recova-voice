@@ -9,6 +9,13 @@ from api.schemas.telephony_number_inventory import (
     CustomerAssignedNumberBindRequest,
     CustomerAssignedNumberListResponse,
     CustomerAssignedNumberResponse,
+    OnnuriStagingCandidateImportRequest,
+    OnnuriStagingCandidateResponse,
+    OnnuriStagingPreflightProofAssignRequest,
+    OnnuriStagingPreflightProofApproveRequest,
+    OnnuriStagingPreflightProofReserveRequest,
+    OnnuriStagingPreflightProofResponse,
+    OnnuriStagingPreflightProofRevokeRequest,
     TelephonyNumberInventoryAssignRequest,
     TelephonyNumberInventoryAuditListResponse,
     TelephonyNumberInventoryImportRequest,
@@ -38,6 +45,14 @@ from api.services.telephony_number_inventory import (
     quarantine_inventory_number,
     reserve_inventory_number,
     retire_inventory_number,
+)
+from api.services.onnuri_staging_preflight import (
+    approve_proof,
+    assign_with_proof,
+    import_candidates,
+    reserve_with_proof,
+    retire_candidate,
+    revoke_proof,
 )
 
 operator_router = APIRouter(
@@ -74,6 +89,122 @@ async def import_telephony_number_inventory(
         imported=[inventory_to_response(row) for row in imported],
         skipped=[TelephonyNumberInventorySkippedItem(**item) for item in skipped],
     )
+@operator_router.post(
+    "/onnuri-staging/candidates/import",
+    response_model=list[OnnuriStagingCandidateResponse],
+)
+async def import_onnuri_staging_candidates(
+    request: OnnuriStagingCandidateImportRequest,
+    user: UserModel = Depends(get_superuser),
+):
+    try:
+        rows = await import_candidates(
+            [item.model_dump() for item in request.numbers], actor_user_id=user.id
+        )
+    except TelephonyNumberInventoryError as error:
+        _raise_inventory_error(error)
+    return [OnnuriStagingCandidateResponse.model_validate(row) for row in rows]
+
+
+@operator_router.post(
+    "/onnuri-staging/proofs/approve",
+    response_model=OnnuriStagingPreflightProofResponse,
+)
+async def approve_onnuri_staging_preflight_proof(
+    request: OnnuriStagingPreflightProofApproveRequest,
+    user: UserModel = Depends(get_superuser),
+):
+    try:
+        proof = await approve_proof(
+            candidate_id=request.candidate_id,
+            organization_id=request.organization_id,
+            predicate_class=request.predicate_class,
+            canonical_input=request.canonical_input,
+            expires_at=request.expires_at,
+            actor_user_id=user.id,
+        )
+    except TelephonyNumberInventoryError as error:
+        _raise_inventory_error(error)
+    return OnnuriStagingPreflightProofResponse.model_validate(proof)
+
+
+@operator_router.post(
+    "/onnuri-staging/inventory/{inventory_id}/reserve",
+    response_model=TelephonyNumberInventoryResponse,
+)
+async def reserve_onnuri_staging_inventory(
+    inventory_id: int,
+    request: OnnuriStagingPreflightProofReserveRequest,
+    user: UserModel = Depends(get_superuser),
+):
+    try:
+        row = await reserve_with_proof(
+            inventory_id,
+            proof_id=request.proof_id,
+            organization_id=request.organization_id,
+            actor_user_id=user.id,
+            reservation_expires_at=request.reservation_expires_at,
+            note=request.note,
+        )
+    except TelephonyNumberInventoryError as error:
+        _raise_inventory_error(error)
+    return inventory_to_response(row)
+@operator_router.post(
+    "/onnuri-staging/inventory/{inventory_id}/assign",
+    response_model=TelephonyNumberInventoryResponse,
+)
+async def assign_onnuri_staging_inventory(
+    inventory_id: int,
+    request: OnnuriStagingPreflightProofAssignRequest,
+    user: UserModel = Depends(get_superuser),
+):
+    try:
+        row = await assign_with_proof(
+            inventory_id,
+            proof_id=request.proof_id,
+            organization_id=request.organization_id,
+            actor_user_id=user.id,
+            telephony_configuration_id=request.telephony_configuration_id,
+            inbound_workflow_id=request.inbound_workflow_id,
+            label=request.label,
+            set_default_caller_id=request.set_default_caller_id,
+            note=request.note,
+        )
+    except TelephonyNumberInventoryError as error:
+        _raise_inventory_error(error)
+    return inventory_to_response(row)
+@operator_router.post(
+    "/onnuri-staging/candidates/{candidate_id}/retire",
+    response_model=OnnuriStagingCandidateResponse,
+)
+async def retire_onnuri_staging_candidate(
+    candidate_id: int,
+    request: TelephonyNumberInventoryStateChangeRequest,
+    user: UserModel = Depends(get_superuser),
+):
+    try:
+        candidate = await retire_candidate(
+            candidate_id, actor_user_id=user.id, reason=request.reason
+        )
+    except TelephonyNumberInventoryError as error:
+        _raise_inventory_error(error)
+    return OnnuriStagingCandidateResponse.model_validate(candidate)
+
+
+@operator_router.post(
+    "/onnuri-staging/proofs/{proof_id}/revoke",
+    response_model=OnnuriStagingPreflightProofResponse,
+)
+async def revoke_onnuri_staging_preflight_proof(
+    proof_id: int,
+    request: OnnuriStagingPreflightProofRevokeRequest,
+    user: UserModel = Depends(get_superuser),
+):
+    try:
+        proof = await revoke_proof(proof_id, actor_user_id=user.id, reason=request.reason)
+    except TelephonyNumberInventoryError as error:
+        _raise_inventory_error(error)
+    return OnnuriStagingPreflightProofResponse.model_validate(proof)
 
 
 @operator_router.get("", response_model=TelephonyNumberInventoryListResponse)

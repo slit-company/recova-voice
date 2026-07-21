@@ -11,6 +11,7 @@ plus a single import line in ``providers/__init__.py``.
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -18,6 +19,7 @@ from typing import (
     Awaitable,
     Callable,
     Dict,
+    FrozenSet,
     Iterable,
     List,
     Optional,
@@ -129,9 +131,23 @@ class ProviderSpec:
     # True marks a constrained provider that is allowed only for server-owned
     # preview smoke paths.
     supports_preview_smoke: bool = False
+    # False means public API and production agent routes must deny this provider.
+    supports_public_calls: bool = True
+    # Dispatch contexts this provider may execute while the runtime is Waiting.
+    allowed_dispatch_purposes: FrozenSet[str] = frozenset(
+        {"public", "direct", "campaign", "bound_inbound", "phone_preview_smoke"}
+    )
 
 
 _REGISTRY: Dict[str, ProviderSpec] = {}
+_PROVIDERS_MODULE = "api.services.telephony.providers"
+
+
+def _ensure_providers_registered() -> None:
+    """Load provider registration side effects only when the registry is consumed."""
+
+    providers = importlib.import_module(_PROVIDERS_MODULE)
+    providers.register_all()
 
 
 def register(spec: ProviderSpec) -> None:
@@ -147,6 +163,7 @@ def register(spec: ProviderSpec) -> None:
 
 def get(name: str) -> ProviderSpec:
     """Look up a registered provider by name."""
+    _ensure_providers_registered()
     try:
         return _REGISTRY[name]
     except KeyError:
@@ -155,14 +172,23 @@ def get(name: str) -> ProviderSpec:
 
 def get_optional(name: str) -> Optional[ProviderSpec]:
     """Look up a registered provider by name, returning None if not registered."""
+    _ensure_providers_registered()
     return _REGISTRY.get(name)
+
+
+def is_dispatch_purpose_allowed(provider_name: str, purpose: str) -> bool:
+    """Return whether the provider may dispatch for the requested purpose."""
+    spec = get_optional(provider_name)
+    return spec is not None and purpose in spec.allowed_dispatch_purposes
 
 
 def all_specs() -> List[ProviderSpec]:
     """Return all registered providers in name-sorted order (stable iteration)."""
+    _ensure_providers_registered()
     return [_REGISTRY[k] for k in sorted(_REGISTRY)]
 
 
 def names() -> Iterable[str]:
     """Return all registered provider names."""
+    _ensure_providers_registered()
     return sorted(_REGISTRY)

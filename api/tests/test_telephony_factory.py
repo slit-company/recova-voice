@@ -76,13 +76,15 @@ async def test_load_credentials_for_transport_casts_numeric_string_config_id():
 @pytest.mark.asyncio
 async def test_load_telephony_config_by_id_casts_numeric_string_before_db_lookup():
     row = SimpleNamespace(id=213)
+    get_config = AsyncMock(return_value=row)
 
     with (
         patch(
-            "api.services.telephony.factory.db_client.get_telephony_configuration_for_org",
-            new_callable=AsyncMock,
-            return_value=row,
-        ) as get_config,
+            "api.services.telephony.factory.db_client",
+            new=SimpleNamespace(
+                get_telephony_configuration_for_org=get_config,
+            ),
+        ),
         patch(
             "api.services.telephony.factory._normalize_with_phone_numbers",
             new_callable=AsyncMock,
@@ -118,12 +120,14 @@ async def test_get_telephony_provider_for_preview_run_uses_allowlisted_scope(
         user_id=7,
         status="calling",
     )
+    get_session = AsyncMock(return_value=session)
 
     with (
         patch(
-            "api.services.phone_preview.telephony_scope.db_client.get_phone_preview_session_for_run",
-            new_callable=AsyncMock,
-            return_value=session,
+            "api.services.phone_preview.telephony_scope.db_client",
+            new=SimpleNamespace(
+                get_phone_preview_session_for_run=get_session,
+            ),
         ),
         patch(
             "api.services.telephony.factory.get_telephony_provider_by_id",
@@ -140,6 +144,7 @@ async def test_get_telephony_provider_for_preview_run_uses_allowlisted_scope(
     assert result == "provider"
     get_provider.assert_awaited_once_with(901, 900)
     get_default.assert_not_awaited()
+    get_session.assert_awaited_once_with(501)
 
 
 @pytest.mark.asyncio
@@ -164,13 +169,19 @@ async def test_get_telephony_provider_for_preview_run_fails_closed_on_session_mi
         user_id=7,
         status="calling",
     )
+    get_session = AsyncMock(return_value=session)
 
     with (
         patch(
-            "api.services.phone_preview.telephony_scope.db_client.get_phone_preview_session_for_run",
-            new_callable=AsyncMock,
-            return_value=session,
+            "api.services.phone_preview.telephony_scope.db_client",
+            new=SimpleNamespace(
+                get_phone_preview_session_for_run=get_session,
+            ),
         ),
+        patch(
+            "api.services.telephony.factory.get_telephony_provider_by_id",
+            new_callable=AsyncMock,
+        ) as get_provider,
         patch(
             "api.services.telephony.factory.get_default_telephony_provider",
             new_callable=AsyncMock,
@@ -178,5 +189,7 @@ async def test_get_telephony_provider_for_preview_run_fails_closed_on_session_mi
     ):
         with pytest.raises(ValueError, match="preview_session_mismatch"):
             await get_telephony_provider_for_run(workflow_run, 11)
+    get_session.assert_awaited_once_with(501)
+    get_provider.assert_not_awaited()
 
     get_default.assert_not_awaited()

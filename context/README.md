@@ -23,3 +23,7 @@
 | [002-korean-sip070-contract-guide.md](./002-korean-sip070-contract-guide.md) | 한국 SIP/070 공급자 계약·기술 부속서 가이드 | active |
 | [003-sip070-phone-call-playbook.md](./003-sip070-phone-call-playbook.md) | SIP/070 공급자 전화 문의·상사 보고 플레이북 | active |
 | [own-telephony-handoff/](./own-telephony-handoff/) | 자체 한국 전화 인프라 코딩 재개용 인수인계 메모 | active |
+| [004-onnuri-staging-no-traffic-checkpoint.md](./004-onnuri-staging-no-traffic-checkpoint.md) | Onnuri staging no-traffic operator controls and architecture checkpoint | Waiting |
+| [005-onnuri-seoul-staging-phase-a-operator-contract.md](./005-onnuri-seoul-staging-phase-a-operator-contract.md) | Onnuri Seoul Phase A operator contract | Waiting |
+| [006-onnuri-seoul-staging-phase-b-foundation-decision.md](./006-onnuri-seoul-staging-phase-b-foundation-decision.md) | Onnuri Seoul Phase B foundation offline-only decision | open-confirmations-pending |
+| [007-onnuri-bounded-live-smoke-foundation.md](./007-onnuri-bounded-live-smoke-foundation.md) | Onnuri 제한형 live smoke의 fail-closed 비공개 기반 결정 | Waiting |

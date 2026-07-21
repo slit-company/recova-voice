@@ -1,20 +1,34 @@
 """Telephony provider implementations.
 
-Importing this module triggers each provider package to register itself
-with ``api.services.telephony.registry``. Adding a new provider requires
-exactly one new line below — no edits to factory, audio_config, schemas,
-or run_pipeline.
+Provider registration is explicit and lazy so importing a provider-owned
+contract module cannot recursively import every provider. Adding a provider
+requires exactly one new module name below.
 """
 
-from api.services.telephony.providers import (  # noqa: F401  -- import for side effects (registration)
-    ari,
-    aws_connect,
-    clawops,
-    cloudonix,
-    jambonz,
-    plivo,
-    telnyx,
-    twilio,
-    vobiz,
-    vonage,
+from __future__ import annotations
+
+import importlib
+
+_PROVIDER_MODULES = (
+    "ari",
+    "aws_connect",
+    "clawops",
+    "cloudonix",
+    "jambonz",
+    "plivo",
+    "telnyx",
+    "twilio",
+    "vobiz",
+    "vonage",
 )
+
+
+def register_all() -> None:
+    """Import every provider package for its registration side effect."""
+
+    package = __name__
+    for module_name in _PROVIDER_MODULES:
+        module = importlib.import_module(f"{package}.{module_name}")
+        register_provider = getattr(module, "register_provider", None)
+        if register_provider is not None:
+            register_provider()

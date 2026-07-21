@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Protocol
 
 from fastapi import HTTPException
 from loguru import logger
@@ -12,7 +15,15 @@ from pipecat.utils.enums import RealtimeFeedbackType
 from api.db import db_client
 from api.db.models import UserModel
 from api.enums import CallType, WorkflowRunMode
+from api.services.onnuri_smoke_capabilities import (
+    ECDSA_P256_SHA256_POLICY_ID,
+    SmokeCapabilityIssuer,
+    SmokeRecoverySealer,
+    get_smoke_authority_runtime,
+    parse_dispatch_capability,
+)
 from api.services.phone_preview.config import (
+    PreviewTelephonySettings,
     get_preview_telephony_settings,
     should_expose_dev_otp,
 )
@@ -37,6 +48,17 @@ from api.services.phone_preview.otp_delivery import (
 from api.services.configuration.resolve import resolve_effective_config
 from api.services.quota_service import check_dograh_quota_by_user_id
 from api.services.telephony.registry import get_optional as get_provider_spec
+from api.services.telephony.jambonz_policy import (
+    JAMBONZ_PROVIDER,
+    is_current_jambonz_routable_phone_tuple,
+    resolve_jambonz_outbound_caller,
+)
+from api.services.telephony.registry import is_dispatch_purpose_allowed
+from api.services import onnuri_staging_preflight
+from api.services.onnuri_smoke_f12 import (
+    F12ServiceError,
+    allocate_and_issue_dispatch,
+)
 from api.utils.common import get_backend_endpoints
 
 _PREVIEW_METADATA_SENSITIVE_EXACT_KEYS = {"from", "to"}
@@ -53,6 +75,25 @@ _PREVIEW_METADATA_SENSITIVE_FRAGMENTS = (
     "api_key",
     "credential",
 )
+
+
+_DESTINATION_HMAC_DOMAIN = "recova.onnuri.smoke.destination.v1"
+
+
+class DestinationHmacProvider(Protocol):
+    async def digest(
+        self, *, canonical_payload: bytes, key_id: str, key_version: str
+    ) -> str: ...
+
+
+class UnavailableDestinationHmacProvider:
+    async def digest(
+        self, *, canonical_payload: bytes, key_id: str, key_version: str
+    ) -> str:
+        raise RuntimeError("classified_destination_hmac_provider_unavailable")
+
+
+
 _PREVIEW_RUNTIME_LATENCY_PROFILE = "speed_demo"
 _PREVIEW_LATENCY_EVENT_TYPE = RealtimeFeedbackType.LATENCY_MEASURED.value
 _PREVIEW_LATENCY_EVENT_KIND = "voice_latency_breakdown"
@@ -142,6 +183,13 @@ class PhonePreviewResult:
     otp_required: bool
     masked_phone: str
     expires_at: datetime
+    gate_states: dict[str, bool] | None = None
+    remaining_attempts: int | None = None
+    proof_current: bool | None = None
+    registration_fresh: bool | None = None
+    media_fresh: bool | None = None
+    contained: bool | None = None
+    terminal_class: str | None = None
     workflow_run_id: int | None = None
     provider_call_id: str | None = None
     failure_reason: str | None = None
@@ -165,10 +213,35 @@ class PhonePreviewResult:
             data["inbound_phone_number"] = self.inbound_phone_number
         if self.latency_summary is not None:
             data["latency_summary"] = self.latency_summary.as_dict()
+        if self.gate_states is not None:
+            data["gate_states"] = self.gate_states
+        if self.remaining_attempts is not None:
+            data["remaining_attempts"] = self.remaining_attempts
+        if self.proof_current is not None:
+            data["proof_current"] = self.proof_current
+        if self.registration_fresh is not None:
+            data["registration_fresh"] = self.registration_fresh
+        if self.media_fresh is not None:
+            data["media_fresh"] = self.media_fresh
+        if self.contained is not None:
+            data["contained"] = self.contained
+        if self.terminal_class is not None:
+            data["terminal_class"] = self.terminal_class
         return data
 
 
 class PhonePreviewService:
+    def __init__(
+        self,
+        destination_hmac_provider: DestinationHmacProvider | None = None,
+        smoke_capability_issuer: SmokeCapabilityIssuer | None = None,
+        smoke_recovery_sealer: SmokeRecoverySealer | None = None,
+    ) -> None:
+        self.destination_hmac_provider = (
+            destination_hmac_provider or UnavailableDestinationHmacProvider()
+        )
+        self.smoke_capability_issuer = smoke_capability_issuer
+        self.smoke_recovery_sealer = smoke_recovery_sealer
     async def start(
         self,
         *,
@@ -356,11 +429,20 @@ class PhonePreviewService:
         )
         return self._session_result(session, otp_required=False)
 
-    async def call(self, *, user: UserModel, session_id: int) -> PhonePreviewResult:
+    async def call(
+        self,
+        *,
+        user: UserModel,
+        session_id: int,
+        idempotency_key: str | None = None,
+        manual_acknowledgement: str | None = None,
+    ) -> PhonePreviewResult:
         organization_id = self._selected_org(user)
         settings = get_preview_telephony_settings()
         if not settings.is_configured:
             raise HTTPException(status_code=400, detail="telephony_not_configured")
+        if settings.is_classified_smoke:
+            self._require_classified_gates(settings, "OUTBOUND_CALL")
 
         session, should_start = await db_client.begin_phone_preview_call(
             session_id, organization_id=organization_id, user_id=user.id
@@ -377,7 +459,12 @@ class PhonePreviewService:
             )
 
         try:
-            return await self._start_provider_call(user=user, session=session)
+            return await self._start_provider_call(
+                user=user,
+                session=session,
+                idempotency_key=idempotency_key,
+                manual_acknowledgement=manual_acknowledgement,
+            )
         except HTTPException as exc:
             await db_client.update_phone_preview_session_status(
                 session.id, status="failed", failure_reason=str(exc.detail)
@@ -397,6 +484,8 @@ class PhonePreviewService:
         settings = get_preview_telephony_settings()
         if not settings.is_configured or settings.from_phone_number_id is None:
             raise HTTPException(status_code=400, detail="telephony_not_configured")
+        if settings.is_classified_smoke:
+            self._require_classified_gates(settings, "INBOUND_CALL")
 
         provider = await _get_preview_telephony_provider_by_id(
             settings.configuration_id, settings.organization_id
@@ -415,6 +504,18 @@ class PhonePreviewService:
         if getattr(phone_row, "inbound_workflow_id", None):
             raise HTTPException(
                 status_code=400, detail="preview_from_phone_number_must_be_unassigned"
+            )
+        if (
+            provider.PROVIDER_NAME == JAMBONZ_PROVIDER
+            and not await is_current_jambonz_routable_phone_tuple(
+                organization_id=settings.organization_id,
+                telephony_configuration_id=settings.configuration_id,
+                telephony_phone_number_id=phone_row.id,
+                address=phone_row.address_normalized,
+            )
+        ):
+            raise HTTPException(
+                status_code=400, detail="preview_jambonz_current_proof_required"
             )
 
         session, is_waiting = await db_client.begin_phone_preview_inbound_wait(
@@ -467,7 +568,37 @@ class PhonePreviewService:
             inbound_phone_number=phone_row.address,
         )
 
-    async def answer_inbound_preview(
+    def is_exact_classified_inbound(
+        self,
+        *,
+        provider_name: str,
+        normalized_data,
+        organization_id: int,
+        telephony_configuration_id: int,
+        from_phone_number_id: int,
+    ) -> bool:
+        settings = get_preview_telephony_settings()
+        if (
+            not settings.is_classified_smoke
+            or provider_name != JAMBONZ_PROVIDER
+            or organization_id != settings.organization_id
+            or telephony_configuration_id != settings.configuration_id
+            or from_phone_number_id != settings.from_phone_number_id
+        ):
+            return False
+        raw_data = normalized_data.raw_data or {}
+        application_id = (
+            raw_data.get("application_id")
+            or raw_data.get("application_sid")
+            or raw_data.get("applicationSid")
+        )
+        return bool(
+            application_id
+            and hmac.compare_digest(
+                str(application_id), str(settings.smoke_application_id)
+            )
+        )
+    async def handle_inbound_preview(
         self,
         *,
         provider_instance,
@@ -484,6 +615,27 @@ class PhonePreviewService:
         so matching is by the previously verified caller-number hash.
         """
         now = datetime.now(UTC)
+        settings = get_preview_telephony_settings()
+        if settings.is_classified_smoke:
+            self._require_classified_gates(settings, "INBOUND_CALL")
+        if settings.is_classified_smoke and not self.is_exact_classified_inbound(
+            provider_name=provider_instance.PROVIDER_NAME,
+            normalized_data=normalized_data,
+            organization_id=organization_id,
+            telephony_configuration_id=telephony_configuration_id,
+            from_phone_number_id=from_phone_number_id,
+        ):
+            return None
+        if (
+            provider_instance.PROVIDER_NAME == JAMBONZ_PROVIDER
+            and not await is_current_jambonz_routable_phone_tuple(
+                organization_id=organization_id,
+                telephony_configuration_id=telephony_configuration_id,
+                telephony_phone_number_id=from_phone_number_id,
+                address=normalized_data.to_number,
+            )
+        ):
+            return None
         caller_hash = global_phone_hash(normalized_data.from_number)
         session = await db_client.claim_phone_preview_inbound_session(
             organization_id=organization_id,
@@ -495,12 +647,43 @@ class PhonePreviewService:
         )
         if not session:
             return None
+        if (
+            provider_instance.PROVIDER_NAME == JAMBONZ_PROVIDER
+            and not await is_current_jambonz_routable_phone_tuple(
+                organization_id=organization_id,
+                telephony_configuration_id=telephony_configuration_id,
+                telephony_phone_number_id=from_phone_number_id,
+                address=normalized_data.to_number,
+            )
+        ):
+            await db_client.update_phone_preview_session_status(
+                session.id,
+                status="failed",
+                failure_reason="inbound_preview_proof_required",
+            )
+            return None
 
         try:
+            smoke_attempt = None
+            settings = get_preview_telephony_settings()
+            if settings.is_classified_smoke:
+                smoke_attempt = await self._allocate_classified_inbound(
+                    session=session,
+                    normalized_data=normalized_data,
+                    settings=settings,
+                )
+                return {
+                    "authority_pending": True,
+                    "attempt_id": smoke_attempt.attempt_uuid,
+                    "idempotency_key": smoke_attempt.idempotency_key,
+                    "direction": "inbound",
+                    "max_duration_seconds": 60,
+                }
             return await self._start_inbound_preview_stream(
                 provider_instance=provider_instance,
                 session=session,
                 normalized_data=normalized_data,
+                smoke_attempt=smoke_attempt,
             )
         except Exception as exc:
             await db_client.update_phone_preview_session_status(
@@ -546,12 +729,77 @@ class PhonePreviewService:
         inbound_phone_number = None
         if session.status == "awaiting_inbound":
             inbound_phone_number = await self._preview_inbound_phone_number(session)
-        return self._session_result(
+        result = self._session_result(
             session,
             otp_required=session.status == "pending_verification",
             inbound_phone_number=inbound_phone_number,
             latency_summary=self._latency_summary_from_workflow_run(workflow_run),
         )
+        settings = get_preview_telephony_settings()
+        if (
+            settings.is_classified_smoke
+            and settings.organization_id == organization_id
+        ):
+            redacted = await onnuri_staging_preflight.get_smoke_redacted_status(
+                settings.smoke_envelope_uuid,
+                organization_id=settings.organization_id,
+            )
+            if redacted:
+                result.gate_states = {
+                    name.lower(): enabled for name, enabled in settings.smoke_gates
+                }
+                result.remaining_attempts = redacted.get("remaining_attempts")
+                result.proof_current = bool(redacted.get("current"))
+                result.registration_fresh = False
+                result.media_fresh = False
+                result.contained = redacted.get("state") == "contained"
+                attempts = redacted.get("attempts") or ()
+                if attempts:
+                    result.terminal_class = attempts[-1].get("terminal_class")
+        return result
+
+    async def contain(
+        self,
+        *,
+        user: UserModel,
+        session_id: int,
+        terminal_class: str,
+        terminal_reason: str,
+    ) -> PhonePreviewResult:
+        organization_id = self._selected_org(user)
+        session = await self._get_user_session(session_id, organization_id, user.id)
+        attempt_uuid = None
+        if session.workflow_run_id:
+            workflow_run = await db_client.get_workflow_run(
+                session.workflow_run_id, organization_id=organization_id
+            )
+            if workflow_run:
+                attempt_uuid = (workflow_run.initial_context or {}).get(
+                    "smoke_attempt_uuid"
+                )
+        settings = get_preview_telephony_settings()
+        if (
+            not attempt_uuid
+            and settings.is_classified_smoke
+            and settings.organization_id == organization_id
+        ):
+            redacted = await onnuri_staging_preflight.get_smoke_redacted_status(
+                settings.smoke_envelope_uuid,
+                organization_id=settings.organization_id,
+            )
+            attempts = (redacted or {}).get("attempts") or ()
+            if attempts:
+                attempt_uuid = attempts[-1].get("attempt_uuid")
+        if not attempt_uuid:
+            raise HTTPException(status_code=409, detail="classified_smoke_not_allocated")
+        await onnuri_staging_preflight.set_smoke_terminal(
+            attempt_uuid,
+            organization_id=get_preview_telephony_settings().organization_id,
+            terminal_class=terminal_class,
+            terminal_reason=terminal_reason,
+            contain=True,
+        )
+        return await self.status(user=user, session_id=session_id)
 
     async def _start_inbound_preview_stream(
         self,
@@ -559,6 +807,7 @@ class PhonePreviewService:
         provider_instance,
         session,
         normalized_data,
+        smoke_attempt=None,
     ):
         workflow = await db_client.get_workflow(
             session.workflow_id, organization_id=session.organization_id
@@ -596,6 +845,13 @@ class PhonePreviewService:
             "preview_session_id": session.id,
             "max_duration_seconds": session.max_duration_seconds,
         }
+        if smoke_attempt is not None:
+            initial_context.update(
+                {
+                    "classified_smoke": True,
+                    "smoke_attempt_uuid": smoke_attempt.attempt_uuid,
+                }
+            )
         if session.display_name:
             initial_context["preview_display_name"] = session.display_name
 
@@ -629,18 +885,47 @@ class PhonePreviewService:
         )
         if not session:
             raise HTTPException(status_code=404, detail="preview_session_not_found")
+        application_attempt_id: str | None = None
+        settings = get_preview_telephony_settings()
+        if smoke_attempt is not None:
+            application_attempt_id = smoke_attempt.attempt_uuid
+        elif provider_instance.PROVIDER_NAME == JAMBONZ_PROVIDER:
+            if not settings.is_configured:
+                raise HTTPException(status_code=403, detail="telephony_not_configured")
+            application_attempt_id = await self._consume_jambonz_application_smoke_lease(
+                settings=settings,
+                workflow=workflow,
+                workflow_run=workflow_run,
+                session=session,
+                attempt_kind="inbound",
+            )
 
         backend_endpoint, wss_backend_endpoint = await get_backend_endpoints()
         websocket_url = (
             f"{wss_backend_endpoint}/api/v1/telephony/ws/"
             f"{workflow.id}/{workflow.user_id}/{workflow_run.id}"
         )
-        return await provider_instance.start_inbound_stream(
-            websocket_url=websocket_url,
-            workflow_run_id=workflow_run.id,
-            normalized_data=normalized_data,
-            backend_endpoint=backend_endpoint,
-        )
+        try:
+            response = await provider_instance.start_inbound_stream(
+                websocket_url=websocket_url,
+                workflow_run_id=workflow_run.id,
+                normalized_data=normalized_data,
+                backend_endpoint=backend_endpoint,
+            )
+        except Exception:
+            if application_attempt_id is not None and smoke_attempt is None:
+                await onnuri_staging_preflight.mark_application_smoke_failed(
+                    application_attempt_id,
+                    organization_id=settings.organization_id,
+                    reason="inbound_stream_start_failed",
+                )
+            raise
+        if application_attempt_id is not None and smoke_attempt is None:
+            await onnuri_staging_preflight.mark_application_smoke_dispatched(
+                application_attempt_id,
+                organization_id=settings.organization_id,
+            )
+        return response
 
     async def _refresh_aws_connect_preview_status(
         self,
@@ -733,8 +1018,103 @@ class PhonePreviewService:
             or session
         )
 
+    async def _consume_jambonz_application_smoke_lease(
+        self,
+        *,
+        settings: PreviewTelephonySettings,
+        workflow,
+        workflow_run,
+        session,
+        attempt_kind: str,
+    ) -> str:
+        """Consume the one-use proof authorization immediately before dispatch."""
+        if settings.from_phone_number_id is None:
+            raise HTTPException(
+                status_code=403,
+                detail="jambonz_application_smoke_authorization_required",
+            )
+
+        phone = await db_client.get_phone_number_for_config(
+            settings.from_phone_number_id, settings.configuration_id
+        )
+        if (
+            phone is None
+            or getattr(phone, "organization_id", None) != settings.organization_id
+            or not getattr(phone, "is_active", False)
+            or getattr(phone, "inbound_workflow_id", None) is not None
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="jambonz_application_smoke_authorization_required",
+            )
+
+        metadata = getattr(phone, "extra_metadata", None) or {}
+        inventory_id = metadata.get("inventory_id") if isinstance(metadata, dict) else None
+        if (
+            isinstance(inventory_id, bool)
+            or not isinstance(inventory_id, int)
+            or inventory_id <= 0
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="jambonz_application_smoke_authorization_required",
+            )
+
+        inventory = await db_client.get_assigned_inventory_for_phone_number(
+            inventory_id=inventory_id,
+            organization_id=settings.organization_id,
+            telephony_phone_number_id=phone.id,
+            provider=JAMBONZ_PROVIDER,
+            telephony_configuration_id=settings.configuration_id,
+            address_normalized=phone.address_normalized,
+        )
+        proof_id = getattr(inventory, "onnuri_preflight_proof_id", None)
+        if (
+            inventory is None
+            or isinstance(proof_id, bool)
+            or not isinstance(proof_id, int)
+            or proof_id <= 0
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="jambonz_application_smoke_authorization_required",
+            )
+
+        duration_seconds = getattr(session, "max_duration_seconds", None)
+        if (
+            isinstance(duration_seconds, bool)
+            or not isinstance(duration_seconds, int)
+            or duration_seconds <= 0
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="jambonz_application_smoke_authorization_required",
+            )
+
+        application_attempt_id = f"phone_preview:{attempt_kind}:{workflow_run.id}"
+        lease = await onnuri_staging_preflight.acquire_application_smoke_lease(
+            proof_id=proof_id,
+            inventory_id=inventory.id,
+            organization_id=settings.organization_id,
+            attempt_kind=attempt_kind,
+            duration_seconds=duration_seconds,
+            actor_user_id=workflow.user_id,
+            application_attempt_id=application_attempt_id,
+        )
+        attempt = await onnuri_staging_preflight.consume_application_smoke_lease(
+            lease.lease_uuid,
+            organization_id=settings.organization_id,
+            application_attempt_id=application_attempt_id,
+        )
+        return attempt.application_attempt_id
+
     async def _start_provider_call(
-        self, *, user: UserModel, session
+        self,
+        *,
+        user: UserModel,
+        session,
+        idempotency_key: str | None,
+        manual_acknowledgement: str | None,
     ) -> PhonePreviewResult:
         settings = get_preview_telephony_settings()
         assert settings.organization_id is not None
@@ -788,10 +1168,37 @@ class PhonePreviewService:
         if not provider.validate_config():
             raise HTTPException(status_code=400, detail="telephony_not_configured")
         self._require_preview_provider(provider.PROVIDER_NAME, inbound=False)
+        if not is_dispatch_purpose_allowed(
+            provider.PROVIDER_NAME, "phone_preview_smoke"
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="telephony_provider_dispatch_not_permitted",
+            )
 
         destination = self._decrypt_destination(session)
         from_number = None
-        if settings.from_phone_number_id is not None:
+        smoke_attempt = None
+        dispatch_capability: bytes | None = None
+        parsed_dispatch = None
+        if settings.is_classified_smoke:
+            if provider.PROVIDER_NAME != JAMBONZ_PROVIDER:
+                raise HTTPException(
+                    status_code=403,
+                    detail="classified_smoke_provider_not_authorized",
+                )
+            caller = await resolve_jambonz_outbound_caller(
+                telephony_configuration_id=settings.configuration_id,
+                from_phone_number_id=settings.from_phone_number_id,
+            )
+            from_number = caller.from_number
+        if provider.PROVIDER_NAME == JAMBONZ_PROVIDER and from_number is None:
+            caller = await resolve_jambonz_outbound_caller(
+                telephony_configuration_id=settings.configuration_id,
+                from_phone_number_id=settings.from_phone_number_id,
+            )
+            from_number = caller.from_number
+        elif settings.from_phone_number_id is not None:
             phone_row = await db_client.get_phone_number_for_config(
                 settings.from_phone_number_id, settings.configuration_id
             )
@@ -837,6 +1244,31 @@ class PhonePreviewService:
             use_draft=True,
             organization_id=session.organization_id,
         )
+        if settings.is_classified_smoke:
+            smoke_attempt, dispatch_capability = (
+                await self._allocate_classified_outbound(
+                    user=user,
+                    settings=settings,
+                    workflow=workflow,
+                    workflow_run=workflow_run,
+                    session=session,
+                    provider=provider,
+                    destination=destination,
+                    client_idempotency_key=idempotency_key,
+                    manual_acknowledgement=manual_acknowledgement,
+                )
+            )
+            parsed_dispatch = parse_dispatch_capability(dispatch_capability)
+            initial_context.update(
+                {
+                    "classified_smoke": True,
+                    "smoke_attempt_uuid": smoke_attempt.attempt_uuid,
+                }
+            )
+            await db_client.update_workflow_run(
+                run_id=workflow_run.id,
+                initial_context=initial_context,
+            )
         _log_preview_latency_profile(
             session_id=session.id,
             workflow_run_id=workflow_run.id,
@@ -865,7 +1297,36 @@ class PhonePreviewService:
         else:
             webhook_url = backend_endpoint
 
+        application_attempt_id: str | None = None
+        if smoke_attempt is not None:
+            application_attempt_id = smoke_attempt.attempt_uuid
+        elif provider.PROVIDER_NAME == JAMBONZ_PROVIDER:
+            application_attempt_id = await self._consume_jambonz_application_smoke_lease(
+                settings=settings,
+                workflow=workflow,
+                workflow_run=workflow_run,
+                session=session,
+                attempt_kind="outbound",
+            )
         try:
+            initiate_kwargs = {}
+            if smoke_attempt is not None:
+                assert dispatch_capability is not None
+                assert parsed_dispatch is not None
+                initiate_kwargs = {
+                    "classified_smoke": True,
+                    "run_id": str(workflow_run.id),
+                    "attempt_id": smoke_attempt.attempt_uuid,
+                    "application_attempt_id": smoke_attempt.attempt_uuid,
+                    "direction": "outbound",
+                    "idempotency_key": smoke_attempt.idempotency_key,
+                    "dispatch_capability": dispatch_capability,
+                    "dispatch_domain": parsed_dispatch.verification_domain,
+                    "dispatch_key_id": parsed_dispatch.key_id,
+                    "dispatch_algorithm_policy_id": ECDSA_P256_SHA256_POLICY_ID,
+                    "authority_deadline": parsed_dispatch.expires_at,
+                    "max_call_seconds": 60,
+                }
             call_result = await provider.initiate_call(
                 to_number=destination,
                 webhook_url=webhook_url,
@@ -873,12 +1334,32 @@ class PhonePreviewService:
                 from_number=from_number,
                 workflow_id=workflow.id,
                 user_id=workflow.user_id,
+                **initiate_kwargs,
             )
         except HTTPException as exc:
+            if application_attempt_id is not None and not settings.is_classified_smoke:
+                await onnuri_staging_preflight.mark_application_smoke_failed(
+                    application_attempt_id,
+                    organization_id=settings.organization_id,
+                    reason="outbound_provider_rejected",
+                )
             raise HTTPException(
                 status_code=502,
                 detail="preview_call_failed",
             ) from exc
+        except Exception:
+            if application_attempt_id is not None and not settings.is_classified_smoke:
+                await onnuri_staging_preflight.mark_application_smoke_failed(
+                    application_attempt_id,
+                    organization_id=settings.organization_id,
+                    reason="outbound_provider_dispatch_failed",
+                )
+            raise
+        if application_attempt_id is not None and not settings.is_classified_smoke:
+            await onnuri_staging_preflight.mark_application_smoke_dispatched(
+                application_attempt_id,
+                organization_id=settings.organization_id,
+            )
 
         provider_call_id = getattr(call_result, "call_id", None) or (
             getattr(call_result, "provider_metadata", {}) or {}
@@ -905,7 +1386,7 @@ class PhonePreviewService:
             raise HTTPException(status_code=404, detail="preview_session_not_found")
 
         updated_initial_context = {
-            **(workflow_run.initial_context or initial_context),
+            **initial_context,
             "phone_number": session.phone_number_masked,
             "called_number": session.phone_number_masked,
             "phone_number_masked": session.phone_number_masked,
@@ -925,6 +1406,220 @@ class PhonePreviewService:
         )
         return self._session_result(session, otp_required=False)
 
+    async def _allocate_classified_inbound(
+        self,
+        *,
+        session,
+        normalized_data,
+        settings: PreviewTelephonySettings,
+    ):
+        workflow = await db_client.get_workflow(
+            session.workflow_id, organization_id=session.organization_id
+        )
+        if not workflow or workflow.user_id is None:
+            raise HTTPException(status_code=404, detail="workflow_not_found")
+        if (
+            workflow.id != settings.smoke_workflow_id
+            or session.organization_id != settings.organization_id
+        ):
+            raise HTTPException(
+                status_code=403, detail="classified_smoke_tuple_mismatch"
+            )
+        canonical_destination = json.dumps(
+            {
+                "domain": _DESTINATION_HMAC_DOMAIN,
+                "organization_id": settings.organization_id,
+                "phone_e164": normalize_preview_phone(normalized_data.from_number),
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        try:
+            destination_digest = await self.destination_hmac_provider.digest(
+                canonical_payload=canonical_destination,
+                key_id=settings.destination_hmac_key_id,
+                key_version=settings.destination_hmac_key_version,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail="classified_destination_proof_unavailable"
+            ) from exc
+        idempotency_key = hashlib.sha256(
+            f"inbound:{normalized_data.call_id}".encode("utf-8")
+        ).hexdigest()
+        request_digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "direction": "inbound",
+                    "idempotency_key": idempotency_key,
+                    "organization_id": settings.organization_id,
+                    "workflow_id": workflow.id,
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        try:
+            return await onnuri_staging_preflight.allocate_smoke_attempt(
+                envelope_uuid=settings.smoke_envelope_uuid,
+                organization_id=settings.organization_id,
+                proof_id=settings.smoke_proof_id,
+                inventory_id=settings.smoke_inventory_id,
+                telephony_configuration_id=settings.configuration_id,
+                workflow_id=settings.smoke_workflow_id,
+                direction="inbound",
+                authenticated_operator_user_id=session.user_id,
+                workflow_owner_user_id=workflow.user_id,
+                idempotency_key=idempotency_key,
+                request_digest=request_digest,
+                destination_hmac_digest=destination_digest,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=403, detail="classified_smoke_allocation_denied"
+            ) from exc
+    async def _allocate_classified_outbound(
+        self,
+        *,
+        user: UserModel,
+        settings: PreviewTelephonySettings,
+        workflow,
+        workflow_run,
+        session,
+        provider,
+        destination: str,
+        client_idempotency_key: str | None,
+        manual_acknowledgement: str | None,
+    ):
+        if (
+            workflow.id != settings.smoke_workflow_id
+            or user.selected_organization_id != settings.organization_id
+            or session.organization_id != settings.organization_id
+            or provider.account_id == ""
+            or provider.application_id != settings.smoke_application_id
+            or not destination.startswith("+8210")
+            or not client_idempotency_key
+        ):
+            raise HTTPException(
+                status_code=403, detail="classified_smoke_tuple_mismatch"
+            )
+
+        canonical_destination = json.dumps(
+            {
+                "domain": _DESTINATION_HMAC_DOMAIN,
+                "organization_id": settings.organization_id,
+                "phone_e164": destination,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        try:
+            destination_digest = await self.destination_hmac_provider.digest(
+                canonical_payload=canonical_destination,
+                key_id=settings.destination_hmac_key_id,
+                key_version=settings.destination_hmac_key_version,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail="classified_destination_proof_unavailable"
+            ) from exc
+
+        request_digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "application_id": settings.smoke_application_id,
+                    "direction": "outbound",
+                    "envelope_uuid": settings.smoke_envelope_uuid,
+                    "idempotency_key": client_idempotency_key,
+                    "inventory_id": settings.smoke_inventory_id,
+                    "organization_id": settings.organization_id,
+                    "proof_id": settings.smoke_proof_id,
+                    "telephony_configuration_id": settings.configuration_id,
+                    "workflow_id": workflow.id,
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        authority_values = {
+            "envelope_uuid": settings.smoke_envelope_uuid,
+            "organization_id": settings.organization_id,
+            "proof_id": settings.smoke_proof_id,
+            "inventory_id": settings.smoke_inventory_id,
+            "telephony_configuration_id": settings.configuration_id,
+            "workflow_id": workflow.id,
+            "authenticated_operator_user_id": user.id,
+            "workflow_owner_user_id": workflow.user_id,
+            "idempotency_key": client_idempotency_key,
+            "request_digest": request_digest,
+            "destination_hmac_digest": destination_digest,
+            "account_id": provider.account_id,
+            "application_id": provider.application_id,
+            "run_id": str(workflow_run.id),
+        }
+        if manual_acknowledgement:
+            authority_values.update(
+                {
+                    "manual_acknowledgement_digest": hashlib.sha256(
+                        manual_acknowledgement.encode("utf-8")
+                    ).hexdigest(),
+                    "manual_acknowledged_at": datetime.now(UTC),
+                }
+            )
+        runtime = get_smoke_authority_runtime()
+        try:
+            return await allocate_and_issue_dispatch(
+                issuer=(
+                    self.smoke_capability_issuer
+                    if self.smoke_capability_issuer is not None
+                    else runtime.issuer
+                ),
+                recovery_sealer=(
+                    self.smoke_recovery_sealer
+                    if self.smoke_recovery_sealer is not None
+                    else runtime.recovery_sealer
+                ),
+                **authority_values,
+            )
+        except F12ServiceError as exc:
+            detail = (
+                "classified_dispatch_atomic_issuance_unavailable"
+                if exc.status_code == 503
+                else "classified_smoke_allocation_denied"
+            )
+            raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=403, detail="classified_smoke_allocation_denied"
+            ) from exc
+    @staticmethod
+    def _require_classified_gates(
+        settings: PreviewTelephonySettings, direction_gate: str
+    ) -> None:
+        gates = dict(settings.smoke_gates)
+        required = {
+            "DEPENDENCY_MANIFEST",
+            "CANDIDATE",
+            "ENDPOINT_IDENTITY",
+            "COST",
+            "LIVE_WINDOW",
+            "SIP_REGISTER",
+            "RTP",
+            "OUTBOUND_CALL",
+            "INBOUND_CALL",
+        }
+        if (
+            direction_gate not in {"OUTBOUND_CALL", "INBOUND_CALL"}
+            or set(gates) != required
+            or any(gates.get(name) is not True for name in required)
+        ):
+            raise HTTPException(
+                status_code=403, detail="classified_smoke_gates_closed"
+            )
     def _decrypt_destination(self, session) -> str:
         try:
             return decrypt_phone(session.destination_phone_encrypted)

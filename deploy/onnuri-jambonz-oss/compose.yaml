@@ -1,0 +1,946 @@
+name: onnuri-jambonz-oss-g009
+
+x-g009-defaults: &g009-defaults
+  read_only: true
+  pull_policy: never
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: none
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m
+    - /run:rw,noexec,nosuid,nodev,size=16m
+
+services:
+  mariadb:
+    <<: *g009-defaults
+    image: ${G009_MARIADB_IMAGE:?G009_MARIADB_IMAGE must be name@sha256}
+    user: "999:999"
+    command: [--socket=/tmp/mariadb.sock, --pid-file=/tmp/mariadb.pid]
+    environment:
+      MARIADB_DATABASE: jambones
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb-root-password
+    secrets: [mariadb-root-password]
+    networks: [g009-internal]
+    tmpfs:
+      - /var/lib/mysql:rw,nosuid,nodev,size=512m,uid=999,gid=999
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=999,gid=999
+      - /run:rw,noexec,nosuid,nodev,size=16m,uid=999,gid=999
+    healthcheck:
+      test: [CMD-SHELL, 'mariadb-admin ping --socket=/tmp/mariadb.sock --silent']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    <<: *g009-defaults
+    image: ${G009_REDIS_IMAGE:?G009_REDIS_IMAGE must be name@sha256}
+    user: redis
+    command: [redis-server, --save, '', --appendonly, 'no', --protected-mode, 'no']
+    networks: [g009-internal]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  database-bootstrap:
+    <<: *g009-defaults
+    image: ${G009_MARIADB_IMAGE:?G009_MARIADB_IMAGE must be name@sha256}
+    command: [sh, /bootstrap/bootstrap-database.sh]
+    environment:
+      G009_DATABASE_HOST: mariadb
+      G009_DATABASE_NAME: jambones
+      G009_UPSTREAM_SCHEMA_FILE: /bootstrap/jambones-sql.sql
+      G009_WEBHOOK_SECRET_FILE: /run/secrets/webhook-secret
+      G009_ACCOUNT_API_TOKEN_FILE: /run/secrets/account-api-token
+      G009_MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb-root-password
+      G009_JAMBONES_MYSQL_USER: ${G009_JAMBONES_MYSQL_USER:?G009_JAMBONES_MYSQL_USER is required}
+      G009_JAMBONES_MYSQL_PASSWORD_FILE: /run/secrets/g009-jambones-mysql-password
+    configs:
+      - source: g009-bootstrap
+        target: /bootstrap/bootstrap-database.sh
+        mode: 0555
+      - source: g009-upstream-schema
+        target: /bootstrap/jambones-sql.sql
+        mode: 0444
+      - source: g009-minimal-seed
+        target: /bootstrap/10-g009-minimal-seed.sql
+        mode: 0444
+    secrets: [mariadb-root-password, webhook-secret, account-api-token, g009-jambones-mysql-password]
+    networks: [g009-internal]
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    restart: 'no'
+
+
+  api:
+    <<: *g009-defaults
+    image: ${G009_API_SERVER_IMAGE:?G009_API_SERVER_IMAGE must be name@sha256}
+    environment:
+      JAMBONES_MYSQL_HOST: mariadb
+      JAMBONES_MYSQL_USER: ${G009_JAMBONES_MYSQL_USER:?G009_JAMBONES_MYSQL_USER is required}
+      JAMBONES_MYSQL_PASSWORD_FILE: /run/secrets/g009-jambones-mysql-password
+      JAMBONES_MYSQL_DATABASE: jambones
+      JAMBONES_REDIS_HOST: redis
+      JAMBONES_TIME_SERIES_HOST: 127.0.0.1
+      JWT_SECRET_FILE: /run/secrets/g009-jwt-secret
+      ENCRYPTION_SECRET_FILE: /run/secrets/g009-encryption-secret
+      RECOVA_EPHEMERAL_NO_STORAGE: '1'
+    secrets: [g009-jambones-mysql-password, g009-jwt-secret, g009-encryption-secret]
+    networks: [g009-internal]
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  feature-server:
+    <<: *g009-defaults
+    image: ${G009_FEATURE_SERVER_IMAGE:?G009_FEATURE_SERVER_IMAGE must be name@sha256}
+    environment:
+      JAMBONES_MYSQL_HOST: mariadb
+      JAMBONES_MYSQL_USER: ${G009_JAMBONES_MYSQL_USER:?G009_JAMBONES_MYSQL_USER is required}
+      JAMBONES_MYSQL_PASSWORD_FILE: /run/secrets/g009-jambones-mysql-password
+      JAMBONES_MYSQL_DATABASE: jambones
+      JAMBONES_MYSQL_CONNECT_TIMEOUT_MS: '300000'
+      JAMBONES_REDIS_HOST: redis
+      JAMBONES_REDIS_PORT: '6379'
+      JAMBONES_TIME_SERIES_HOST: 127.0.0.1
+      JAMBONES_NETWORK_CIDR: 172.30.0.0/24
+      DRACHTIO_HOST: 127.0.0.1
+      DRACHTIO_PORT: '9022'
+      DRACHTIO_SECRET_FILE: /run/secrets/g009-drachtio-feature-secret
+      JAMBONES_FREESWITCH_HOST: 127.0.0.1
+      JAMBONES_FREESWITCH_PORT: ${G009_FREESWITCH_ESL_PORT:?G009_FREESWITCH_ESL_PORT is required}
+      JAMBONES_FREESWITCH_PASSWORD_FILE: /run/secrets/g009-freeswitch-esl-password
+      JAMBONES_ESL_LISTEN_ADDRESS: 127.0.0.1
+      HTTP_PORT: '3000'
+      JWT_SECRET_FILE: /run/secrets/g009-jwt-secret
+      ENCRYPTION_SECRET_FILE: /run/secrets/g009-encryption-secret
+      RECOVA_EPHEMERAL_NO_STORAGE: '1'
+    secrets: [g009-jambones-mysql-password, g009-jwt-secret, g009-encryption-secret, g009-drachtio-feature-secret, g009-freeswitch-esl-password]
+    networks:
+      g009-internal:
+        ipv4_address: 172.30.0.10
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  drachtio-feature:
+    <<: *g009-defaults
+    image: ${G009_DRACHTIO_IMAGE:?G009_DRACHTIO_IMAGE must be name@sha256}
+    secrets: [g009-drachtio-feature-secret]
+    network_mode: service:feature-server
+    command: [--file, /etc/drachtio-feature.xml, --secret-file, /run/secrets/g009-drachtio-feature-secret]
+    configs:
+      - source: drachtio-feature-config
+        target: /etc/drachtio-feature.xml
+        mode: 0444
+    depends_on:
+      feature-server:
+        condition: service_started
+
+  freeswitch:
+    <<: *g009-defaults
+    image: ${G009_FREESWITCH_IMAGE:?G009_FREESWITCH_IMAGE must be name@sha256}
+    secrets: [g009-freeswitch-esl-password]
+    network_mode: service:feature-server
+    environment:
+      FREESWITCH_EVENT_SOCKET_PASSWORD_FILE: /run/secrets/g009-freeswitch-esl-password
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=999,gid=999
+      - /run:rw,noexec,nosuid,nodev,size=16m,uid=999,gid=999
+    depends_on:
+      feature-server:
+        condition: service_started
+
+  rtpengine:
+    <<: *g009-defaults
+    image: ${G009_RTPENGINE_IMAGE:?G009_RTPENGINE_IMAGE must be name@sha256}
+    command: [--foreground, --table=-1, --interface=public/eth0, --listen-ng=0.0.0.0:22222, --listen-http=0.0.0.0:8080, --dtmf-log-dest=127.0.0.1:22223, --port-min=40000, --port-max=40099, --delete-delay=0, --log-level=0]
+    networks: [g009-internal]
+
+  rtpengine-sidecar:
+    <<: *g009-defaults
+    image: ${G009_SBC_RTPENGINE_SIDECAR_IMAGE:?G009_SBC_RTPENGINE_SIDECAR_IMAGE must be name@sha256}
+    environment:
+      DTMF_ONLY: '1'
+      RTPENGINE_DTMF_LOG_PORT: '22223'
+      RTPENGINE_URL: ws://127.0.0.1:8080
+    network_mode: service:rtpengine
+    depends_on:
+      rtpengine:
+        condition: service_started
+
+  drachtio-sip:
+    <<: *g009-defaults
+    image: ${G009_DRACHTIO_IMAGE:?G009_DRACHTIO_IMAGE must be name@sha256}
+    secrets: [g009-drachtio-sip-secret]
+    networks:
+      g009-internal:
+        ipv4_address: 172.30.0.20
+      registration-internal:
+        ipv4_address: 172.31.0.3
+    command: [--file, /etc/drachtio-sip.xml, --secret-file, /run/secrets/g009-drachtio-sip-secret]
+    configs:
+      - source: drachtio-sip-config
+        target: /etc/drachtio-sip.xml
+        mode: 0444
+    healthcheck:
+      test: [CMD, drachtio, --version]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 3s
+
+  registration-authority:
+    <<: *g009-defaults
+    image: ${G009_SBC_SIP_SIDECAR_IMAGE:?G009_SBC_SIP_SIDECAR_IMAGE must be name@sha256}
+    profiles: [registration, g008-live-smoke]
+    user: "1000:1000"
+    environment:
+      G009_DISPATCH_PUBLIC_KEY_PATH: /run/secrets/dispatch-es256-public-key
+      G009_DISPATCH_KEY_ID: ${ONNURI_SMOKE_DISPATCH_KEY_ID:?ONNURI_SMOKE_DISPATCH_KEY_ID is required}
+      RECOVA_REGISTRATION_F12_BASE_URL: ${RECOVA_REGISTRATION_F12_BASE_URL:?RECOVA_REGISTRATION_F12_BASE_URL is required}
+      RECOVA_F12_VERIFIED_IDENTITY: ${RECOVA_F12_VERIFIED_IDENTITY:?RECOVA_F12_VERIFIED_IDENTITY is required}
+      RECOVA_F12_VERIFIED_ISSUER: ${RECOVA_F12_VERIFIED_ISSUER:?RECOVA_F12_VERIFIED_ISSUER is required}
+      RECOVA_F12_CLIENT_CERTIFICATE_PATH: /run/secrets/registration-f12-client-certificate
+      RECOVA_F12_CLIENT_KEY_PATH: /run/secrets/registration-f12-client-key
+      RECOVA_F12_CA_CERTIFICATE_PATH: /run/secrets/registration-f12-ca-certificate
+      RECOVA_F12_ENDPOINT_CREDENTIAL_PATH: /run/secrets/registration-f12-endpoint-credential
+      ONNURI_SMOKE_REGISTRATION_ATTESTATION_KEY_ID: ${ONNURI_SMOKE_REGISTRATION_ATTESTATION_KEY_ID:?ONNURI_SMOKE_REGISTRATION_ATTESTATION_KEY_ID is required}
+      ONNURI_SMOKE_REGISTRATION_ATTESTATION_PRIVATE_KEY_FILE: /run/secrets/registration-attestation-es256-private-key
+      ONNURI_SMOKE_REGISTRATION_UPSTREAM_ENDPOINT_SHA256: ${ONNURI_SMOKE_REGISTRATION_UPSTREAM_ENDPOINT_SHA256:?ONNURI_SMOKE_REGISTRATION_UPSTREAM_ENDPOINT_SHA256 is required}
+      G009_REGISTRATION_SUPPLIER_IPV4: ${G009_REGISTRATION_GATEWAY_IPV4:?G009_REGISTRATION_GATEWAY_IPV4 is required}
+      G009_REGISTRATION_SUPPLIER_PORT: '5060'
+      G009_REGISTRATION_SUPPLIER_TRANSPORT: udp
+      G009_REGISTRATION_AUTHORITY_INGRESS_IPV4: 172.31.0.2
+      G009_REGISTRATION_AUTHORITY_INGRESS_PORT: '5060'
+      G009_REGISTRATION_PROVIDER_IPV4: 172.31.0.3
+      G008_TRANSACTION_CONTROL_HOST: 172.32.0.2
+      G008_TRANSACTION_CONTROL_PORT: '8079'
+    secrets:
+      - source: dispatch-es256-public-key
+        target: dispatch-es256-public-key
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+      - source: registration-f12-client-certificate
+        target: registration-f12-client-certificate
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+      - source: registration-f12-client-key
+        target: registration-f12-client-key
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+      - source: registration-f12-ca-certificate
+        target: registration-f12-ca-certificate
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+      - source: registration-f12-endpoint-credential
+        target: registration-f12-endpoint-credential
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+      - source: registration-attestation-es256-private-key
+        target: registration-attestation-es256-private-key
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+    volumes:
+      - g008-registration-control:/run/g008-registration-control
+    configs:
+      - source: g009-registration-egress-verifier
+        target: /opt/g009/verify-registration-egress-proof.js
+        mode: 0444
+      - source: g009-registration-transaction-runner
+        target: /opt/g009/run-registration-transaction.js
+        mode: 0444
+      - source: g009-registration-sip-attestor
+        target: /opt/g009/registration-sip-attestor.js
+        mode: 0444
+    command: [node, /opt/g009/run-registration-transaction.js]
+    networks:
+      registration-internal:
+        ipv4_address: 172.31.0.2
+      registration-supplier-egress:
+      f12-client:
+      transaction-control:
+        ipv4_address: 172.32.0.2
+    healthcheck:
+      test: [CMD, node, -e, "require('fs').accessSync('/run/g008-registration-control/register.ready')"]
+      interval: 1s
+      timeout: 1s
+      retries: 35
+      start_period: 1s
+    restart: 'no'
+    depends_on:
+      registration-bootstrap:
+        condition: service_completed_successfully
+      f12-ingress:
+        condition: service_healthy
+
+  sip-sidecar-register:
+    <<: *g009-defaults
+    image: ${G009_SBC_SIP_SIDECAR_IMAGE:?G009_SBC_SIP_SIDECAR_IMAGE must be name@sha256}
+    profiles: [g008-live-smoke]
+    secrets: [g009-drachtio-sip-secret, g009-jambones-mysql-password, g009-jwt-secret, g009-encryption-secret]
+    network_mode: service:drachtio-sip
+    environment:
+      DRACHTIO_HOST: 127.0.0.1
+      DRACHTIO_PORT: '9022'
+      DRACHTIO_SECRET_FILE: /run/secrets/g009-drachtio-sip-secret
+      JAMBONES_MYSQL_HOST: mariadb
+      JAMBONES_MYSQL_USER: ${G009_JAMBONES_MYSQL_USER:?G009_JAMBONES_MYSQL_USER is required}
+      JAMBONES_MYSQL_PASSWORD_FILE: /run/secrets/g009-jambones-mysql-password
+      JAMBONES_MYSQL_DATABASE: jambones
+      JAMBONES_REDIS_HOST: redis
+      JAMBONES_TIME_SERIES_HOST: 127.0.0.1
+      JWT_SECRET_FILE: /run/secrets/g009-jwt-secret
+      ENCRYPTION_SECRET_FILE: /run/secrets/g009-encryption-secret
+      RECOVA_EPHEMERAL_NO_STORAGE: '1'
+      RECOVA_ONE_SHOT_OPERATION_KIND: register
+    command:
+      - sh
+      - -ec
+      - |
+        until [ -f /run/g008-registration-control/register.ready ]; do sleep 1; done
+        node app.js
+        while :; do sleep 3600; done
+    volumes:
+      - g008-registration-control:/run/g008-registration-control:ro
+    deploy:
+      replicas: 1
+    restart: 'no'
+    depends_on:
+      registration-bootstrap:
+        condition: service_completed_successfully
+      drachtio-sip:
+        condition: service_started
+      registration-authority:
+        condition: service_healthy
+
+  sip-sidecar-unregister:
+    <<: *g009-defaults
+    image: ${G009_SBC_SIP_SIDECAR_IMAGE:?G009_SBC_SIP_SIDECAR_IMAGE must be name@sha256}
+    profiles: [g008-live-smoke]
+    secrets: [g009-drachtio-sip-secret, g009-jambones-mysql-password, g009-jwt-secret, g009-encryption-secret]
+    network_mode: service:drachtio-sip
+    environment:
+      DRACHTIO_HOST: 127.0.0.1
+      DRACHTIO_PORT: '9022'
+      DRACHTIO_SECRET_FILE: /run/secrets/g009-drachtio-sip-secret
+      JAMBONES_MYSQL_HOST: mariadb
+      JAMBONES_MYSQL_USER: ${G009_JAMBONES_MYSQL_USER:?G009_JAMBONES_MYSQL_USER is required}
+      JAMBONES_MYSQL_PASSWORD_FILE: /run/secrets/g009-jambones-mysql-password
+      JAMBONES_MYSQL_DATABASE: jambones
+      JAMBONES_REDIS_HOST: redis
+      JAMBONES_TIME_SERIES_HOST: 127.0.0.1
+      JWT_SECRET_FILE: /run/secrets/g009-jwt-secret
+      ENCRYPTION_SECRET_FILE: /run/secrets/g009-encryption-secret
+      RECOVA_EPHEMERAL_NO_STORAGE: '1'
+      RECOVA_ONE_SHOT_OPERATION_KIND: unregister
+    command:
+      - sh
+      - -ec
+      - |
+        until [ -f /run/g008-registration-control/unregister.ready ]; do sleep 1; done
+        node app.js
+        while :; do sleep 3600; done
+    volumes:
+      - g008-registration-control:/run/g008-registration-control:ro
+    deploy:
+      replicas: 1
+    restart: 'no'
+    depends_on:
+      registration-bootstrap:
+        condition: service_completed_successfully
+      drachtio-sip:
+        condition: service_started
+      registration-authority:
+        condition: service_healthy
+  inbound:
+    <<: *g009-defaults
+    image: ${G009_SBC_INBOUND_IMAGE:?G009_SBC_INBOUND_IMAGE must be name@sha256}
+    environment:
+      JAMBONES_MYSQL_HOST: mariadb
+      JAMBONES_MYSQL_USER: ${G009_JAMBONES_MYSQL_USER:?G009_JAMBONES_MYSQL_USER is required}
+      JAMBONES_MYSQL_PASSWORD_FILE: /run/secrets/g009-jambones-mysql-password
+      JAMBONES_MYSQL_DATABASE: jambones
+      JAMBONES_REDIS_HOST: redis
+      JAMBONES_TIME_SERIES_HOST: 127.0.0.1
+      JAMBONES_NETWORK_CIDR: 172.30.0.0/24
+      DRACHTIO_HOST: 127.0.0.1
+      DRACHTIO_PORT: '9022'
+      DRACHTIO_SECRET_FILE: /run/secrets/g009-drachtio-sip-secret
+      JWT_SECRET_FILE: /run/secrets/g009-jwt-secret
+      ENCRYPTION_SECRET_FILE: /run/secrets/g009-encryption-secret
+      RECOVA_EPHEMERAL_NO_STORAGE: '1'
+    secrets: [g009-drachtio-sip-secret, g009-jambones-mysql-password, g009-jwt-secret, g009-encryption-secret]
+    network_mode: service:drachtio-sip
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+      drachtio-sip:
+        condition: service_healthy
+
+  outbound:
+    <<: *g009-defaults
+    image: ${G009_SBC_OUTBOUND_IMAGE:?G009_SBC_OUTBOUND_IMAGE must be name@sha256}
+    environment:
+      JAMBONES_MYSQL_HOST: mariadb
+      JAMBONES_MYSQL_USER: ${G009_JAMBONES_MYSQL_USER:?G009_JAMBONES_MYSQL_USER is required}
+      JAMBONES_MYSQL_PASSWORD_FILE: /run/secrets/g009-jambones-mysql-password
+      JAMBONES_MYSQL_DATABASE: jambones
+      JAMBONES_REDIS_HOST: redis
+      JAMBONES_TIME_SERIES_HOST: 127.0.0.1
+      JAMBONES_NETWORK_CIDR: 172.30.0.0/24
+      DRACHTIO_HOST: 127.0.0.1
+      DRACHTIO_PORT: '9022'
+      DRACHTIO_SECRET_FILE: /run/secrets/g009-drachtio-sip-secret
+      JWT_SECRET_FILE: /run/secrets/g009-jwt-secret
+      ENCRYPTION_SECRET_FILE: /run/secrets/g009-encryption-secret
+      RECOVA_EPHEMERAL_NO_STORAGE: '1'
+    secrets: [g009-drachtio-sip-secret, g009-jambones-mysql-password, g009-jwt-secret, g009-encryption-secret]
+    network_mode: service:drachtio-sip
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+      drachtio-sip:
+        condition: service_healthy
+
+  call-router:
+    <<: *g009-defaults
+    image: ${G009_SBC_CALL_ROUTER_IMAGE:?G009_SBC_CALL_ROUTER_IMAGE must be name@sha256}
+    environment:
+      JAMBONES_MYSQL_HOST: mariadb
+      JAMBONES_MYSQL_USER: ${G009_JAMBONES_MYSQL_USER:?G009_JAMBONES_MYSQL_USER is required}
+      JAMBONES_MYSQL_PASSWORD_FILE: /run/secrets/g009-jambones-mysql-password
+      JAMBONES_MYSQL_DATABASE: jambones
+      JAMBONES_REDIS_HOST: redis
+      JAMBONES_NETWORK_CIDR: 172.30.0.0/24
+      HTTP_PORT: '3000'
+      RECOVA_EPHEMERAL_NO_STORAGE: '1'
+    secrets: [g009-jambones-mysql-password]
+    networks: [g009-internal]
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+
+  facade:
+    <<: *g009-defaults
+    image: ${G009_FACADE_IMAGE:?G009_FACADE_IMAGE must be name@sha256}
+    environment:
+      FACADE_APP_FACTORY: api.services.telephony.providers.jambonz.facade.app:create_facade_app
+      FACADE_ASGI_COMMAND_JSON: '["python","-m","uvicorn","{app_factory}","--factory","--host","0.0.0.0","--port","8080"]'
+      RECOVA_DISPATCH_KEY_ID: ${ONNURI_SMOKE_DISPATCH_KEY_ID:?ONNURI_SMOKE_DISPATCH_KEY_ID is required}
+      RECOVA_MEDIA_KEY_ID: ${ONNURI_SMOKE_MEDIA_KEY_ID:?ONNURI_SMOKE_MEDIA_KEY_ID is required}
+      RECOVA_DISPATCH_PUBLIC_KEY_PATH: /run/secrets/dispatch-es256-public-key
+      RECOVA_MEDIA_PUBLIC_KEY_PATH: /run/secrets/media-es256-public-key
+      RECOVA_F12_BASE_URL: https://f12-ingress:8443/api/v1/internal/onnuri-smoke
+      RECOVA_F12_VERIFIED_IDENTITY: ${RECOVA_F12_VERIFIED_IDENTITY:?RECOVA_F12_VERIFIED_IDENTITY is required}
+      RECOVA_F12_VERIFIED_ISSUER: ${RECOVA_F12_VERIFIED_ISSUER:?RECOVA_F12_VERIFIED_ISSUER is required}
+      RECOVA_F12_CLIENT_CERTIFICATE_PATH: /run/secrets/registration-f12-client-certificate
+      RECOVA_F12_CLIENT_KEY_PATH: /run/secrets/registration-f12-client-key
+      RECOVA_F12_CA_CERTIFICATE_PATH: /run/secrets/registration-f12-ca-certificate
+      RECOVA_F12_ENDPOINT_CREDENTIAL_PATH: /run/secrets/registration-f12-endpoint-credential
+      RECOVA_MEDIA_WEBSOCKET_URL: wss://f12-ingress:8443/api/v1/telephony/jambonz/onnuri-smoke/media
+      RECOVA_STOCK_BASE_URL: http://api:3000
+      RECOVA_STOCK_ACCOUNT_ID: ${RECOVA_STOCK_ACCOUNT_ID:?RECOVA_STOCK_ACCOUNT_ID is required}
+      RECOVA_STOCK_API_TOKEN_FILE: /run/secrets/g008-stock-api-token
+    networks: [g009-internal, f12-client]
+    secrets:
+      - dispatch-es256-public-key
+      - media-es256-public-key
+      - source: registration-f12-client-certificate
+        target: registration-f12-client-certificate
+        uid: "65532"
+        gid: "65532"
+        mode: 0400
+      - source: registration-f12-client-key
+        target: registration-f12-client-key
+        uid: "65532"
+        gid: "65532"
+        mode: 0400
+      - source: registration-f12-ca-certificate
+        target: registration-f12-ca-certificate
+        uid: "65532"
+        gid: "65532"
+        mode: 0400
+      - source: registration-f12-endpoint-credential
+        target: registration-f12-endpoint-credential
+        uid: "65532"
+        gid: "65532"
+        mode: 0400
+      - source: stock-api-token
+        target: g008-stock-api-token
+        uid: "65532"
+        gid: "65532"
+        mode: 0400
+
+  recova-postgres:
+    <<: *g009-defaults
+    image: ${G008_POSTGRES_IMAGE:?G008_POSTGRES_IMAGE must be name@sha256}
+    user: postgres
+    environment:
+      POSTGRES_DB: recova
+      POSTGRES_USER: recova
+      POSTGRES_PASSWORD_FILE: /run/secrets/recova-postgres-password
+    secrets: [recova-postgres-password]
+    networks: [f12-data]
+    tmpfs:
+      - /var/lib/postgresql/data:rw,nosuid,nodev,size=512m
+      - /var/run/postgresql:rw,nosuid,nodev,size=16m
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U recova -d recova]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  recova-redis:
+    <<: *g009-defaults
+    image: ${G008_REDIS_IMAGE:?G008_REDIS_IMAGE must be name@sha256}
+    user: redis
+    command: [sh, /bootstrap/sealed-secret-wrapper.sh, redis, /run/secrets/recova-redis-password]
+    configs:
+      - source: g009-sealed-secret-wrapper
+        target: /bootstrap/sealed-secret-wrapper.sh
+        mode: 0555
+    secrets: [recova-redis-password]
+    networks: [f12-data]
+    healthcheck:
+      test: [CMD, sh, /bootstrap/sealed-secret-wrapper.sh, redis-health, /run/secrets/recova-redis-password]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  recova-migrate:
+    <<: *g009-defaults
+    image: ${G008_RECOVA_BACKEND_IMAGE:?G008_RECOVA_BACKEND_IMAGE must be name@sha256}
+    platform: linux/amd64
+    command: [sh, /bootstrap/sealed-secret-wrapper.sh, migrate, /run/secrets/g008-recova-postgres-password]
+    configs:
+      - source: g009-sealed-secret-wrapper
+        target: /bootstrap/sealed-secret-wrapper.sh
+        mode: 0555
+    environment:
+      ENVIRONMENT: production
+      RECOVA_SIP_ENABLED: ${RECOVA_SIP_ENABLED:?RECOVA_SIP_ENABLED must be gate-derived}
+      RECOVA_RTP_ENABLED: ${RECOVA_RTP_ENABLED:?RECOVA_RTP_ENABLED must be gate-derived}
+      RECOVA_REGISTER_ENABLED: ${RECOVA_REGISTER_ENABLED:?RECOVA_REGISTER_ENABLED must be gate-derived}
+      RECOVA_OUTBOUND_CALLS_ENABLED: ${RECOVA_OUTBOUND_CALLS_ENABLED:?RECOVA_OUTBOUND_CALLS_ENABLED must be gate-derived}
+      RECOVA_INBOUND_CALLS_ENABLED: ${RECOVA_INBOUND_CALLS_ENABLED:?RECOVA_INBOUND_CALLS_ENABLED must be gate-derived}
+    secrets:
+      - source: recova-postgres-password
+        target: g008-recova-postgres-password
+        mode: 0444
+    networks: [f12-data]
+    depends_on:
+      recova-postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  recova-backend:
+    <<: *g009-defaults
+    image: ${G008_RECOVA_BACKEND_IMAGE:?G008_RECOVA_BACKEND_IMAGE must be name@sha256}
+    platform: linux/amd64
+    command: [sh, /bootstrap/sealed-secret-wrapper.sh, backend, /run/secrets/g008-recova-postgres-password, /run/secrets/g008-recova-redis-password]
+    configs:
+      - source: g009-sealed-secret-wrapper
+        target: /bootstrap/sealed-secret-wrapper.sh
+        mode: 0555
+    environment:
+      ENVIRONMENT: production
+      ONNURI_SMOKE_F12_CREDENTIAL_SHA256: ${ONNURI_SMOKE_F12_CREDENTIAL_SHA256:?ONNURI_SMOKE_F12_CREDENTIAL_SHA256 is required}
+      ONNURI_SMOKE_F12_TRUSTED_MTLS_ISSUER: ${ONNURI_SMOKE_F12_TRUSTED_MTLS_ISSUER:?ONNURI_SMOKE_F12_TRUSTED_MTLS_ISSUER is required}
+      ONNURI_SMOKE_F12_ALLOWED_MTLS_IDENTITIES: ${ONNURI_SMOKE_F12_ALLOWED_MTLS_IDENTITIES:?ONNURI_SMOKE_F12_ALLOWED_MTLS_IDENTITIES is required}
+      ONNURI_SMOKE_DISPATCH_KEY_ID: ${ONNURI_SMOKE_DISPATCH_KEY_ID:?ONNURI_SMOKE_DISPATCH_KEY_ID is required}
+      ONNURI_SMOKE_DISPATCH_PRIVATE_KEY_FILE: /run/secrets/g008-dispatch-es256-private-key
+      ONNURI_SMOKE_DISPATCH_PUBLIC_KEY_FILE: /run/secrets/g008-dispatch-es256-public-key
+      ONNURI_SMOKE_MEDIA_KEY_ID: ${ONNURI_SMOKE_MEDIA_KEY_ID:?ONNURI_SMOKE_MEDIA_KEY_ID is required}
+      ONNURI_SMOKE_MEDIA_PRIVATE_KEY_FILE: /run/secrets/g008-media-es256-private-key
+      ONNURI_SMOKE_MEDIA_PUBLIC_KEY_FILE: /run/secrets/g008-media-es256-public-key
+      ONNURI_SMOKE_RECOVERY_KEY_FILE: /run/secrets/g008-authority-recovery-key
+      ONNURI_SMOKE_EXECUTION_EVIDENCE_KEY_ID: ${ONNURI_SMOKE_EXECUTION_EVIDENCE_KEY_ID:?ONNURI_SMOKE_EXECUTION_EVIDENCE_KEY_ID is required}
+      ONNURI_SMOKE_EXECUTION_EVIDENCE_PRIVATE_KEY_FILE: /run/secrets/g008-execution-evidence-es256-private-key
+      ONNURI_SMOKE_EXECUTION_EVIDENCE_PUBLIC_KEY_FILE: /run/secrets/g008-execution-evidence-es256-public-key
+      ONNURI_SMOKE_REGISTRATION_ATTESTATION_KEY_ID: ${ONNURI_SMOKE_REGISTRATION_ATTESTATION_KEY_ID:?ONNURI_SMOKE_REGISTRATION_ATTESTATION_KEY_ID is required}
+      ONNURI_SMOKE_REGISTRATION_ATTESTATION_PUBLIC_KEY_FILE: /run/secrets/g008-registration-attestation-es256-public-key
+      ONNURI_SMOKE_REGISTRATION_UPSTREAM_ENDPOINT_SHA256: ${ONNURI_SMOKE_REGISTRATION_UPSTREAM_ENDPOINT_SHA256:?ONNURI_SMOKE_REGISTRATION_UPSTREAM_ENDPOINT_SHA256 is required}
+      RECOVA_SIP_ENABLED: ${RECOVA_SIP_ENABLED:?RECOVA_SIP_ENABLED must be gate-derived}
+      RECOVA_RTP_ENABLED: ${RECOVA_RTP_ENABLED:?RECOVA_RTP_ENABLED must be gate-derived}
+      RECOVA_REGISTER_ENABLED: ${RECOVA_REGISTER_ENABLED:?RECOVA_REGISTER_ENABLED must be gate-derived}
+      RECOVA_OUTBOUND_CALLS_ENABLED: ${RECOVA_OUTBOUND_CALLS_ENABLED:?RECOVA_OUTBOUND_CALLS_ENABLED must be gate-derived}
+      RECOVA_INBOUND_CALLS_ENABLED: ${RECOVA_INBOUND_CALLS_ENABLED:?RECOVA_INBOUND_CALLS_ENABLED must be gate-derived}
+      ONNURI_SMOKE_F12_ROUTE_EVIDENCE_ROOT: /run/onnuri-route-evidence
+      ONNURI_SMOKE_F12_ROUTE_EVIDENCE_MANIFEST_FILE: /run/onnuri-route-evidence/manifest.json
+      ONNURI_SMOKE_F12_ROUTE_EVIDENCE_UID: '65532'
+      ONNURI_SMOKE_F12_ROUTE_EVIDENCE_GID: '65532'
+    secrets:
+      - source: recova-postgres-password
+        target: g008-recova-postgres-password
+        mode: 0444
+      - source: recova-redis-password
+        target: g008-recova-redis-password
+        mode: 0444
+      - source: dispatch-es256-private-key
+        target: g008-dispatch-es256-private-key
+        mode: 0444
+      - source: dispatch-es256-public-key
+        target: g008-dispatch-es256-public-key
+        mode: 0444
+      - source: media-es256-private-key
+        target: g008-media-es256-private-key
+        mode: 0444
+      - source: media-es256-public-key
+        target: g008-media-es256-public-key
+        mode: 0444
+      - source: execution-evidence-es256-private-key
+        target: g008-execution-evidence-es256-private-key
+        mode: 0444
+      - source: execution-evidence-es256-public-key
+        target: g008-execution-evidence-es256-public-key
+        mode: 0444
+      - source: authority-recovery-key
+        target: g008-authority-recovery-key
+        mode: 0444
+      - source: registration-attestation-es256-public-key
+        target: g008-registration-attestation-es256-public-key
+        mode: 0444
+    volumes:
+      - type: bind
+        source: ${ONNURI_SMOKE_F12_ROUTE_EVIDENCE_ROOT:?ONNURI_SMOKE_F12_ROUTE_EVIDENCE_ROOT must be sealed}/route-evidence
+        target: /run/onnuri-route-evidence
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [f12-backend, f12-data]
+    depends_on:
+      recova-migrate:
+        condition: service_completed_successfully
+      recova-redis:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD-SHELL, 'python -c "import urllib.request; urllib.request.urlopen(''http://127.0.0.1:8000/api/v1/health'').read()"']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  f12-ingress:
+    <<: *g009-defaults
+    image: ${G008_F12_INGRESS_IMAGE:?G008_F12_INGRESS_IMAGE must be name@sha256}
+    user: nginx
+    configs:
+      - source: f12-ingress-config
+        target: /etc/nginx/nginx.conf
+        mode: 0444
+    secrets: [f12-server-certificate, f12-server-key, f12-client-ca-certificate]
+    networks: [f12-client, f12-backend]
+    depends_on:
+      recova-backend:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, nginx, -t]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  registration-bootstrap:
+    <<: *g009-defaults
+    image: ${G009_MARIADB_IMAGE:?G009_MARIADB_IMAGE must be name@sha256}
+    profiles: [registration, g008-live-smoke]
+    command: [sh, /bootstrap/bootstrap-database.sh]
+    environment:
+      G009_REGISTRATION_BOOTSTRAP: '1'
+      G009_DATABASE_HOST: mariadb
+      G009_DATABASE_NAME: jambones
+      G009_MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb-root-password
+      G009_REGISTRATION_CARRIER_SID: ${G009_REGISTRATION_CARRIER_SID:?G009_REGISTRATION_CARRIER_SID must be sealed}
+      G009_REGISTRATION_GATEWAY_SID: ${G009_REGISTRATION_GATEWAY_SID:?G009_REGISTRATION_GATEWAY_SID must be sealed}
+      G009_REGISTRATION_USERNAME_FILE: /run/g008-secrets/sip-username
+      G009_REGISTRATION_SIP_REALM_FILE: /run/g008-secrets/sip-realm
+      G009_REGISTRATION_PASSWORD_FILE: /run/g008-secrets/sip-password
+      G009_REGISTRATION_GATEWAY_IPV4: '172.31.0.2'
+    configs:
+      - source: g009-bootstrap
+        target: /bootstrap/bootstrap-database.sh
+        mode: 0555
+      - source: g009-registration-template
+        target: /bootstrap/20-g009-registration-template.sql
+        mode: 0444
+    secrets: [mariadb-root-password]
+    volumes:
+      - g008-live-smoke-secrets:/run/g008-secrets:ro
+    networks: [g009-internal]
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+    restart: 'no'
+
+  g008-live-smoke-runner:
+    <<: *g009-defaults
+    image: ${G008_RECOVA_BACKEND_IMAGE:?G008_RECOVA_BACKEND_IMAGE must be name@sha256}
+    platform: linux/amd64
+    profiles: [g008-live-smoke]
+    user: "1000:1000"
+    command: [python, /opt/g008/run-g008-live-smoke.py]
+    environment:
+      G008_AUTHORITY_BASE_URL: https://f12-ingress:8443/api/v1/internal/onnuri-smoke
+      G008_FACADE_BASE_URL: http://facade:8080
+      G008_F12_CLIENT_CERTIFICATE_FILE: /run/secrets/registration-f12-client-certificate
+      G008_F12_CLIENT_KEY_FILE: /run/secrets/registration-f12-client-key
+      G008_F12_CA_CERTIFICATE_FILE: /run/secrets/registration-f12-ca-certificate
+      G008_F12_CLIENT_CA_CERTIFICATE_FILE: /run/secrets/registration-f12-ca-certificate
+      G008_F12_ENDPOINT_CREDENTIAL_FILE: /run/secrets/registration-f12-endpoint-credential
+      # Canonical execution-request bytes are the sole authority for these bindings.
+      G008_EXECUTION_REQUEST_FILE: /run/g008-execution/request
+      G008_EXECUTION_SIP_USERNAME_FILE: /run/g008-execution/sip-username
+      G008_EXECUTION_SIP_PASSWORD_FILE: /run/g008-execution/sip-password
+      G008_EXECUTION_SIP_REALM_FILE: /run/g008-execution/sip-realm
+      G008_EXECUTION_TARGET_FILE: /run/g008-execution/target
+      G008_SIP_USERNAME_FILE: /run/g008-execution/sip-username
+      G008_SIP_PASSWORD_FILE: /run/g008-execution/sip-password
+      G008_SIP_REALM_FILE: /run/g008-execution/sip-realm
+      G008_OWNED_TARGET_FILE: /run/g008-execution/target
+      G008_SECRET_DIR: /run/g008-secrets
+      G008_BARRIER_SOCKET: /run/g008-control/barrier.sock
+      G008_TRANSACTION_BROKER_HOST: 172.32.0.2
+      G008_TRANSACTION_BROKER_PORT: '8079'
+      G008_OPERATOR_CREDENTIAL_FILE: /run/g008-execution/operator-credential
+      G008_EXECUTION_NONCE_FILE: /run/g008-execution/execution-nonce
+      G008_EXECUTION_REQUEST_SHA256: ${G008_EXECUTION_REQUEST_SHA256:?G008_EXECUTION_REQUEST_SHA256 must be sealed}
+      ONNURI_REQUEST_DIGEST: ${ONNURI_REQUEST_DIGEST:?ONNURI_REQUEST_DIGEST must be sealed}
+      ONNURI_CANDIDATE_DIGEST: ${ONNURI_CANDIDATE_DIGEST:?ONNURI_CANDIDATE_DIGEST must be sealed}
+      ONNURI_ROUTE_PROFILE_DIGEST: ${ONNURI_ROUTE_PROFILE_DIGEST:?ONNURI_ROUTE_PROFILE_DIGEST must be sealed}
+      RECOVA_SIP_ENABLED: ${RECOVA_SIP_ENABLED:?RECOVA_SIP_ENABLED must be gate-derived}
+      RECOVA_RTP_ENABLED: ${RECOVA_RTP_ENABLED:?RECOVA_RTP_ENABLED must be gate-derived}
+      RECOVA_REGISTER_ENABLED: ${RECOVA_REGISTER_ENABLED:?RECOVA_REGISTER_ENABLED must be gate-derived}
+      RECOVA_OUTBOUND_CALLS_ENABLED: ${RECOVA_OUTBOUND_CALLS_ENABLED:?RECOVA_OUTBOUND_CALLS_ENABLED must be gate-derived}
+      RECOVA_INBOUND_CALLS_ENABLED: ${RECOVA_INBOUND_CALLS_ENABLED:?RECOVA_INBOUND_CALLS_ENABLED must be gate-derived}
+    configs:
+      - source: g008-live-smoke-runner
+        target: /opt/g008/run-g008-live-smoke.py
+        mode: 0555
+      - source: g008-trusted-keyset
+        target: /opt/g008/trusted/phase_c_live_preflight_v1.json
+        mode: 0444
+    secrets:
+      - source: registration-f12-client-certificate
+        target: registration-f12-client-certificate
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+      - source: registration-f12-client-key
+        target: registration-f12-client-key
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+      - source: registration-f12-ca-certificate
+        target: registration-f12-ca-certificate
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+      - source: registration-f12-endpoint-credential
+        target: registration-f12-endpoint-credential
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+      - source: registration-attestation-es256-public-key
+        target: g008-registration-attestation-es256-public-key
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+    volumes:
+      - type: bind
+        source: ${G008_EXECUTION_REQUEST_FILE:?G008_EXECUTION_REQUEST_FILE must be sealed}
+        target: /run/g008-execution/request
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${G008_EXECUTION_SIP_USERNAME_FILE:?G008_EXECUTION_SIP_USERNAME_FILE must be sealed}
+        target: /run/g008-execution/sip-username
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${G008_EXECUTION_SIP_PASSWORD_FILE:?G008_EXECUTION_SIP_PASSWORD_FILE must be sealed}
+        target: /run/g008-execution/sip-password
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${G008_EXECUTION_SIP_REALM_FILE:?G008_EXECUTION_SIP_REALM_FILE must be sealed}
+        target: /run/g008-execution/sip-realm
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${G008_EXECUTION_TARGET_FILE:?G008_EXECUTION_TARGET_FILE must be sealed}
+        target: /run/g008-execution/target
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${G008_EXECUTION_NONCE_FILE:?G008_EXECUTION_NONCE_FILE must be sealed}
+        target: /run/g008-execution/execution-nonce
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${G008_OPERATOR_CREDENTIAL_FILE:?G008_OPERATOR_CREDENTIAL_FILE must be sealed}
+        target: /run/g008-execution/operator-credential
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${G008_EXECUTION_OUTPUT_DIRECTORY:?G008_EXECUTION_OUTPUT_DIRECTORY must be sealed}
+        target: /run/g008-output
+        bind:
+          create_host_path: false
+      - g008-live-smoke-secrets:/run/g008-secrets
+    tmpfs:
+      - /run/g008-control:rw,noexec,nosuid,nodev,size=64k,uid=1000,gid=1000,mode=0700
+    networks:
+      g009-internal:
+      f12-client:
+      transaction-control:
+        ipv4_address: 172.32.0.3
+    restart: 'no'
+
+
+networks:
+  g009-internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  registration-internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
+  registration-supplier-egress:
+  f12-client:
+    internal: true
+  f12-backend:
+    internal: true
+  f12-data:
+    internal: true
+  transaction-control:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.32.0.0/24
+
+volumes:
+  g008-live-smoke-secrets:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=64k,mode=0700,uid=1000,gid=1000,noexec,nosuid,nodev
+  g008-registration-control:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=64k,mode=0700,uid=1000,gid=1000,noexec,nosuid,nodev
+
+configs:
+  g009-bootstrap:
+    file: ./bootstrap-database.sh
+  g009-sealed-secret-wrapper:
+    file: ./sealed-secret-wrapper.sh
+  g009-minimal-seed:
+    file: ./10-g009-minimal-seed.sql
+  g009-upstream-schema:
+    file: ${G009_UPSTREAM_SCHEMA_FILE:?G009_UPSTREAM_SCHEMA_FILE is required}
+  g009-registration-template:
+    file: ./20-g009-registration-template.sql
+  g008-live-smoke-runner:
+    file: /opt/g008/run-g008-live-smoke.py
+  g008-trusted-keyset:
+    file: /opt/g008/trusted/phase_c_live_preflight_v1.json
+  g009-registration-egress-verifier:
+    file: /opt/g009/verify-registration-egress-proof.js
+  g009-registration-transaction-runner:
+    file: /opt/g009/run-registration-transaction.js
+  g009-registration-sip-attestor:
+    file: /opt/g009/registration-sip-attestor.js
+  drachtio-feature-config:
+    file: ./drachtio-feature.xml
+  drachtio-sip-config:
+    file: ./drachtio-sip.xml
+  f12-ingress-config:
+    file: ./f12-ingress-nginx.conf
+
+secrets:
+  g009-jambones-mysql-password:
+    file: ${G009_JAMBONES_MYSQL_PASSWORD_FILE:?G009_JAMBONES_MYSQL_PASSWORD_FILE is required}
+  g009-jwt-secret:
+    file: ${G009_JWT_SECRET_FILE:?G009_JWT_SECRET_FILE is required}
+  g009-encryption-secret:
+    file: ${G009_ENCRYPTION_SECRET_FILE:?G009_ENCRYPTION_SECRET_FILE is required}
+  g009-drachtio-feature-secret:
+    file: ${G009_DRACHTIO_FEATURE_SECRET_FILE:?G009_DRACHTIO_FEATURE_SECRET_FILE is required}
+  g009-drachtio-sip-secret:
+    file: ${G009_DRACHTIO_SIP_SECRET_FILE:?G009_DRACHTIO_SIP_SECRET_FILE is required}
+  g009-freeswitch-esl-password:
+    file: ${G009_FREESWITCH_ESL_PASSWORD_FILE:?G009_FREESWITCH_ESL_PASSWORD_FILE is required}
+  mariadb-root-password:
+    file: ${G009_MARIADB_ROOT_PASSWORD_FILE:?G009_MARIADB_ROOT_PASSWORD_FILE is required}
+  webhook-secret:
+    file: ${G009_WEBHOOK_SECRET_FILE:?G009_WEBHOOK_SECRET_FILE is required}
+  account-api-token:
+    file: ${G009_ACCOUNT_API_TOKEN_FILE:?G009_ACCOUNT_API_TOKEN_FILE is required}
+  dispatch-es256-public-key:
+    file: ${ONNURI_SMOKE_DISPATCH_PUBLIC_KEY_FILE:?ONNURI_SMOKE_DISPATCH_PUBLIC_KEY_FILE is required}
+  media-es256-public-key:
+    file: ${ONNURI_SMOKE_MEDIA_PUBLIC_KEY_FILE:?ONNURI_SMOKE_MEDIA_PUBLIC_KEY_FILE is required}
+  dispatch-es256-private-key:
+    file: ${ONNURI_SMOKE_DISPATCH_PRIVATE_KEY_FILE:?ONNURI_SMOKE_DISPATCH_PRIVATE_KEY_FILE is required}
+  media-es256-private-key:
+    file: ${ONNURI_SMOKE_MEDIA_PRIVATE_KEY_FILE:?ONNURI_SMOKE_MEDIA_PRIVATE_KEY_FILE is required}
+  execution-evidence-es256-private-key:
+    file: ${ONNURI_SMOKE_EXECUTION_EVIDENCE_PRIVATE_KEY_FILE:?ONNURI_SMOKE_EXECUTION_EVIDENCE_PRIVATE_KEY_FILE is required}
+  execution-evidence-es256-public-key:
+    file: ${ONNURI_SMOKE_EXECUTION_EVIDENCE_PUBLIC_KEY_FILE:?ONNURI_SMOKE_EXECUTION_EVIDENCE_PUBLIC_KEY_FILE is required}
+  authority-recovery-key:
+    file: ${ONNURI_SMOKE_RECOVERY_KEY_FILE:?ONNURI_SMOKE_RECOVERY_KEY_FILE is required}
+  registration-egress-proof:
+    file: ${G009_REGISTRATION_EGRESS_PROOF_FILE:?G009_REGISTRATION_EGRESS_PROOF_FILE is required}
+  f12-endpoint-credential:
+    file: ${RECOVA_F12_ENDPOINT_CREDENTIAL_FILE:?RECOVA_F12_ENDPOINT_CREDENTIAL_FILE is required}
+  registration-f12-client-certificate:
+    file: ${RECOVA_REGISTRATION_F12_CLIENT_CERTIFICATE_FILE:?RECOVA_REGISTRATION_F12_CLIENT_CERTIFICATE_FILE is required}
+  registration-f12-client-key:
+    file: ${RECOVA_REGISTRATION_F12_CLIENT_KEY_FILE:?RECOVA_REGISTRATION_F12_CLIENT_KEY_FILE is required}
+  registration-f12-ca-certificate:
+    file: ${RECOVA_REGISTRATION_F12_CA_CERTIFICATE_FILE:?RECOVA_REGISTRATION_F12_CA_CERTIFICATE_FILE is required}
+  registration-f12-endpoint-credential:
+    file: ${RECOVA_REGISTRATION_F12_ENDPOINT_CREDENTIAL_FILE:?RECOVA_REGISTRATION_F12_ENDPOINT_CREDENTIAL_FILE is required}
+  registration-attestation-es256-private-key:
+    file: ${ONNURI_SMOKE_REGISTRATION_ATTESTATION_PRIVATE_KEY_FILE:?ONNURI_SMOKE_REGISTRATION_ATTESTATION_PRIVATE_KEY_FILE is required}
+  registration-attestation-es256-public-key:
+    file: ${ONNURI_SMOKE_REGISTRATION_ATTESTATION_PUBLIC_KEY_FILE:?ONNURI_SMOKE_REGISTRATION_ATTESTATION_PUBLIC_KEY_FILE is required}
+  recova-postgres-password:
+    file: ${G008_RECOVA_POSTGRES_PASSWORD_FILE:?G008_RECOVA_POSTGRES_PASSWORD_FILE is required}
+  recova-redis-password:
+    file: ${G008_RECOVA_REDIS_PASSWORD_FILE:?G008_RECOVA_REDIS_PASSWORD_FILE is required}
+  f12-server-certificate:
+    file: ${G008_F12_SERVER_CERTIFICATE_FILE:?G008_F12_SERVER_CERTIFICATE_FILE is required}
+  f12-server-key:
+    file: ${G008_F12_SERVER_KEY_FILE:?G008_F12_SERVER_KEY_FILE is required}
+  f12-client-ca-certificate:
+    file: ${G008_F12_CLIENT_CA_CERTIFICATE_FILE:?G008_F12_CLIENT_CA_CERTIFICATE_FILE is required}
+  stock-api-token:
+    file: ${RECOVA_STOCK_API_TOKEN_FILE:?RECOVA_STOCK_API_TOKEN_FILE is required}

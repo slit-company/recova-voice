@@ -1,4 +1,4 @@
 project_id               = "slit-497603"
 region                   = "asia-northeast3"
-subnet_ipv4_cidr         = "REPLACE_WITH_G0_APPROVED_RFC1918_SLASH_24"
-deployer_service_account = "REPLACE_WITH_G0_APPROVED_DEPLOYER_SERVICE_ACCOUNT"
+subnet_ipv4_cidr         = "10.73.96.0/24"
+deployer_service_account = "phaseb-deployer@slit-497603.iam.gserviceaccount.com"

@@ -1,7 +1,7 @@
 # 제품 우선순위
 
 - 문서 상태: active
-- 마지막 검토: 2026-07-10
+- 마지막 검토: 2026-07-16
 - 기준: 전화 공급자 계약은 기다리되, 콜 빌더 제품 개선은 멈추지 않는다.
 
 이 문서는 구현 작업 목록이 아니라 제품 문제의 우선순위다. 파일 단위 변경과 검증은 실행 전에 `plans/` 문서로 구체화한다.
@@ -58,8 +58,8 @@
 ### Waiting — 자체 한국 전화 인프라
 
 - **제품 상태:** Waiting
-- contract-independent 코드 경로는 존재하지만 live readiness는 검증되지 않았다.
-- 공급자 답변 전에는 추측 코딩을 하지 않고, Green 판정 후 기술 handoff 순서로 검증한다.
+- 공개 소스·라이선스 키 비의존 후보와 서울 비공개 disabled staging은 검증했지만 live readiness는 검증되지 않았다.
+- 최신 시작 잔액·통화, 공급자 권위 RTP CIDR/포트와 실제 Recova F12/media 경로가 확인되기 전에는 REGISTER·RTP·실통화 gate를 열지 않는다.
 - 이 대기는 위 P0/P1 콜 빌더 개선을 막지 않는다.
 
 결정·기술 handoff: [`../context/own-telephony-handoff/01-current-state.md`](../context/own-telephony-handoff/01-current-state.md), [`../context/own-telephony-handoff/03-next-coding-after-supplier.md`](../context/own-telephony-handoff/03-next-coding-after-supplier.md)

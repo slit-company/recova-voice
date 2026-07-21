@@ -1,6 +1,28 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "path_count": 39,
+  "exact_active_resource_count": 4,
+  "allowed_active_resources": [
+    "google_compute_network.phase_b",
+    "google_compute_subnetwork.phase_b",
+    "google_compute_firewall.deny_all_ingress",
+    "google_compute_firewall.deny_all_egress"
+  ],
+  "allowed_active_providers": ["google"],
+  "allowed_active_outputs": [
+    "project_id",
+    "region",
+    "network_self_link",
+    "subnet_self_link",
+    "subnet_ipv4_cidr",
+    "private_ip_google_access",
+    "ingress_deny_rule_name",
+    "ingress_deny_rule_self_link",
+    "egress_deny_rule_name",
+    "egress_deny_rule_self_link",
+    "source_contract_version"
+  ],
+  "all_allowed_outputs_sensitive": false,
   "required_paths": [
     ".gitignore",
     "context/006-onnuri-seoul-staging-phase-b-foundation-decision.md",
@@ -37,10 +59,10 @@
     "infra/onnuri-seoul-staging-phase-b/tests/test_run_offline_validation.py",
     "infra/onnuri-seoul-staging-phase-b/tests/test_verify_offline_provider_mirror.py",
     "infra/onnuri-seoul-staging-phase-b/tests/test_verify_plan_allowlist.py",
-    "infra/onnuri-seoul-staging-phase-b/tests/variables.tf",
     "infra/onnuri-seoul-staging-phase-b/tests/verify_offline_provider_mirror.py",
     "infra/onnuri-seoul-staging-phase-b/tests/verify_plan_allowlist.py",
+    "infra/onnuri-seoul-staging-phase-b/variables.tf",
     "infra/onnuri-seoul-staging-phase-b/versions.tf"
   ],
-  "forbidden_active_tokens": ["module ", "data ", "provisioner ", "output ", "dynamic ", "import ", "moved ", "local-exec", "remote-exec", "endpoint", "credentials", "access_token", "private_key", "secret", "token", "labels"]
+  "forbidden_active_tokens": ["module ", "data ", "provisioner ", "dynamic ", "import ", "moved ", "local-exec", "remote-exec", "endpoint", "credentials", "access_token", "private_key", "secret", "token", "labels"]
 }

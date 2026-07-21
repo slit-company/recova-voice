@@ -1,0 +1,17 @@
+<drachtio>
+  <!-- Runtime supplies the admin secret through the drachtio command line or environment. -->
+  <admin port="9022" secret="">127.0.0.1</admin>
+  <sip>
+    <contacts>
+      <contact>sip:172.30.0.20:5060;transport=udp,tcp</contact>
+    </contacts>
+  </sip>
+  <request-handlers>
+    <request-handler sip-method="INVITE" http-method="POST">http://call-router:3000</request-handler>
+  </request-handlers>
+  <cdrs>false</cdrs>
+  <logging>
+    <sofia-loglevel>0</sofia-loglevel>
+    <loglevel>error</loglevel>
+  </logging>
+</drachtio>

@@ -1,0 +1,54 @@
+FROM --platform=linux/amd64 debian:12-slim@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e AS build
+ARG SOURCE_PATCH_SHA256
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        autoconf automake build-essential ca-certificates clang cmake git \
+        libboost-filesystem-dev libboost-log-dev libboost-system-dev \
+        libboost-thread-dev libcurl4-openssl-dev libssl-dev libtool \
+        libtool-bin netbase pax-utils pkg-config zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CC=clang \
+    CXX=clang++ \
+    CMAKE_POLICY_VERSION_MINIMUM=3.5
+
+WORKDIR /src
+COPY . ./
+
+RUN test "$(git rev-parse HEAD)" = "4bf0f5796b6a09e2789594a2d8f257ffd61f1d02" \
+    && ./bootstrap.sh \
+    && mkdir build \
+    && cd build \
+    && ../configure --enable-tcmalloc=no CPPFLAGS='-DNDEBUG' CXXFLAGS='-O2' \
+    && make -j"$(nproc)" \
+    && make install DESTDIR=/out
+
+RUN install -D -m 0755 /out/usr/local/bin/drachtio /runtime/usr/local/bin/drachtio \
+    && install -D -m 0644 docker.drachtio.conf.xml /runtime/etc/drachtio.conf.xml \
+    && install -D -m 0644 /etc/protocols /runtime/etc/protocols \
+    && install -D -m 0644 /etc/services /runtime/etc/services \
+    && install -D -m 0644 /etc/nsswitch.conf /runtime/etc/nsswitch.conf \
+    && install -D -m 0644 /etc/ssl/certs/ca-certificates.crt \
+        /runtime/etc/ssl/certs/ca-certificates.crt \
+    && lddtree -l /out/usr/local/bin/drachtio | while read -r library; do \
+        if test "$library" != /out/usr/local/bin/drachtio; then \
+            mkdir -p "/runtime$(dirname "$library")"; \
+            cp -L "$library" "/runtime$library"; \
+        fi; \
+    done
+RUN test "${#SOURCE_PATCH_SHA256}" -eq 64
+
+FROM --platform=linux/amd64 debian:12-slim@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e
+ARG SOURCE_PATCH_SHA256
+
+LABEL org.opencontainers.image.revision="4bf0f5796b6a09e2789594a2d8f257ffd61f1d02" \
+      org.opencontainers.image.source="https://github.com/drachtio/drachtio-server" \
+      org.opencontainers.image.licenses="MIT" \
+      org.recova.patch.sha256="sha256:$SOURCE_PATCH_SHA256" \
+      org.recova.base.digest="debian:12-slim@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e"
+
+COPY --from=build /runtime/ /
+
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/drachtio"]

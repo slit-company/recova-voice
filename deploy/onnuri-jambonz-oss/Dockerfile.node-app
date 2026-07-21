@@ -1,0 +1,29 @@
+FROM --platform=linux/amd64 node:24-alpine@sha256:4ba75f835bb8802193e4c114572113d4b26f95f6f094f4b5229d2a77773e0afc AS build
+ARG SOURCE_REPOSITORY
+ARG SOURCE_COMMIT
+ARG SOURCE_PATCH_SHA256
+
+RUN apk add --no-cache build-base python3
+RUN test -n "$SOURCE_REPOSITORY" \
+    && test "${#SOURCE_COMMIT}" -eq 40 \
+    && test "${#SOURCE_PATCH_SHA256}" -eq 64
+WORKDIR /opt/app
+COPY package.json package-lock.json ./
+RUN npm pkg delete scripts.prepare && npm ci --omit=dev
+COPY . ./
+
+FROM --platform=linux/amd64 node:24-alpine@sha256:4ba75f835bb8802193e4c114572113d4b26f95f6f094f4b5229d2a77773e0afc
+ARG SOURCE_REPOSITORY
+ARG SOURCE_COMMIT
+ARG SOURCE_PATCH_SHA256
+LABEL org.opencontainers.image.source="$SOURCE_REPOSITORY" \
+      org.opencontainers.image.revision="$SOURCE_COMMIT" \
+      org.opencontainers.image.licenses="MIT" \
+      org.recova.patch.sha256="sha256:$SOURCE_PATCH_SHA256" \
+      org.recova.base.digest="node:24-alpine@sha256:4ba75f835bb8802193e4c114572113d4b26f95f6f094f4b5229d2a77773e0afc"
+WORKDIR /opt/app
+ENV NODE_ENV=production
+COPY --from=build --chown=node:node /opt/app /opt/app
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+USER node
+CMD ["node", "app.js"]

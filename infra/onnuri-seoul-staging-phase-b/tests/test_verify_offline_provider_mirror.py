@@ -131,9 +131,10 @@ class FrozenProviderInterfaceTests(unittest.TestCase):
         self.assertIn('var.project_id == "slit-497603"', variables)
         self.assertIn('var.region == "asia-northeast3"', variables)
         self.assertIn(
-            'var.deployer_service_account == "REPLACE_WITH_G0_APPROVED_DEPLOYER_SERVICE_ACCOUNT"',
+            '@slit-497603\\\\.iam\\\\.gserviceaccount\\\\.com$',
             variables,
         )
+        self.assertNotIn("REPLACE_WITH_G0_APPROVED_DEPLOYER_SERVICE_ACCOUNT", variables)
 
 if __name__ == "__main__":
     unittest.main()

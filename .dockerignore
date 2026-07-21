@@ -2,3 +2,13 @@ api/.env
 evals/
 api/mcp_server/ts_validator/node_modules/
 sdk/
+.git/
+.gjc/
+artifacts/
+api/.venv/
+ui/.next/
+ui/node_modules/
+pipecat/.venv/
+pipecat/node_modules/
+**/__pycache__/
+**/.pytest_cache/

@@ -32,6 +32,14 @@ def command_result(command, cwd, environment):
     result = subprocess.run(command, cwd=cwd, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
     return result.returncode, result.stdout
 
+def sandbox_provider_ipc_blocked(terraform_args, output):
+    return (
+        terraform_args in {("validate",), ("test",)}
+        and "Failed to load plugin schemas" in output
+        and "failed to instantiate provider" in output
+        and "Failed to read any lines from plugin's stdout" in output
+    )
+
 
 def preflight(args):
     blockers = []
@@ -65,15 +73,23 @@ def main(argv=None):
     evidence_dir = Path(args.evidence_dir)
     evidence_dir.mkdir(parents=True, exist_ok=True)
     audit_script = repo_root / "infra/onnuri-seoul-staging-phase-b/tests/audit_static_source_policy.py"
+    mirror_script = repo_root / "infra/onnuri-seoul-staging-phase-b/tests/verify_offline_provider_mirror.py"
     policy = repo_root / "infra/onnuri-seoul-staging-phase-b/tests/source_policy_manifest.json"
-    audit_code, audit_output = command_result((sys.executable, "-B", str(audit_script), "--repo-root", str(repo_root), "--manifest", str(policy), "--expected-manifest", args.expected_manifest, "--expected-manifest-sha", args.expected_manifest_sha), repo_root, {"PATH": os.environ.get("PATH", ""), "LC_ALL": "C", "TZ": "UTC"})
+    child_environment = {"PATH": os.environ.get("PATH", ""), "LC_ALL": "C", "TZ": "UTC"}
+    audit_code, audit_output = command_result((sys.executable, "-B", str(audit_script), "--repo-root", str(repo_root), "--manifest", str(policy), "--expected-manifest", args.expected_manifest, "--expected-manifest-sha", args.expected_manifest_sha), repo_root, child_environment)
+    mirror_code, mirror_output = command_result((sys.executable, "-B", str(mirror_script), "--mirror", args.mirror, "--cli-config", args.cli_config, "--lockfile", str(repo_root / "infra/onnuri-seoul-staging-phase-b/.terraform.lock.hcl")), repo_root, child_environment)
     blockers = preflight(args)
-    commands = [{"name": "static-policy", "exit": audit_code}]
+    commands = [
+        {"name": "static-policy", "exit": audit_code},
+        {"name": "offline-provider-mirror", "exit": mirror_code},
+    ]
     if audit_code:
         blockers.append("STATIC_POLICY")
+    if mirror_code:
+        blockers.append("MIRROR_POLICY")
     if blockers:
         print(json.dumps({"status": "blocked", "blockers": sorted(set(blockers)), "commands": commands}, sort_keys=True))
-        return 1 if audit_code else 0
+        return 1 if audit_code or mirror_code else 0
     with tempfile.TemporaryDirectory(prefix="phase-b-tf-") as temporary:
         environment = scrubbed_environment(args.cli_config, Path(temporary) / "data", Path(temporary) / "home")
         Path(environment["HOME"]).mkdir()
@@ -87,6 +103,9 @@ def main(argv=None):
                     print(json.dumps({"status": "blocked", "blockers": ["CLI_VERSION"], "commands": commands}, sort_keys=True))
                     return 0
             if exit_code:
+                if sandbox_provider_ipc_blocked(terraform_args, output):
+                    print(json.dumps({"status": "blocked", "blockers": ["SANDBOX_PROVIDER_IPC"], "commands": commands}, sort_keys=True))
+                    return 0
                 print(json.dumps({"status": "failed", "blockers": [], "commands": commands}, sort_keys=True))
                 return 1
     print(json.dumps({"status": "passed", "blockers": [], "commands": commands}, sort_keys=True))

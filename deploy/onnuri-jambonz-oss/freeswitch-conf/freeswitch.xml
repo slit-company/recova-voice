@@ -1,0 +1,21 @@
+<document type="freeswitch/xml">
+  <section name="configuration" description="Dedicated Jambonz MRF configuration">
+  <X-PRE-PROCESS cmd="env-set" data="FREESWITCH_EVENT_SOCKET_PASSWORD=$FREESWITCH_EVENT_SOCKET_PASSWORD"/>
+    <X-PRE-PROCESS cmd="include" data="autoload_configs/*.xml"/>
+  </section>
+  <section name="dialplan" description="Dedicated Jambonz MRF outbound ESL">
+    <context name="jambonz">
+      <extension name="jambonz-outbound-esl">
+        <condition field="${sip_user_agent}" expression="^drachtio-fsmrf:(.*)$">
+          <action application="answer"/>
+          <action application="set" data="timer_name=timerfd"/>
+          <action application="set" data="send_silence_when_idle=-1"/>
+          <action application="set" data="hangup_after_bridge=false"/>
+          <action application="set" data="park_after_bridge=true"/>
+          <action application="set" data="playback_terminators=none"/>
+          <action application="socket" data="${sip_h_X-esl-outbound} async full"/>
+        </condition>
+      </extension>
+    </context>
+  </section>
+</document>

@@ -1,0 +1,236 @@
+diff --git a/app.js b/app.js
+index 454395b..ab61b71 100644
+--- a/app.js
++++ b/app.js
+@@ -22,6 +22,11 @@ const {
+   NODE_ENV,
+   SBC_PUBLIC_ADDRESS_KEEP_ALIVE_IN_MILISECOND
+ } = require('./lib/config');
++const recovaOneShot = process.env.RECOVA_ONE_SHOT_REGISTER === '1';
++const recovaRejectInbound = (req, res, next) => {
++  if (!recovaOneShot) return next();
++  return res.send(403);
++};
+ 
+ assert.ok(JAMBONES_MYSQL_HOST &&
+   JAMBONES_MYSQL_USER &&
+@@ -240,10 +245,9 @@ srf.on('connect', (err, hp, version, localHostports) => {
+     cleanSbcAddresses();
+   }, interval);
+ 
+-  /* start regbot */
++  /* Registration remains stock-owned; one-shot omits the OPTIONS bot. */
+   require('./lib/sip-trunk-register')(logger, srf);
+-  // Start Options bot
+-  require('./lib/sip-trunk-options-ping')(logger, srf);
++  if (!recovaOneShot) require('./lib/sip-trunk-options-ping')(logger, srf);
+ });
+ 
+ if (NODE_ENV === 'test') {
+@@ -262,7 +266,7 @@ const rttMetric = (req, res, time) => {
+ };
+ 
+ // middleware
+-srf.use('register', [
++srf.use('register', [recovaRejectInbound,
+   initLocals,
+   responseTime(rttMetric),
+   rejectIpv4,
+@@ -272,20 +276,21 @@ srf.use('register', [
+   digestChallenge,
+   enforceDeviceLimits]);
+ 
+-srf.use('options', [
++srf.use('options', [recovaRejectInbound,
+   initLocals
+ ]);
+ 
+ srf.register(require('./lib/register')({logger}));
+ srf.options(require('./lib/options')({srf, logger}));
+ 
+-// Start CLI runtime config server with access to srf.locals
+-require('./lib/cli/runtime-config').initialize(srf.locals, logger);
+-
+-setInterval(async() => {
++// The one-shot derivative has no CLI reload endpoint or recurring statistics timer.
++if (!recovaOneShot) {
++  require('./lib/cli/runtime-config').initialize(srf.locals, logger);
++  setInterval(async() => {
+   const count = await srf.locals.registrar.getCountOfUsers();
+   debug(`count of registered users: ${count}`);
+-  stats.gauge('sbc.users.count', parseInt(count));
+-}, 30000);
++    stats.gauge('sbc.users.count', parseInt(count));
++  }, 30000);
++}
+ 
+ module.exports = { srf, logger };
+diff --git a/lib/regbot.js b/lib/regbot.js
+index 0fb740e..eca042f 100644
+--- a/lib/regbot.js
++++ b/lib/regbot.js
+@@ -16,10 +16,41 @@ const REGISTER_FAILURE_THRESHOLD = (parseInt(JAMBONES_REGBOT_REGISTER_FAILURE_TH
+ const assert = require('assert');
+ const version = require('../package.json').version;
+ const useragent = JAMBONES_REGBOT_USER_AGENT || `Jambonz ${version}`;
++const recovaOneShot = process.env.RECOVA_ONE_SHOT_REGISTER === '1';
++const RECOVA_ONE_SHOT_DEADLINE_MS = 32000;
++let recovaOneShotStarted = false;
++let recovaDeadlineMonotonicMs = null;
++let recovaDeadlineTimer = null;
++let recovaTerminalStatus = null;
++const recovaMonotonicMs = () => Number(process.hrtime.bigint() / 1000000n);
++const recovaTerminal = (regbot, outcome) => {
++  if (recovaTerminalStatus) return recovaTerminalStatus;
++  if (recovaDeadlineMonotonicMs === null) recovaDeadlineMonotonicMs = recovaMonotonicMs() + RECOVA_ONE_SHOT_DEADLINE_MS;
++  if (recovaDeadlineTimer) clearTimeout(recovaDeadlineTimer);
++  recovaDeadlineTimer = null;
++  recovaTerminalStatus = Object.freeze({
++    outcome, deadline_monotonic_ms: recovaDeadlineMonotonicMs, finished_monotonic_ms: recovaMonotonicMs()
++  });
++  regbot.status = outcome === 'success' ? 'registered' : 'fail';
++  regbot.oneShotStatus = recovaTerminalStatus;
++  if (regbot.oneShotResolve) regbot.oneShotResolve(recovaTerminalStatus);
++  return recovaTerminalStatus;
++};
++const recovaBegin = (regbot) => {
++  recovaDeadlineMonotonicMs = recovaMonotonicMs() + RECOVA_ONE_SHOT_DEADLINE_MS;
++  regbot.oneShotCompletion = new Promise((resolve) => { regbot.oneShotResolve = resolve; });
++  recovaDeadlineTimer = setTimeout(() => recovaTerminal(regbot, 'timeout'), RECOVA_ONE_SHOT_DEADLINE_MS);
++};
++const recovaChallengeRefused = (res) => /stale\s*=\s*true/i.test(String(
++  (res.get && (res.get('www-authenticate') || res.get('proxy-authenticate'))) || ''
++));
++const recovaLogger = (logger) => !recovaOneShot ? logger : {
++  debug: () => {}, info: () => {}, warn: () => {}, error: () => {}
++};
+ 
+ class Regbot {
+   constructor(logger, opts) {
+-    this.logger = logger;
++    this.logger = recovaLogger(logger);
+ 
+     [
+       'voip_carrier_sid',
+@@ -51,9 +82,14 @@ class Regbot {
+ 
+   async start(srf) {
+     assert(!this.timer);
+-
++    if (recovaOneShot) {
++      if (recovaOneShotStarted || !isValidIPv4(this.ipv4)) throw new Error('one-shot registration refused');
++      recovaOneShotStarted = true;
++      this.retired = false;
++      return this.register(srf);
++    }
+     this.logger.info(`starting regbot for ${this.fromUser}@${this.sip_realm}`);
+-    this.register(srf);
++    return this.register(srf);
+   }
+ 
+   stop(srf) {
+@@ -79,6 +115,7 @@ class Regbot {
+   }
+ 
+   configKey() {
++    if (recovaOneShot) return 'recova-one-shot';
+     return [
+       this.voip_carrier_sid, this.ipv4, this.port,
+       this.username, this.password, this.sip_realm,
+@@ -90,6 +127,7 @@ class Regbot {
+   }
+ 
+   static configKeyFromOpts(opts) {
++    if (recovaOneShot) return 'recova-one-shot';
+     const sip_realm = opts.sip_realm || opts.ipv4;
+     const fromUser = opts.from_user || opts.username;
+     const fromDomain = opts.from_domain || sip_realm;
+@@ -162,6 +200,7 @@ class Regbot {
+         proxy = `sip:${this.ipv4}${isIPv4 ? `:${this.port}` : ''};transport=${transport}`;
+         this.logger.debug(`sending to registrar ${proxy}`);
+       }
++      if (recovaOneShot) recovaBegin(this);
+       const req = await srf.request(`${scheme}:${this.sip_realm}`, {
+         method: 'REGISTER',
+         proxy,
+@@ -179,6 +218,15 @@ class Regbot {
+         }
+       });
+       req.on('response', async(res) => {
++        if (recovaOneShot) {
++          if (recovaTerminalStatus) return recovaTerminalStatus;
++          if (res.status === 401 || res.status === 407) {
++            if (this.oneShotChallengeSeen || recovaChallengeRefused(res)) return recovaTerminal(this, 'refused');
++            this.oneShotChallengeSeen = true;
++            return;
++          }
++          return recovaTerminal(this, res.status === 200 ? 'success' : 'failure');
++        }
+         if (this.retired) {
+           this.logger.info(`${this.aor}: ignoring response, regbot has been retired`);
+           return;
+@@ -304,7 +352,9 @@ class Regbot {
+           }
+         }
+       });
++      if (recovaOneShot) return this.oneShotCompletion;
+     } catch (err) {
++      if (recovaOneShot) return recovaTerminal(this, 'exception');
+       this.logger.error({ err }, `${this.aor}: Error registering to ${this.ipv4}:${this.port}`);
+       this.timer = setTimeout(this.register.bind(this, srf), FAILURE_RETRY_INTERVAL * 1000);
+       updateVoipCarriersRegisterStatus(this.voip_carrier_sid, JSON.stringify({
+diff --git a/lib/sip-trunk-register.js b/lib/sip-trunk-register.js
+index 1891d71..12e5e85 100644
+--- a/lib/sip-trunk-register.js
++++ b/lib/sip-trunk-register.js
+@@ -7,7 +7,8 @@ const {
+ } = require('./config');
+ const short = require('short-uuid');
+ const Regbot = require('./regbot');
+-const { sleepFor } = require('./utils');
++const { sleepFor, isValidIPv4 } = require('./utils');
++const recovaOneShot = process.env.RECOVA_ONE_SHOT_REGISTER === '1';
+ 
+ const MAX_INITIAL_DELAY = 15;
+ const REGBOT_STATUS_CHECK_INTERVAL = 60;
+@@ -99,6 +100,7 @@ function getUniqueGateways(gateways, logger) {
+ module.exports = async(logger, srf) => {
+   if (initialized) return;
+   initialized = true;
++  if (recovaOneShot) return recovaRunOnce(srf);
+   const { addKeyNx } = srf.locals.realtimeDbHelpers;
+   const myToken = short.generate();
+   srf.locals.regbot = {
+@@ -147,6 +149,32 @@ module.exports = async(logger, srf) => {
+   return srf.locals.regbot.active;
+ };
+ 
++const recovaRunOnce = async(srf) => {
++  if (!recovaOneShot) throw new Error('one-shot registration refused');
++  const { lookupAllVoipCarriers, lookupSipGatewaysByCarrier } = srf.locals.dbHelpers;
++  const carriers = (await lookupAllVoipCarriers()).filter((c) => c.requires_register && c.is_active);
++  if (carriers.length !== 1) throw new Error('one-shot requires exactly one carrier');
++  const carrier = carriers[0];
++  const gateways = (await lookupSipGatewaysByCarrier(carrier.voip_carrier_sid))
++    .filter((gw) => gw.outbound && gw.is_active);
++  if (gateways.length !== 1 || !isValidIPv4(gateways[0].ipv4) ||
++      (carrier.outbound_sip_proxy && carrier.outbound_sip_proxy !== gateways[0].ipv4)) {
++    throw new Error('one-shot requires one IPv4 gateway and no alternate proxy');
++  }
++  const gw = gateways[0];
++  const rb = new Regbot({debug: () => {}, info: () => {}, warn: () => {}, error: () => {}}, {
++    voip_carrier_sid: carrier.voip_carrier_sid, ipv4: gw.ipv4, port: gw.port, protocol: gw.protocol,
++    use_sips_scheme: gw.use_sips_scheme, username: carrier.register_username, password: carrier.register_password,
++    sip_realm: carrier.register_sip_realm, from_user: carrier.register_from_user,
++    from_domain: carrier.register_from_domain, use_public_ip_in_contact: carrier.register_public_ip_in_contact,
++    outbound_sip_proxy: carrier.outbound_sip_proxy, trunk_type: carrier.trunk_type, sip_gateway_sid: gw.sip_gateway_sid
++  });
++  srf.locals.regbot = {active: true, one_shot: true};
++  srf.locals.regbotStatus = () => rb.oneShotStatus;
++  await rb.start(srf);
++  return rb.oneShotStatus;
++};
++
+ const checkStatus = async(logger, srf) => {
+   const { addKeyNx, addKey, retrieveKey } = srf.locals.realtimeDbHelpers;
+   const { myToken, active } = srf.locals.regbot;

@@ -41,23 +41,24 @@ async def db_session_factory(setup_test_database):
     concurrent SELECT FOR UPDATE SKIP LOCKED behavior across independent
     connections.
 
-    Patches db_client so CampaignCallDispatcher uses the test database.
+    Patches the dispatcher's canonical database facade so
+    CampaignCallDispatcher uses the test database.
     """
-    from api.db import db_client
+    from api.db import database_client
 
     test_url = setup_test_database
     engine = create_async_engine(test_url, echo=False)
     session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
 
-    original_engine = db_client.engine
-    original_session = db_client.async_session
-    db_client.engine = engine
-    db_client.async_session = session_factory
+    original_engine = database_client.engine
+    original_session = database_client.async_session
+    database_client.engine = engine
+    database_client.async_session = session_factory
 
     yield session_factory
 
-    db_client.engine = original_engine
-    db_client.async_session = original_session
+    database_client.engine = original_engine
+    database_client.async_session = original_session
     await engine.dispose()
 
 
@@ -257,6 +258,17 @@ def mock_rate_limiter():
         "get_workflow_from_number_mapping": mock_get_from_number_mapping,
         "delete_workflow_from_number_mapping": mock_delete_from_number_mapping,
     }
+
+
+@pytest.fixture(autouse=True)
+def bounded_rate_limiter(mock_rate_limiter):
+    """Keep concurrent patch teardown from exposing the real rate limiter."""
+    with patch(
+        "api.services.campaign.campaign_call_dispatcher.rate_limiter"
+    ) as limiter:
+        for method_name, implementation in mock_rate_limiter.items():
+            setattr(limiter, method_name, AsyncMock(side_effect=implementation))
+        yield limiter
 
 
 # =============================================================================

@@ -1,0 +1,31 @@
+<configuration name="modules.conf" description="Dedicated Jambonz media-server modules">
+  <modules>
+    <!--
+      mod_event_socket supplies the outbound `socket` dialplan application. This
+      FreeSWITCH instance is dedicated to Jambonz: every inbound call must use that
+      application to connect outbound to jambonz-feature-server. Do not expose an
+      inbound ESL listener beyond the local management boundary.
+    -->
+    <load module="mod_event_socket"/>
+
+    <!-- SIP signaling and the XML dialplan that invokes outbound ESL. -->
+    <load module="mod_sofia"/>
+    <load module="mod_dialplan_xml"/>
+
+    <!-- Required core call-control APIs. -->
+    <load module="mod_commands"/>
+    <load module="mod_dptools"/>
+    <load module="mod_expr"/>
+    <load module="mod_hash"/>
+    <load module="mod_console"/>
+
+    <!--
+      Cyrenity jambonz-freeswitch-modules mod_audio_fork, dynamically loaded from
+      this source build. It streams mono 8 kHz signed-L16 audio bidirectionally by
+      websocket. MOD_AUDIO_BASIC_AUTH_USERNAME and MOD_AUDIO_BASIC_AUTH_PASSWORD
+      are channel variables used for HTTP Basic authentication on the websocket
+      handshake; neither is a FreeSWITCH or module license key.
+    -->
+    <load module="mod_audio_fork"/>
+  </modules>
+</configuration>

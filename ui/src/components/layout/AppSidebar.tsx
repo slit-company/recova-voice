@@ -3,7 +3,6 @@
 import type { Team } from "@stackframe/stack";
 import {
   AlertTriangle,
-  ArrowUpCircle,
   AudioLines,
   Brain,
   ChevronLeft,
@@ -55,7 +54,6 @@ import { useAppConfig } from "@/context/AppConfigContext";
 import { useLocale } from "@/context/LocaleContext";
 import { useTelephonyConfigWarnings } from "@/context/TelephonyConfigWarningsContext";
 import { useUserConfig } from "@/context/UserConfigContext";
-import { useLatestReleaseVersion } from "@/hooks/useLatestReleaseVersion";
 import type { LocalUser } from "@/lib/auth";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -136,10 +134,6 @@ export function AppSidebar() {
 
   const versionInfo = config ? { ui: config.uiVersion, api: config.apiVersion } : null;
 
-  const { latest: latestRelease, isBehind, isLatest } = useLatestReleaseVersion(
-    versionInfo?.ui,
-    { enabled: config?.deploymentMode === "oss" },
-  );
 
   const translatedSections = useMemo(
     () => NAV_SECTIONS.map((section) => ({
@@ -241,36 +235,6 @@ export function AppSidebar() {
                 </span>
               )}
             </Link>
-            {isBehind && latestRelease && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <a
-                    href="https://docs.dograh.com/deployment/update"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-md border bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-900 transition-opacity hover:opacity-80 dark:bg-amber-950 dark:text-amber-200"
-                  >
-                    <ArrowUpCircle className="h-3 w-3" />
-                    {t('sidebar.update')}
-                  </a>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <p>{t('sidebar.latestReleaseTooltip', { version: latestRelease })}</p>
-                </TooltipContent>
-              </Tooltip>
-            )}
-            {isLatest && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex items-center rounded-md border bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">
-                    {t('sidebar.latest')}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <p>{t('sidebar.runningLatestRelease')}</p>
-                </TooltipContent>
-              </Tooltip>
-            )}
           </div>
 
           <SidebarTrigger className={cn("hover:bg-accent", isCollapsed && "mx-auto")}>

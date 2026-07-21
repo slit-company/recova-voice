@@ -9,6 +9,7 @@ from api.routes.credentials import router as credentials_router
 from api.routes.folder import router as folder_router
 from api.routes.knowledge_base import router as knowledge_base_router
 from api.routes.node_types import router as node_types_router
+from api.routes.onnuri_smoke_internal import router as onnuri_smoke_internal_router
 from api.routes.organization import router as organization_router
 from api.routes.organization_usage import router as organization_usage_router
 from api.routes.phone_preview import router as phone_preview_router
@@ -42,6 +43,7 @@ router = APIRouter(
 router.include_router(telephony_router)
 router.include_router(telephony_number_inventory_operator_router)
 router.include_router(telephony_number_inventory_customer_router)
+router.include_router(onnuri_smoke_internal_router)
 router.include_router(phone_preview_router)
 router.include_router(superuser_router)
 router.include_router(workflow_router)

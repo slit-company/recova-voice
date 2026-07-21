@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Optional
 from loguru import logger
 
 from api.constants import DEFAULT_ORG_CONCURRENCY_LIMIT
-from api.db import db_client
 from api.db.models import QueuedRunModel, WorkflowRunModel
 from api.enums import OrganizationConfigurationKey, WorkflowRunState
 from api.services.campaign.circuit_breaker import circuit_breaker
@@ -25,6 +24,17 @@ if TYPE_CHECKING:
     # chain and create a circular import. Runtime calls below lazy-import the
     # factory helpers inside methods instead.
     from api.services.telephony.base import TelephonyProvider
+
+class _DatabaseClientProxy:
+    """Resolve the shared facade after api.db has finished initializing."""
+
+    def __getattr__(self, name: str):
+        from api.db import database_client
+
+        return getattr(database_client, name)
+
+
+db_client = _DatabaseClientProxy()
 
 
 class CampaignCallDispatcher:
@@ -289,6 +299,15 @@ class CampaignCallDispatcher:
 
         # Get provider for this campaign's pinned telephony config.
         provider = await self.get_provider_for_campaign(campaign)
+        from api.services.telephony.registry import is_dispatch_purpose_allowed
+
+        if not is_dispatch_purpose_allowed(provider.PROVIDER_NAME, "campaign"):
+            await rate_limiter.release_concurrent_slot(
+                campaign.organization_id, slot_id
+            )
+            raise ValueError(
+                f"Provider {provider.PROVIDER_NAME} does not permit campaign dispatch"
+            )
         if not getattr(provider, "SUPPORTS_MEDIA_TRANSPORT", True):
             await rate_limiter.release_concurrent_slot(
                 campaign.organization_id, slot_id
