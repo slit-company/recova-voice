@@ -13,7 +13,7 @@ RUN test "${#FACADE_SOURCE_SHA256}" -eq 64
 
 LABEL org.opencontainers.image.source="https://github.com/slit-company/recova-voice" \
       org.opencontainers.image.licenses="LicenseRef-Recova-Proprietary" \
-      org.recova.source-tree.sha256="$FACADE_SOURCE_SHA256" \
+      org.opencontainers.image.revision="$FACADE_SOURCE_SHA256" \
       org.recova.base.digest="python:3.13.14-slim@sha256:afe189875f1d2f9b45e287834fb9f2c273a5d59d354ae4050ab9affbf0a6ba06"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
