@@ -184,7 +184,7 @@ def validate_bootstrap_manifest_evidence(
         errors.append("bootstrap binding: evidence must be UTF-8")
         return
     required_fragments = (
-        'set(manifest) != {"schema_version", "binding_sha256", "transaction_authority_service_account", "secret_version_mounts", "execution_versions"}',
+        'set(manifest) != {"schema_version", "binding_sha256", "transaction_authority_service_account", "secret_version_mounts", "execution_versions", "route_evidence_bundle"}',
         "set(mounts) != set(EXPECTED_MOUNTS)",
         "set(execution) != EXECUTION_KEYS",
         "binding_input.pop(\"binding_sha256\")",
@@ -1364,6 +1364,10 @@ def json_evidence(path: Path, maximum: int, label: str, errors: Errors) -> Any |
         return None
 
 
+def redact_image_reference(value: str) -> str:
+    _, separator, remainder = value.partition("/")
+    return "local-registry/" + (remainder if separator else value)
+
 def finding_key(image: str, finding: dict[str, Any]) -> str | None:
     vulnerability, artifact = finding.get("vulnerability"), finding.get("artifact")
     values = (image, vulnerability.get("id") if isinstance(vulnerability, dict) else None, artifact.get("name") if isinstance(artifact, dict) else None, artifact.get("version") if isinstance(artifact, dict) else None, artifact.get("type") if isinstance(artifact, dict) else None)
@@ -1530,7 +1534,7 @@ def validate_support_evidence(data: dict[str, Any], index: dict[str, Any], root:
         if not isinstance(base, str) or not IMAGE.fullmatch(base):
             errors.append(f"{path}.notices.base_image: invalid immutable base image")
         else:
-            exact(support.get("base_images"), ["local-registry/" + base], f"{path}.base_images", errors)
+            exact(support.get("base_images"), [redact_image_reference(base)], f"{path}.base_images", errors)
         if not isinstance(oci_license, dict) or set(oci_license) != {
             "name", "image", "license_spdx", "oci_labels_sha256"
         }:

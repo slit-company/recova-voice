@@ -1021,6 +1021,7 @@ class VerifyCandidateManifestTests(unittest.TestCase):
             "org.opencontainers.image.licenses": support["license_spdx"],
             "org.recova.base.digest": f"registry.example/base@{DIGEST}",
         }
+        support["base_images"] = [verifier.redact_image_reference(labels["org.recova.base.digest"])]
         notice = verifier.canonical_json(
             {"name": support["name"], "image": support["image"], "oci_labels": labels}
         )
