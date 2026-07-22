@@ -751,7 +751,7 @@ def validate_runtime(value: Any, errors: Errors) -> None:
     data = object_(
         value,
         "runtime_contract",
-        {"inbound", "outbound", "listen", "receipt_signing", "registration", "calls", "timers"},
+        {"inbound", "outbound", "listen", "receipt_signing", "registration", "calls", "timers", "teardown"},
         errors,
     )
     inbound = object_(
@@ -869,7 +869,7 @@ def validate_runtime(value: Any, errors: Errors) -> None:
     calls = object_(
         data.get("calls"),
         "runtime_contract.calls",
-        {"automatic_retry", "max_concurrency", "maximum_attempts", "contingency_attempts", "contingency_authority_required", "contingency_direction_bound"},
+        {"automatic_retry", "max_concurrency", "maximum_attempts", "contingency_attempts", "contingency_authority_required", "contingency_direction_bound", "target_scope", "target_binding"},
         errors,
     )
     exact(calls.get("automatic_retry"), False, "runtime_contract.calls.automatic_retry", errors)
@@ -878,6 +878,8 @@ def validate_runtime(value: Any, errors: Errors) -> None:
     exact(calls.get("contingency_attempts"), 1, "runtime_contract.calls.contingency_attempts", errors)
     exact(calls.get("contingency_authority_required"), True, "runtime_contract.calls.contingency_authority_required", errors)
     exact(calls.get("contingency_direction_bound"), True, "runtime_contract.calls.contingency_direction_bound", errors)
+    exact(calls.get("target_scope"), "single_owned_destination", "runtime_contract.calls.target_scope", errors)
+    exact(calls.get("target_binding"), "destination_hmac_digest_and_private_owned_target_file", "runtime_contract.calls.target_binding", errors)
     timers = object_(
         data.get("timers"),
         "runtime_contract.timers",
@@ -896,6 +898,14 @@ def validate_runtime(value: Any, errors: Errors) -> None:
         "runtime_contract.timers.call_deadline_seconds",
         errors,
     )
+    teardown = object_(
+        data.get("teardown"),
+        "runtime_contract.teardown",
+        {"unregister_required", "active_call_hangup_required", "execution_containment_required", "secret_erasure_required", "failure_cleanup_required"},
+        errors,
+    )
+    for field in ("unregister_required", "active_call_hangup_required", "execution_containment_required", "secret_erasure_required", "failure_cleanup_required"):
+        exact(teardown.get(field), True, f"runtime_contract.teardown.{field}", errors)
 
 
 def validate_management_storage(management_value: Any, storage_value: Any, errors: Errors) -> None:
