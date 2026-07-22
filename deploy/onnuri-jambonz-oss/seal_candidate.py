@@ -144,7 +144,7 @@ FROZEN_RUNTIME_EVIDENCE = {
     "candidate_input_g008_live_smoke_runner": {
         "source": "run-g008-live-smoke.py",
         "evidence_name": "g008-live-smoke-runner.py",
-        "sha256": "13b9b5b801a4ffb00bb410623b673bb8b493096d0403500a4627f9c7f28d21a3",
+        "sha256": "afaf908b715d7016f8fac550048e12800a65972645b8abed832206785bbae558",
     },
     "candidate_input_runtime_compose": {
         "source": "compose.yaml",
@@ -1494,7 +1494,7 @@ def seal(args: argparse.Namespace) -> dict[str, Any]:
                     "contingency_authority_required": True,
                     "contingency_direction_bound": True,
                     "target_scope": "single_owned_destination",
-                    "target_binding": "destination_hmac_digest_and_private_owned_target_file",
+                    "target_binding": "execution_request_owned_target_sha256_and_destination_hmac_digest",
                 },
                 "timers": {
                     "register_terminal_deadline_seconds": 32,

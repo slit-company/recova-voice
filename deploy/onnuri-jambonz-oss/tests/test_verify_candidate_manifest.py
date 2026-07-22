@@ -278,7 +278,7 @@ def valid_manifest():
                     },
                 ],
             },
-            "calls": {"automatic_retry": False, "max_concurrency": 1, "maximum_attempts": 3, "contingency_attempts": 1, "contingency_authority_required": True, "contingency_direction_bound": True, "target_scope": "single_owned_destination", "target_binding": "destination_hmac_digest_and_private_owned_target_file"},
+            "calls": {"automatic_retry": False, "max_concurrency": 1, "maximum_attempts": 3, "contingency_attempts": 1, "contingency_authority_required": True, "contingency_direction_bound": True, "target_scope": "single_owned_destination", "target_binding": "execution_request_owned_target_sha256_and_destination_hmac_digest"},
             "timers": {"register_terminal_deadline_seconds": 32, "call_deadline_seconds": 60},
             "teardown": {"unregister_required": True, "active_call_hangup_required": True, "execution_containment_required": True, "secret_erasure_required": True, "failure_cleanup_required": True},
         },

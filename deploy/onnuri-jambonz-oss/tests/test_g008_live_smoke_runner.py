@@ -64,6 +64,7 @@ def config(tmp_path: Path) -> runner.Config:
         candidate_digest="b" * 64,
         gate_digest="c" * 64,
         destination_digest="d" * 64,
+        owned_target_sha256=hashlib.sha256(b"target").hexdigest(),
         envelope_uuid="22222222-2222-4222-8222-222222222222",
         request_digest="e" * 64,
         reserved_did_digest="6" * 64,
@@ -752,6 +753,7 @@ def execution_request() -> dict:
         "candidate_digest": "b" * 64,
         "gate_envelope_digest": "c" * 64,
         "destination_hmac_digest": "d" * 64,
+        "owned_target_sha256": hashlib.sha256(b"target").hexdigest(),
         "gate_envelope_uuid": "22222222-2222-4222-8222-222222222222",
         "request_digest": "e" * 64,
         "reserved_inbound_did_digest": "6" * 64,
@@ -772,6 +774,14 @@ def execution_request() -> dict:
         "status_hook_url": "https://hooks.invalid/status",
         "contingency_direction": None,
     }
+
+def test_owned_target_binding_rejects_swapped_private_target(tmp_path: Path) -> None:
+    subject = config(tmp_path)
+    secrets = FakeSecrets()
+    runner.validate_owned_target_binding(subject, secrets)
+    object.__setattr__(subject, "owned_target_sha256", hashlib.sha256(b"other-target").hexdigest())
+    with pytest.raises(runner.RunnerError, match="owned_target_binding_rejected"):
+        runner.validate_owned_target_binding(subject, secrets)
 
 
 def request_environment(tmp_path: Path, payload: bytes) -> dict[str, str]:
@@ -821,6 +831,8 @@ def test_execution_request_loads_exact_contract_and_fixed_endpoints(tmp_path: Pa
     assert "G008_OUTBOUND_PATH" not in source
     assert "G008_INBOUND_PATH" not in source
     assert "contingency_direction" in source
+    assert "owned_target_sha256" in source
+
 
 
 @pytest.mark.parametrize(

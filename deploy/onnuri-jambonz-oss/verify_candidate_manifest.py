@@ -125,7 +125,7 @@ BOOTSTRAP_EXECUTION_REFERENCE_COUNT = 7
 FROZEN_RUNTIME_EVIDENCE = {
     "candidate_input_g008_live_smoke_runner": (
         "evidence:evidence/g008-live-smoke-runner.py",
-        "13b9b5b801a4ffb00bb410623b673bb8b493096d0403500a4627f9c7f28d21a3",
+        "afaf908b715d7016f8fac550048e12800a65972645b8abed832206785bbae558",
     ),
     "candidate_input_runtime_compose": (
         "evidence:evidence/runtime-compose.yaml",
@@ -879,7 +879,7 @@ def validate_runtime(value: Any, errors: Errors) -> None:
     exact(calls.get("contingency_authority_required"), True, "runtime_contract.calls.contingency_authority_required", errors)
     exact(calls.get("contingency_direction_bound"), True, "runtime_contract.calls.contingency_direction_bound", errors)
     exact(calls.get("target_scope"), "single_owned_destination", "runtime_contract.calls.target_scope", errors)
-    exact(calls.get("target_binding"), "destination_hmac_digest_and_private_owned_target_file", "runtime_contract.calls.target_binding", errors)
+    exact(calls.get("target_binding"), "execution_request_owned_target_sha256_and_destination_hmac_digest", "runtime_contract.calls.target_binding", errors)
     timers = object_(
         data.get("timers"),
         "runtime_contract.timers",

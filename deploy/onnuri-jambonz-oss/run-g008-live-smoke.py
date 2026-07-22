@@ -591,6 +591,7 @@ class Config:
     candidate_digest: str
     gate_digest: str
     destination_digest: str
+    owned_target_sha256: str
     envelope_uuid: str
     request_digest: str
     reserved_did_digest: str
@@ -625,7 +626,7 @@ class Config:
         fields = {
             "schema_version", "organization_id", "execution_seal_uuid",
             "execution_nonce_digest", "candidate_digest", "gate_envelope_digest",
-            "destination_hmac_digest", "gate_envelope_uuid", "request_digest",
+            "destination_hmac_digest", "owned_target_sha256", "gate_envelope_uuid", "request_digest",
             "reserved_inbound_did_digest", "reserved_inbound_caller_digest",
             "policy_digest", "live_window_start", "live_window_end", "account_id",
             "application_id", "run_id", "attempt_id", "authority_deadline",
@@ -645,7 +646,7 @@ class Config:
                 raise ValueError
             for name in (
                 "execution_nonce_digest", "candidate_digest", "gate_envelope_digest",
-                "destination_hmac_digest", "request_digest",
+                "destination_hmac_digest", "owned_target_sha256", "request_digest",
                 "reserved_inbound_did_digest", "reserved_inbound_caller_digest",
                 "policy_digest",
             ):
@@ -680,7 +681,7 @@ class Config:
             organization_id, request["execution_seal_uuid"],
             request["execution_nonce_digest"], request["candidate_digest"],
             request["gate_envelope_digest"], request["destination_hmac_digest"],
-            request["gate_envelope_uuid"], request["request_digest"],
+            request["owned_target_sha256"], request["gate_envelope_uuid"], request["request_digest"],
             request["reserved_inbound_did_digest"],
             request["reserved_inbound_caller_digest"], request["policy_digest"],
             request["live_window_start"], request["live_window_end"],
@@ -705,7 +706,7 @@ class Config:
 def validate_owned_target_binding(config: Config, secret_files: SecretFiles) -> None:
     try:
         read_private(secret_files.paths["sip-username"])
-        read_private(secret_files.paths["owned-target"])
+        owned_target = read_private(secret_files.paths["owned-target"])
         authority_deadline = datetime.fromisoformat(
             config.authority_deadline.replace("Z", "+00:00")
         )
@@ -713,6 +714,9 @@ def validate_owned_target_binding(config: Config, secret_files: SecretFiles) -> 
             authority_deadline.tzinfo is None
             or authority_deadline.utcoffset() is None
             or config.request_mode != "diagnostic"
+            or not hmac.compare_digest(
+                hashlib.sha256(owned_target).hexdigest(), config.owned_target_sha256
+            )
         ):
             raise ValueError
     except (KeyError, TypeError, UnicodeDecodeError, ValueError) as exc:
