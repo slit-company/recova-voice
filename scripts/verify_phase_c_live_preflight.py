@@ -397,11 +397,12 @@ def _validate_context(context: Any) -> dict[str, Any]:
         _canonical_cidr(execution_contract["peer_signaling_ipv4_cidr"], "context_execution_contract_peer", 32)
         _hex(execution_contract["owned_target_sha256"], "context_execution_contract_target")
         if (
-            execution_contract["stage_sequence"] != ["outbound_call", "inbound_call", "peer_detach"]
+            execution_contract["stage_sequence"] != ["peer_attach", "outbound_call", "inbound_call", "peer_detach"]
             or execution_contract["register_attempt_budget"] != "0"
             or execution_contract["unregister_attempt_budget"] != "0"
             or execution_contract["peer_signaling_udp_port"] != "5060"
             or execution_contract["peer_detach_required"] is not True
+            or execution_contract["source_external_ipv4"] == execution_contract["peer_signaling_ipv4_cidr"].removesuffix("/32")
         ):
             _fail("context_execution_contract_ip_to_ip")
 

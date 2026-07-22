@@ -84,8 +84,9 @@ PATH_RE = re.compile(r"/[A-Za-z0-9._~/-]{1,255}\Z")
 MAX_AF_UNIX_PATH_BYTES = 100
 REDACTED_LABELS = {
     "sealed", "running", "contained", "completed", "failed",
-    "register_started", "register_succeeded", "outbound_call_started",
-    "outbound_call_succeeded", "inbound_call_started", "inbound_call_succeeded",
+    "register_started", "register_succeeded", "peer_attach_started", "peer_attach_succeeded",
+    "outbound_call_started", "outbound_call_succeeded", "inbound_call_started",
+    "inbound_call_succeeded", "peer_detach_started", "peer_detach_succeeded",
     "unregister_started", "unregister_succeeded", "evidence_finalized",
 }
 
@@ -701,6 +702,7 @@ class Config:
                     or parsed_peer.version != 4
                     or parsed_peer.prefixlen != 32
                     or str(parsed_peer) != peer_signaling_ipv4_cidr
+                    or parsed_source == parsed_peer.network_address
                 ):
                     raise ValueError
                 if not isinstance(peer_binding_digest, str) or DIGEST_RE.fullmatch(peer_binding_digest) is None:

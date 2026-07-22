@@ -158,9 +158,10 @@ def audit() -> None:
     activation = variable_blocks.get("activation_receipt", "")
     for field in ("source_external_ipv4", "peer_signaling_ipv4_cidr", "peer_signaling_udp_port", "owned_target_sha256"):
         require(activation, field, f"IP-to-IP activation omits {field}")
-    require(activation, '["outbound_call", "inbound_call", "peer_detach"]', "IP-to-IP activation omits peer-detach sequence")
+    require(activation, '["peer_attach", "outbound_call", "inbound_call", "peer_detach"]', "IP-to-IP activation omits peer lifecycle sequence")
     require(SOURCE, 'owned_target_sha256 == var.g008_execution_trigger.target_sha256', "IP-to-IP owned target is not bound to the sealed target digest")
     require(SOURCE, 'source_external_ipv4 == var.supplier_endpoint_binding.customer_external_ipv4', "IP-to-IP source is not bound to the reserved external IPv4")
+    require(SOURCE, 'source_external_ipv4 != trimsuffix(var.activation_receipt.peer_signaling_ipv4_cidr, "/32")', "IP-to-IP source and remote peer are not required to be distinct")
     require(SOURCE, 'peer_signaling_udp_port == 5060', "IP-to-IP peer signaling is not fixed to UDP/5060")
     require(SOURCE, 'cutoff_action                   = var.sip_connection_mode == "registration" ? "terminate_media_and_unregister" : "terminate_media_and_detach_peer"', "IP-to-IP containment does not detach the peer")
 
@@ -330,7 +331,8 @@ def audit() -> None:
     if sip_ready is None:
         fail("missing sip_ready expression")
     for predicate in (
-        "var.sip_register_gate", "local.g2_boot_prerequisites_ready", "local.cost_ready",
+        "local.sip_connection_authority_ready", "local.ip_to_ip_binding_ready",
+        "local.g2_boot_prerequisites_ready", "local.cost_ready",
         "local.time_ready", "local.supplier_signaling_ready", "local.g008_derivative_ready",
         "local.g008_authority_ready", "local.g008_f12_ready", "local.g008_secrets_ready",
     ):

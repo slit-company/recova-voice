@@ -177,7 +177,7 @@ def test_ip_to_ip_context_binds_exact_source_peer_target_and_cleanup(tmp_path, a
     ip_context["execution_contract"] = {
         "sip_connection_mode": "ip_to_ip", "source_external_ipv4": ip_context["supplier"]["customer_external_ipv4"],
         "peer_signaling_ipv4_cidr": ip_context["supplier"]["signaling_ipv4_cidr"], "peer_signaling_udp_port": "5060",
-        "owned_target_sha256": H4, "stage_sequence": ["outbound_call", "inbound_call", "peer_detach"],
+        "owned_target_sha256": H4, "stage_sequence": ["peer_attach", "outbound_call", "inbound_call", "peer_detach"],
         "register_attempt_budget": "0", "unregister_attempt_budget": "0", "total_call_attempt_budget": "3",
         "retry_count": "0", "concurrency_count": "1", "call_deadline_seconds": "60",
         "peer_detach_required": True, "containment_cleanup_required": True,
@@ -203,7 +203,7 @@ def test_ip_to_ip_context_rejects_unbounded_or_unbound_values(tmp_path, context,
     ip_context["execution_contract"] = {
         "sip_connection_mode": "ip_to_ip", "source_external_ipv4": ip_context["supplier"]["customer_external_ipv4"],
         "peer_signaling_ipv4_cidr": ip_context["supplier"]["signaling_ipv4_cidr"], "peer_signaling_udp_port": "5060",
-        "owned_target_sha256": H4, "stage_sequence": ["outbound_call", "inbound_call", "peer_detach"],
+        "owned_target_sha256": H4, "stage_sequence": ["peer_attach", "outbound_call", "inbound_call", "peer_detach"],
         "register_attempt_budget": "0", "unregister_attempt_budget": "0", "total_call_attempt_budget": "3",
         "retry_count": "0", "concurrency_count": "1", "call_deadline_seconds": "60",
         "peer_detach_required": True, "containment_cleanup_required": True,

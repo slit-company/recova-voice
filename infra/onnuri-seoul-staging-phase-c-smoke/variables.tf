@@ -1295,10 +1295,11 @@ variable "activation_receipt" {
           var.activation_receipt.register_attempt_budget == 1 &&
           var.activation_receipt.unregister_attempt_budget == 1
           ) : (
-          var.activation_receipt.stage_sequence == tolist(["outbound_call", "inbound_call", "peer_detach"]) &&
+          var.activation_receipt.stage_sequence == tolist(["peer_attach", "outbound_call", "inbound_call", "peer_detach"]) &&
           var.activation_receipt.register_attempt_budget == 0 &&
           var.activation_receipt.unregister_attempt_budget == 0 &&
           try(var.activation_receipt.source_external_ipv4 == var.supplier_endpoint_binding.customer_external_ipv4, false) &&
+          try(var.activation_receipt.source_external_ipv4 != trimsuffix(var.activation_receipt.peer_signaling_ipv4_cidr, "/32"), false) &&
           try(var.activation_receipt.peer_signaling_ipv4_cidr == var.supplier_endpoint_binding.signaling_ipv4_cidr, false) &&
           try(var.activation_receipt.peer_signaling_udp_port == 5060, false) &&
           try(var.activation_receipt.peer_signaling_udp_port == var.supplier_endpoint_binding.signaling_remote_udp_port, false) &&

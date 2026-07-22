@@ -144,7 +144,7 @@ FROZEN_RUNTIME_EVIDENCE = {
     "candidate_input_g008_live_smoke_runner": {
         "source": "run-g008-live-smoke.py",
         "evidence_name": "g008-live-smoke-runner.py",
-        "sha256": "2c92d21b3ed2e33b5b8eb808d4a21345cef202c7cf5a14fd1e26383c815e7f44",
+        "sha256": "280d4b95eec76e605e42295d591ec64cb7b0ce8ca91dede49e9d7ba1d22d0ca9",
     },
     "candidate_input_runtime_compose": {
         "source": "compose.yaml",
@@ -174,13 +174,13 @@ PHASE_C_RUNTIME_SHA256 = {
     "crypto_gate.tf": "07225e2ab4bf6b2bc2fb6ae1a1f7ce91b6e1e6a4c55ce8db0509c3fce7be8f1e",
     "firewalls.tf": "c1b3c6af27def65bd5c115dd90660402741b11bb8d7a37e75ecd52364a0a7e6a",
     "iam.tf": "894791c62712571c43605aaded6e737f50d3eb4b5d5c8a9084331bdec0871834",
-    "locals.tf": "aa7f748a08c95563c58ce794d889a4c788c00b12ee5b6f81fd7905599593bcf1",
+    "locals.tf": "f725febc287a0fa64ce96228ee886384ec554cc10add04feadc8b215ac8eb678",
     "network.tf": "e920ab3827bd5548a7251294f21d7d66211e552462e59af343bf33810a328f99",
     "observability.tf": "8b7c8de24b86f42253fe10329141034ddb2618fca4db93915147f89e77292e01",
     "outputs.tf": "fdab75096a58ce62487390fb0170a69e1494c7aa002c920bc202e25737caef39",
     "providers.tf": "d44f95858aebade0afaa2b7908677e11e0aff018c4a42698e4f45eeb493fff71",
     "secrets.tf": "c18c551e42960ff57a3a18e1837e61fdde4ff2ad7cdcbeb5a163d978e59c8743",
-    "variables.tf": "30448d5a629c4dca146ae138afa40a2938f026af48c98a541af56e849a4fff61",
+    "variables.tf": "28a5edb24b788aef7db475b19cd4abdb5667e4e20ad8eaff974102f86c5303de",
     "versions.tf": "16031e61a9de9aab9358f537d68d5f41c6065bb626a65d84f0b8f5d195be4fe0",
     "workload.tf": "e33c6530fbf7e690f8d1b0d1583cac7b07e5f1c136e579757faef73af90d40fd",
 }
