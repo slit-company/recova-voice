@@ -579,7 +579,7 @@
               "const": "evidence:evidence/g008-live-smoke-runner.py"
             },
             "sha256": {
-              "const": "sha256:afaf908b715d7016f8fac550048e12800a65972645b8abed832206785bbae558"
+              "const": "sha256:f1517747eac6a4a7bf28e4e2c4d00825481959462bcd911ab8a2d5bcee3a256c"
 
             }
           }
@@ -670,7 +670,7 @@
           "properties": {
             "result": {"const": "pass"},
             "reference": {"const": "evidence:evidence/phase-c-crypto_gate.tf"},
-            "sha256": {"const": "sha256:1450c556687d2ffe189c45b5796209cbffff39314926d3f48eb770a331c214a7"}
+            "sha256": {"const": "sha256:07225e2ab4bf6b2bc2fb6ae1a1f7ce91b6e1e6a4c55ce8db0509c3fce7be8f1e"}
           }
         },
         "candidate_input_phase_c_configuration_firewalls.tf": {
@@ -763,7 +763,7 @@
               "const": "evidence/g008-live-smoke-runner.py"
             },
             "sha256": {
-              "const": "afaf908b715d7016f8fac550048e12800a65972645b8abed832206785bbae558"
+              "const": "f1517747eac6a4a7bf28e4e2c4d00825481959462bcd911ab8a2d5bcee3a256c"
 
             },
             "content_type": {
@@ -828,7 +828,7 @@
           "required": ["path", "sha256", "content_type"],
           "properties": {
             "path": {"const": "evidence/phase-c-crypto_gate.tf"},
-            "sha256": {"const": "1450c556687d2ffe189c45b5796209cbffff39314926d3f48eb770a331c214a7"},
+            "sha256": {"const": "07225e2ab4bf6b2bc2fb6ae1a1f7ce91b6e1e6a4c55ce8db0509c3fce7be8f1e"},
             "content_type": {"const": "text"}
           }
         },

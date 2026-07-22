@@ -125,7 +125,7 @@ BOOTSTRAP_EXECUTION_REFERENCE_COUNT = 7
 FROZEN_RUNTIME_EVIDENCE = {
     "candidate_input_g008_live_smoke_runner": (
         "evidence:evidence/g008-live-smoke-runner.py",
-        "afaf908b715d7016f8fac550048e12800a65972645b8abed832206785bbae558",
+        "f1517747eac6a4a7bf28e4e2c4d00825481959462bcd911ab8a2d5bcee3a256c",
     ),
     "candidate_input_runtime_compose": (
         "evidence:evidence/runtime-compose.yaml",
@@ -148,16 +148,16 @@ PHASE_C_EVIDENCE = {
     "startup-g008.sh": "181d7df7975679bd8fc5d80f8e6fc7df55ccaa5aefd41fefa2d7ad362ad5fdff",
     "backend.tf": "4a3e917be1d0ffe925505b1bdaa4d205effb9bd142cf0ccb655b0204fa06a7a2",
     "containment.tf": "174f821de4bf18df83a0252fc1ff5f51962a0860c0de0843ee658b075686d967",
-    "crypto_gate.tf": "1450c556687d2ffe189c45b5796209cbffff39314926d3f48eb770a331c214a7",
+    "crypto_gate.tf": "07225e2ab4bf6b2bc2fb6ae1a1f7ce91b6e1e6a4c55ce8db0509c3fce7be8f1e",
     "firewalls.tf": "c1b3c6af27def65bd5c115dd90660402741b11bb8d7a37e75ecd52364a0a7e6a",
     "iam.tf": "894791c62712571c43605aaded6e737f50d3eb4b5d5c8a9084331bdec0871834",
-    "locals.tf": "c04d2861f8d33a9ce6bea3ff8361d11cf33e150e4bb571183307a3c6f39fc3b6",
+    "locals.tf": "aa7f748a08c95563c58ce794d889a4c788c00b12ee5b6f81fd7905599593bcf1",
     "network.tf": "e920ab3827bd5548a7251294f21d7d66211e552462e59af343bf33810a328f99",
     "observability.tf": "8b7c8de24b86f42253fe10329141034ddb2618fca4db93915147f89e77292e01",
     "outputs.tf": "fdab75096a58ce62487390fb0170a69e1494c7aa002c920bc202e25737caef39",
     "providers.tf": "d44f95858aebade0afaa2b7908677e11e0aff018c4a42698e4f45eeb493fff71",
     "secrets.tf": "c18c551e42960ff57a3a18e1837e61fdde4ff2ad7cdcbeb5a163d978e59c8743",
-    "variables.tf": "ab5c3e79fabbb3eefdd9a9dc62b0a0c45aa23a1cddfa02a0b5eaf3c09d4fae3a",
+    "variables.tf": "30448d5a629c4dca146ae138afa40a2938f026af48c98a541af56e849a4fff61",
     "versions.tf": "16031e61a9de9aab9358f537d68d5f41c6065bb626a65d84f0b8f5d195be4fe0",
     "workload.tf": "e33c6530fbf7e690f8d1b0d1583cac7b07e5f1c136e579757faef73af90d40fd",
 }
