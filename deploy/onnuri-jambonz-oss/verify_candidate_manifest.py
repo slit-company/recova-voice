@@ -126,7 +126,7 @@ BOOTSTRAP_EXECUTION_REFERENCE_COUNT = 7
 FROZEN_RUNTIME_EVIDENCE = {
     "candidate_input_g008_live_smoke_runner": (
         "evidence:evidence/g008-live-smoke-runner.py",
-        "280d4b95eec76e605e42295d591ec64cb7b0ce8ca91dede49e9d7ba1d22d0ca9",
+        "842d7cea2f7e34c30d8a4ed9fd8bab51ab25e6bc78383ce41994cef8bad042ca",
     ),
     "candidate_input_runtime_compose": (
         "evidence:evidence/runtime-compose.yaml",

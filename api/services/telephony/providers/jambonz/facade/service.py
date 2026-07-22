@@ -77,6 +77,54 @@ class G008Binding(BaseModel):
     gate_envelope_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class G008PeerBinding(G008Binding):
+    source_external_ip: str
+    peer_cidr: str
+    peer_port: Literal[5060]
+    peer_transport: Literal["udp"]
+    owned_target_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    peer_binding_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def require_exact_ip_peer(self) -> "G008PeerBinding":
+        import ipaddress
+
+        source = ipaddress.ip_address(self.source_external_ip)
+        peer = ipaddress.ip_network(self.peer_cidr, strict=True)
+        if (
+            source.version != 4
+            or peer.version != 4
+            or peer.prefixlen != 32
+            or not source.is_global
+            or str(source) != self.source_external_ip
+            or str(peer) != self.peer_cidr
+            or source == peer.network_address
+        ):
+            raise ValueError("exact distinct IP peer binding required")
+        material = {
+            "source_external_ip": self.source_external_ip,
+            "peer_cidr": self.peer_cidr,
+            "peer_port": self.peer_port,
+            "peer_transport": self.peer_transport,
+            "owned_target_sha256": self.owned_target_sha256,
+        }
+        if _digest_payload(material) != self.peer_binding_digest:
+            raise ValueError("IP peer binding digest mismatch")
+        return self
+
+
+class G008PeerAttachRequest(G008PeerBinding):
+    retry_count: Literal[0]
+    concurrency_count: Literal[1]
+    deadline_seconds: Literal[60]
+
+
+class G008PeerReceipt(G008PeerBinding):
+    state: Literal["attached", "detached"]
+
+
+
+
 class G008InboundArmRequest(G008Binding):
     execution_stage_uuid: str = Field(
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
@@ -253,6 +301,8 @@ class FacadeService:
         self._inbound_arms: dict[int, _InboundArm] = {}
         self._hangup_receipts: dict[str, G008HangupReceipt] = {}
         self._outbound_nonce_digests: dict[str, str] = {}
+        self._ip_peer: G008PeerBinding | None = None
+        self._peer_receipts: dict[str, G008PeerReceipt] = {}
 
     async def ready(self) -> bool:
         try:
@@ -282,6 +332,35 @@ class FacadeService:
         return G008InboundArmReceipt(
             context=G008InboundArmContext(context_digest=context_digest)
         )
+    async def attach_g008_ip_peer(self, request: G008PeerAttachRequest) -> G008PeerReceipt:
+        operation_digest = _digest_payload(request.model_dump(mode="json"))
+        async with self._control_lock:
+            recovered = self._peer_receipts.get(operation_digest)
+            if recovered is not None:
+                return recovered
+            peer = G008PeerBinding.model_validate(
+                request.model_dump(mode="json", exclude={"retry_count", "concurrency_count", "deadline_seconds"})
+            )
+            if self._ip_peer is not None:
+                raise FacadeError(FailureCategory.REPLAY, http_status=409)
+            self._ip_peer = peer
+            receipt = G008PeerReceipt(**peer.model_dump(mode="json"), state="attached")
+            self._peer_receipts[operation_digest] = receipt
+            return receipt
+
+    async def detach_g008_ip_peer(self, request: G008PeerBinding) -> G008PeerReceipt:
+        operation_digest = _digest_payload(request.model_dump(mode="json"))
+        async with self._control_lock:
+            recovered = self._peer_receipts.get(operation_digest)
+            if recovered is not None and recovered.state == "detached":
+                return recovered
+            if self._ip_peer is None or self._ip_peer != request:
+                raise FacadeError(FailureCategory.CONTRACT_MISMATCH, http_status=409)
+            self._ip_peer = None
+            receipt = G008PeerReceipt(**request.model_dump(mode="json"), state="detached")
+            self._peer_receipts[operation_digest] = receipt
+            return receipt
+
 
     async def hangup_g008(
         self,

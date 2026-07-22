@@ -144,7 +144,7 @@ FROZEN_RUNTIME_EVIDENCE = {
     "candidate_input_g008_live_smoke_runner": {
         "source": "run-g008-live-smoke.py",
         "evidence_name": "g008-live-smoke-runner.py",
-        "sha256": "280d4b95eec76e605e42295d591ec64cb7b0ce8ca91dede49e9d7ba1d22d0ca9",
+        "sha256": "842d7cea2f7e34c30d8a4ed9fd8bab51ab25e6bc78383ce41994cef8bad042ca",
     },
     "candidate_input_runtime_compose": {
         "source": "compose.yaml",

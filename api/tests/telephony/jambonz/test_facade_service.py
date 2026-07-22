@@ -46,6 +46,8 @@ from api.services.telephony.providers.jambonz.facade.service import (
     FacadeService,
     G008HangupRequest,
     G008InboundArmRequest,
+    G008PeerAttachRequest,
+    G008PeerBinding,
     canonical_model_digest,
     outbound_create_request_digest,
 )
@@ -279,6 +281,52 @@ async def _arm_inbound(service, **updates):
         request=G008InboundArmRequest(**values),
         now=_NOW,
     )
+
+def _peer_binding(**updates):
+    material = {
+        "source_external_ip": "8.8.8.8",
+        "peer_cidr": "1.1.1.1/32",
+        "peer_port": 5060,
+        "peer_transport": "udp",
+        "owned_target_sha256": "f" * 64,
+    }
+    values = {
+        "organization_id": 7,
+        "execution_seal_uuid": "10000000-0000-4000-8000-000000000010",
+        "execution_nonce_digest": "a" * 64,
+        "candidate_digest": "b" * 64,
+        "gate_envelope_digest": "e" * 64,
+        **material,
+        "peer_binding_digest": service_module._digest_payload(material),
+    }
+    values.update(updates)
+    return values
+
+
+@pytest.mark.asyncio
+async def test_ip_peer_attach_detach_is_exact_one_at_a_time_and_idempotent():
+    service = _service()
+    attach = G008PeerAttachRequest(**_peer_binding(), retry_count=0, concurrency_count=1, deadline_seconds=60)
+    first = await service.attach_g008_ip_peer(attach)
+    recovered = await service.attach_g008_ip_peer(attach)
+    assert first == recovered
+    assert first.state == "attached"
+    detached = await service.detach_g008_ip_peer(G008PeerBinding(**_peer_binding()))
+    assert detached.state == "detached"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("peer_cidr", "8.8.8.8/32"),
+        ("peer_cidr", "9.9.9.9/32"),
+        ("owned_target_sha256", "0" * 64),
+        ("peer_binding_digest", "0" * 64),
+    ],
+)
+def test_ip_peer_binding_rejects_source_peer_target_or_digest_substitution(field, value):
+    with pytest.raises(ValueError):
+        G008PeerBinding(**_peer_binding(**{field: value}))
 
 
 def _outbound_create(**updates):

@@ -208,6 +208,8 @@ class FakeApi:
                 "registration_attestation_key_id": "registration-attestation-v1",
                 "registration_attestation_public_key_sha256": hashlib.sha256(public_der).hexdigest(),
             })
+        if path == "/execution/stage/finalize":
+            return self.signed("stage_finalize", {**payload, "state": "succeeded"})
         if path == "/execution/stage/start":
             stage = payload["stage"]
             return self.signed(
@@ -283,6 +285,10 @@ class FakeApi:
                 "outcome": "succeeded",
                 "recovered": False,
             }
+        if path == "/v1/g008/ip-peer/attach":
+            return {**{key: value for key, value in payload.items() if key not in {"retry_count", "concurrency_count", "deadline_seconds"}}, "state": "attached"}
+        if path == "/v1/g008/ip-peer/detach":
+            return {**payload, "state": "detached"}
         if path in {
             runner.OUTBOUND_ROUTE_TEMPLATE.format(account_id="account-1"),
             runner.INBOUND_ROUTE,

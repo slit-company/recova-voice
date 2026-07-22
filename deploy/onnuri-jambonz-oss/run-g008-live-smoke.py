@@ -1090,10 +1090,12 @@ class Runner:
             facade=True,
             deadline=deadline,
         )
-        self._signed_payload(
-            acknowledgement,
-            kind="ip_peer_attachment",
-            expected={**binding, "state": "attached"},
+        if acknowledgement != {**binding, "state": "attached"}:
+            raise RunnerError("peer_attach_receipt_rejected")
+        self.api.post(
+            "/execution/stage/finalize",
+            {**self.config.binding(), "stage": "peer_attach", "ordinal": 1, "stage_deadline_seconds": 60, "stage_state": "succeeded", "terminal_class": "peer_attached"},
+            deadline=deadline,
         )
         self.peer_attached = True
         return acknowledgement
@@ -1105,10 +1107,12 @@ class Runner:
         acknowledgement = self.api.post(
             "/v1/g008/ip-peer/detach", binding, facade=True, deadline=deadline
         )
-        self._signed_payload(
-            acknowledgement,
-            kind="ip_peer_detachment",
-            expected={**binding, "state": "detached"},
+        if acknowledgement != {**binding, "state": "detached"}:
+            raise RunnerError("peer_detach_receipt_rejected")
+        self.api.post(
+            "/execution/stage/finalize",
+            {**self.config.binding(), "stage": "peer_detach", "ordinal": 4, "stage_deadline_seconds": 60, "stage_state": "succeeded", "terminal_class": "peer_detached"},
+            deadline=deadline,
         )
         self.peer_attached = False
 

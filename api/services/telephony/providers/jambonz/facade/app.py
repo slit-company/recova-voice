@@ -21,6 +21,8 @@ from .service import (
     F12AuthorityClient,
     FacadeError,
     G008HangupRequest,
+    G008PeerAttachRequest,
+    G008PeerBinding,
     G008InboundArmRequest,
     FacadeService,
     StockJambonzClient,
@@ -126,6 +128,14 @@ def create_facade_app(
     @app.post("/v1/g008/calls/hangup")
     async def hangup_g008_call(request: G008HangupRequest) -> Any:
         return await service.hangup_g008(request=request)
+
+    @app.post("/v1/g008/ip-peer/attach")
+    async def attach_g008_ip_peer(request: G008PeerAttachRequest) -> Any:
+        return await service.attach_g008_ip_peer(request)
+
+    @app.post("/v1/g008/ip-peer/detach")
+    async def detach_g008_ip_peer(request: G008PeerBinding) -> Any:
+        return await service.detach_g008_ip_peer(request)
 
     @app.post("/v1/jambonz-contract/accounts/{account_id}/calls", status_code=201)
     async def create_call(
