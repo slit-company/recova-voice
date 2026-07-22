@@ -117,6 +117,7 @@ CONFORMANCE_CHECKS = {
     "registration_no_retry_concurrency": "pytest:registration-no-retry-concurrency",
     "media_contract": "pytest:media-basic-l16-8000-mono-bidirectional",
     "call_deadline": "pytest:call-deadline-60s",
+    "ip_to_ip_execution_contract": "pytest:ip-to-ip-no-register-exact-peer-four-stage",
 }
 
 CONFORMANCE_TRUSTED_KEYSET_SHA256 = "00645f3af8230c742951c12f17a713afde209de12182cd6e3722ac59445507aa"
