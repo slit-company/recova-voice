@@ -140,7 +140,7 @@ locals {
   g2_prerequisites_ready      = local.dependency_ready && local.candidate_ready && local.endpoints_ready && local.g009_candidate_receipt_valid && local.phase_c_backend_receipt_valid
   g2_boot_prerequisites_ready = local.g2_prerequisites_ready && local.phase_b_private_google_access_ready && local.destroy_deadline_valid && !local.destroy_due
   g2_boot_requested           = var.dependency_manifest_gate || var.candidate_gate || var.endpoint_identity_gate
-  g2_live_gates_disabled      = !var.external_ip_reservation_gate && !var.network_path_arm_gate && !var.control_readiness_gate && !var.cost_gate && !var.live_window_gate && !var.sip_register_gate && !var.rtp_gate && !var.outbound_call_gate && !var.inbound_call_gate
+  g2_live_gates_disabled      = !var.external_ip_reservation_gate && !var.network_path_arm_gate && !var.control_readiness_gate && !var.cost_gate && !var.live_window_gate && !var.sip_register_gate && !var.sip_ip_to_ip_gate && !var.rtp_gate && !var.outbound_call_gate && !var.inbound_call_gate
   g2_disabled_boot_ready = (
     local.g2_boot_requested &&
     local.g2_boot_prerequisites_ready &&
@@ -298,7 +298,19 @@ locals {
     var.supplier_rtp_evidence.max_concurrent_calls == 1 &&
     var.supplier_rtp_evidence.calls_per_second == 1
   ) : false
-  supplier_signaling_ready = local.supplier_signaling_bound && local.supplier_rtp_evidence_valid
+  supplier_signaling_ready       = local.supplier_signaling_bound && local.supplier_rtp_evidence_valid
+  sip_connection_authority_ready = var.sip_connection_mode == "registration" ? var.sip_register_gate : var.sip_ip_to_ip_gate
+  ip_to_ip_binding_ready = var.sip_connection_mode != "ip_to_ip" ? true : (
+    var.sip_ip_to_ip_gate &&
+    !var.sip_register_gate &&
+    local.supplier_signaling_bound &&
+    var.supplier_signaling_remote_udp_port == 5060 &&
+    try(var.activation_receipt.sip_connection_mode == "ip_to_ip", false) &&
+    try(var.activation_receipt.source_external_ipv4 == var.supplier_endpoint_binding.customer_external_ipv4, false) &&
+    try(var.activation_receipt.peer_signaling_ipv4_cidr == var.supplier_endpoint_binding.signaling_ipv4_cidr, false) &&
+    try(var.activation_receipt.peer_signaling_udp_port == 5060, false) &&
+    try(var.activation_receipt.owned_target_sha256 == var.g008_execution_trigger.target_sha256, false)
+  )
   phase_c_live_plan_verified = (
     local.phase_c_live_crypto_enabled &&
     try(data.external.phase_c_live_plan[0].result.verified == "true", false)
@@ -327,13 +339,14 @@ locals {
   )
 
   sip_ready = (
-    var.sip_register_gate &&
+    local.sip_connection_authority_ready &&
     local.network_path_armed &&
     local.control_ready &&
     local.g2_boot_prerequisites_ready &&
     local.cost_ready &&
     local.time_ready &&
     local.supplier_signaling_ready &&
+    local.ip_to_ip_binding_ready &&
     local.g008_derivative_ready &&
     local.g008_authority_ready &&
     local.g008_f12_ready &&
@@ -350,11 +363,21 @@ locals {
   outbound_live_enabled = var.outbound_call_gate && local.rtp_ready
   inbound_live_enabled  = var.inbound_call_gate && local.rtp_ready
   any_live_enabled      = local.outbound_live_enabled || local.inbound_live_enabled
-  exact_four_stage_contract_ready = nonsensitive(var.activation_receipt != null && var.g008_execution_trigger != null ? (
-    var.activation_receipt.stage_sequence == tolist(["register", "outbound_call", "inbound_call", "unregister"]) &&
+  exact_execution_contract_ready = nonsensitive(var.activation_receipt != null && var.g008_execution_trigger != null ? (
+    var.activation_receipt.sip_connection_mode == var.sip_connection_mode &&
+    (
+      var.sip_connection_mode == "registration" ? (
+        var.activation_receipt.stage_sequence == tolist(["register", "outbound_call", "inbound_call", "unregister"]) &&
+        var.activation_receipt.register_attempt_budget == 1 &&
+        var.activation_receipt.unregister_attempt_budget == 1
+        ) : (
+        var.activation_receipt.stage_sequence == tolist(["outbound_call", "inbound_call", "peer_detach"]) &&
+        var.activation_receipt.register_attempt_budget == 0 &&
+        var.activation_receipt.unregister_attempt_budget == 0 &&
+        local.ip_to_ip_binding_ready
+      )
+    ) &&
     var.activation_receipt.execution_seal_count == 1 &&
-    var.activation_receipt.register_attempt_budget == 1 &&
-    var.activation_receipt.unregister_attempt_budget == 1 &&
     var.activation_receipt.total_call_attempt_budget == 3 &&
     var.activation_receipt.retry_count == 0 &&
     var.activation_receipt.concurrency_count == 1 &&
@@ -375,19 +398,23 @@ locals {
     host_policy_sha256              = try(var.host_policy_receipt.policy_sha256, "")
     recova_destination_sha256       = try(var.recova_destination_receipt.canonical_receipt_sha256, "")
     external_address_binding_sha256 = try(sha256(var.supplier_endpoint_binding.customer_external_ipv4), "")
+    sip_connection_mode             = try(var.activation_receipt.sip_connection_mode, "registration")
+    owned_target_sha256             = try(var.activation_receipt.owned_target_sha256, "")
+    peer_signaling_ipv4_cidr        = try(var.activation_receipt.peer_signaling_ipv4_cidr, "")
+    peer_signaling_udp_port         = try(var.activation_receipt.peer_signaling_udp_port, 0)
     stage_sequence                  = try(var.activation_receipt.stage_sequence, [])
     outbound_barrier_receipt_sha256 = try(var.activation_receipt.outbound_barrier_receipt_sha256, "")
     inbound_barrier_receipt_sha256  = try(var.activation_receipt.inbound_barrier_receipt_sha256, "")
     execution_seal_count            = try(var.activation_receipt.execution_seal_count, 0)
-    register_attempt_budget         = 1
-    unregister_attempt_budget       = 1
+    register_attempt_budget         = var.sip_connection_mode == "registration" ? 1 : 0
+    unregister_attempt_budget       = var.sip_connection_mode == "registration" ? 1 : 0
     total_call_attempt_budget       = 3
     call_retry_budget               = 0
     contingency_call_budget         = 1
     contingency_authority_required  = true
     maximum_active_calls            = 1
     maximum_media_seconds_per_call  = 60
-    cutoff_action                   = "terminate_media_and_unregister"
+    cutoff_action                   = var.sip_connection_mode == "registration" ? "terminate_media_and_unregister" : "terminate_media_and_detach_peer"
   }
   cutoff_required = local.control_phase_ready || local.bounded_live_ready
   watchdog_cutoff_utc = local.cutoff_required ? sort([
@@ -405,7 +432,7 @@ locals {
     local.immutable_names.google_out_firewall,
   ] : []
   bounded_live_ready = nonsensitive((
-    var.sip_register_gate &&
+    local.sip_connection_authority_ready &&
     var.rtp_gate &&
     var.outbound_call_gate &&
     var.inbound_call_gate &&
@@ -413,12 +440,13 @@ locals {
     local.rtp_ready &&
     local.outbound_live_enabled &&
     local.inbound_live_enabled &&
-    local.exact_four_stage_contract_ready &&
+    local.exact_execution_contract_ready &&
     local.g008_external_iam_receipt_ready
   ))
   control_phase_ready = nonsensitive((
     local.control_ready &&
     !var.sip_register_gate &&
+    !var.sip_ip_to_ip_gate &&
     !var.rtp_gate &&
     !var.outbound_call_gate &&
     !var.inbound_call_gate &&
@@ -436,6 +464,7 @@ locals {
     !var.cost_gate &&
     !var.live_window_gate &&
     !var.sip_register_gate &&
+    !var.sip_ip_to_ip_gate &&
     !var.rtp_gate &&
     !var.outbound_call_gate &&
     !var.inbound_call_gate
@@ -444,6 +473,7 @@ locals {
     local.network_path_armed &&
     !var.control_readiness_gate &&
     !var.sip_register_gate &&
+    !var.sip_ip_to_ip_gate &&
     !var.rtp_gate &&
     !var.outbound_call_gate &&
     !var.inbound_call_gate
@@ -474,8 +504,8 @@ locals {
     endpoints_are_approved       = local.endpoints_ready
     cost_is_below_ceiling        = !var.cost_gate || local.cost_evidence_valid
     live_window_is_active        = !var.live_window_gate || local.live_window_active
-    supplier_receipt_is_current  = !var.sip_register_gate || local.supplier_rtp_evidence_valid
-    sip_matches_supplier_receipt = !var.sip_register_gate || local.supplier_signaling_ready
+    supplier_receipt_is_current  = !local.sip_connection_authority_ready || local.supplier_rtp_evidence_valid
+    sip_matches_supplier_receipt = !local.sip_connection_authority_ready || (local.supplier_signaling_ready && local.ip_to_ip_binding_ready)
     # Compatibility key consumed by the existing redacted output; it now means
     # absent-by-default or exactly matched to the signed supplier receipt.
     sip_is_exact_host_udp_5060 = (
@@ -496,7 +526,7 @@ locals {
     g009_candidate_receipt_is_bound    = local.g009_candidate_receipt_valid
     phase_c_backend_receipt_is_current = local.phase_c_backend_receipt_valid
     g2_disabled_boot_is_authorized     = local.g2_disabled_boot_authority_valid
-    g008_live_bindings_are_complete    = !var.sip_register_gate || (local.g008_derivative_ready && local.g008_authority_ready && local.g008_f12_ready && local.g008_secrets_ready)
+    g008_live_bindings_are_complete    = !local.sip_connection_authority_ready || (local.g008_derivative_ready && local.g008_authority_ready && local.g008_f12_ready && local.g008_secrets_ready && local.ip_to_ip_binding_ready)
     ordered_deployment_is_ready        = local.deployment_ready
   }
 }

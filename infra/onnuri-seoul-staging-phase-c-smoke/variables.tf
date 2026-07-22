@@ -1247,6 +1247,11 @@ variable "activation_receipt" {
     canonical_receipt_sha256          = string
     verification_receipt_sha256       = string
     stage_sequence                    = list(string)
+    sip_connection_mode               = optional(string, "registration")
+    source_external_ipv4              = optional(string)
+    peer_signaling_ipv4_cidr          = optional(string)
+    peer_signaling_udp_port           = optional(number)
+    owned_target_sha256               = optional(string)
     outbound_barrier_receipt_sha256   = string
     inbound_barrier_receipt_sha256    = string
     execution_seal_count              = number
@@ -1283,10 +1288,25 @@ variable "activation_receipt" {
         var.activation_receipt.inbound_barrier_receipt_sha256,
       ] : can(regex("^[0-9a-f]{64}$", digest))]) &&
       var.activation_receipt.outbound_barrier_receipt_sha256 != var.activation_receipt.inbound_barrier_receipt_sha256 &&
-      var.activation_receipt.stage_sequence == tolist(["register", "outbound_call", "inbound_call", "unregister"]) &&
+      contains(["registration", "ip_to_ip"], var.activation_receipt.sip_connection_mode) &&
+      (
+        var.activation_receipt.sip_connection_mode == "registration" ? (
+          var.activation_receipt.stage_sequence == tolist(["register", "outbound_call", "inbound_call", "unregister"]) &&
+          var.activation_receipt.register_attempt_budget == 1 &&
+          var.activation_receipt.unregister_attempt_budget == 1
+          ) : (
+          var.activation_receipt.stage_sequence == tolist(["outbound_call", "inbound_call", "peer_detach"]) &&
+          var.activation_receipt.register_attempt_budget == 0 &&
+          var.activation_receipt.unregister_attempt_budget == 0 &&
+          try(var.activation_receipt.source_external_ipv4 == var.supplier_endpoint_binding.customer_external_ipv4, false) &&
+          try(var.activation_receipt.peer_signaling_ipv4_cidr == var.supplier_endpoint_binding.signaling_ipv4_cidr, false) &&
+          try(var.activation_receipt.peer_signaling_udp_port == 5060, false) &&
+          try(var.activation_receipt.peer_signaling_udp_port == var.supplier_endpoint_binding.signaling_remote_udp_port, false) &&
+          try(can(cidrhost("${var.activation_receipt.source_external_ipv4}/32", 0)), false) &&
+          try(can(regex("^[0-9a-f]{64}$", var.activation_receipt.owned_target_sha256)), false)
+        )
+      ) &&
       var.activation_receipt.execution_seal_count == 1 &&
-      var.activation_receipt.register_attempt_budget == 1 &&
-      var.activation_receipt.unregister_attempt_budget == 1 &&
       var.activation_receipt.total_call_attempt_budget == 3 &&
       var.activation_receipt.retry_count == 0 &&
       var.activation_receipt.concurrency_count == 1 &&
@@ -1297,7 +1317,7 @@ variable "activation_receipt" {
       can(formatdate("YYYY-MM-DD'T'hh:mm:ss'Z'", var.activation_receipt.expires_at_utc)) &&
       timecmp(var.activation_receipt.expires_at_utc, var.activation_receipt.issued_at_utc) > 0
     )
-    error_message = "activation_receipt must bind the exact canonical successor review payload digest, preverify the exact REGISTER/outbound/inbound/UNREGISTER sequence, two distinct barrier receipts, one seal, exactly one operator-authorized direction-bound contingency, zero automatic retries, concurrency one, and a 60-second deadline."
+    error_message = "activation_receipt must bind either the legacy REGISTER/outbound/inbound/UNREGISTER contract or the no-register outbound/inbound/peer-detach contract, plus the exact reserved source IPv4, peer /32:5060/UDP, owned target digest, one seal, maximum three calls, zero retries, concurrency one, and a 60-second deadline."
   }
 }
 
@@ -1392,11 +1412,58 @@ variable "live_window_gate" {
   }
 }
 
+variable "sip_connection_mode" {
+  description = "SIP signaling mode. registration preserves the legacy REGISTER flow; ip_to_ip requires an exact no-register peer binding."
+  type        = string
+  default     = "registration"
+  nullable    = false
+
+  validation {
+    condition     = contains(["registration", "ip_to_ip"], var.sip_connection_mode)
+    error_message = "sip_connection_mode must be registration or ip_to_ip."
+  }
+}
+
+variable "sip_ip_to_ip_gate" {
+  description = "Separate G3 approval for bounded no-register IP-to-IP SIP with exact peer detachment cleanup."
+  type        = bool
+  default     = false
+  nullable    = false
+
+  validation {
+    condition = !var.sip_ip_to_ip_gate || (
+      var.sip_connection_mode == "ip_to_ip" &&
+      !var.sip_register_gate &&
+      var.dependency_manifest_gate &&
+      var.candidate_gate &&
+      var.endpoint_identity_gate &&
+      var.cost_gate &&
+      var.live_window_gate &&
+      var.network_path_arm_gate &&
+      var.supplier_signaling_ipv4_cidr != null &&
+      var.supplier_signaling_remote_udp_port == 5060 &&
+      var.candidate_sip_listen_udp_port != null &&
+      var.supplier_rtp_evidence != null &&
+      var.activation_receipt != null &&
+      try(var.activation_receipt.sip_connection_mode == "ip_to_ip", false) &&
+      var.g008_execution_trigger != null &&
+      var.g008_external_iam_provisioning_receipt != null &&
+      try(var.g009_candidate_receipt.execution_runner_receipt_sha256 != null, false)
+    )
+    error_message = "sip_ip_to_ip_gate requires the no-register mode, exact peer /32:5060 binding, bounded activation authority, external IAM receipt, and immutable execution trigger."
+  }
+}
+
 variable "sip_register_gate" {
   description = "Separate G3 approval for one bounded SIP REGISTER operation."
   type        = bool
   default     = false
   nullable    = false
+
+  validation {
+    condition     = !var.sip_register_gate || var.sip_connection_mode == "registration"
+    error_message = "sip_register_gate is valid only in registration mode."
+  }
 
   validation {
     condition = !var.sip_register_gate || (
@@ -1427,7 +1494,7 @@ variable "rtp_gate" {
 
   validation {
     condition = !var.rtp_gate || (
-      var.sip_register_gate &&
+      (var.sip_register_gate || var.sip_ip_to_ip_gate) &&
       var.supplier_rtp_evidence != null &&
       var.g008_execution_trigger != null &&
       try(var.g009_candidate_receipt.execution_runner_receipt_sha256 != null, false)

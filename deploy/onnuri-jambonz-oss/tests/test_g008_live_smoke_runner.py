@@ -83,6 +83,7 @@ def config(tmp_path: Path) -> runner.Config:
         request_mode="diagnostic",
         answer_hook_url="https://hooks.invalid/answer",
         status_hook_url="https://hooks.invalid/status",
+        sip_mode="registration",
         execution_bundle_path=tmp_path / "execution-bundle.json",
     )
 
@@ -773,6 +774,9 @@ def execution_request() -> dict:
         "answer_hook_url": "https://hooks.invalid/answer",
         "status_hook_url": "https://hooks.invalid/status",
         "contingency_direction": None,
+        "sip_mode": "registration",
+        "source_external_ip": None,
+        "peer_binding_digest": None,
     }
 
 def test_owned_target_binding_rejects_swapped_private_target(tmp_path: Path) -> None:
@@ -832,6 +836,62 @@ def test_execution_request_loads_exact_contract_and_fixed_endpoints(tmp_path: Pa
     assert "G008_INBOUND_PATH" not in source
     assert "contingency_direction" in source
     assert "owned_target_sha256" in source
+    assert "peer_binding_digest" in source
+
+
+def ip_to_ip_config(tmp_path: Path) -> runner.Config:
+    subject = config(tmp_path)
+    source_external_ip = "203.0.113.10"
+    owned_target_sha256 = hashlib.sha256(b"target").hexdigest()
+    peer_binding_digest = hashlib.sha256(
+        runner.canonical(
+            {
+                "source_external_ip": source_external_ip,
+                "peer_cidr": f"{source_external_ip}/32",
+                "peer_port": 5060,
+                "peer_transport": "udp",
+                "owned_target_sha256": owned_target_sha256,
+            }
+        )
+    ).hexdigest()
+    object.__setattr__(subject, "sip_mode", "ip_to_ip")
+    object.__setattr__(subject, "source_external_ip", source_external_ip)
+    object.__setattr__(subject, "peer_binding_digest", peer_binding_digest)
+    return subject
+
+
+def test_ip_to_ip_mode_uses_exact_peer_without_registration_and_detaches(tmp_path: Path) -> None:
+    api = FakeApi()
+    subject = runner.Runner(
+        ip_to_ip_config(tmp_path), api, FakeBarrier(), FakeSecrets(), FakeBroker()
+    )
+
+    subject.run()
+
+    paths = [path for path, _, _ in api.calls]
+    assert "/registration/begin" not in paths
+    assert paths.count("/v1/g008/ip-peer/attach") == 1
+    assert paths.count("/v1/g008/ip-peer/detach") == 1
+    attach = next(payload for path, payload, _ in api.calls if path == "/v1/g008/ip-peer/attach")
+    assert attach["peer_cidr"] == "203.0.113.10/32"
+    assert attach["peer_port"] == 5060
+    assert attach["peer_transport"] == "udp"
+    assert attach["retry_count"] == 0
+    assert attach["concurrency_count"] == 1
+    assert attach["deadline_seconds"] == 60
+    assert [receipt["payload"]["stage"] for receipt in subject.stage_receipts] == [
+        "outbound_call", "inbound_call"
+    ]
+
+
+@pytest.mark.parametrize("source_ip", ["10.0.0.1", "127.0.0.1", "2001:db8::1"])
+def test_ip_to_ip_request_rejects_non_external_or_non_ipv4_source(tmp_path: Path, source_ip: str) -> None:
+    request = execution_request()
+    request["sip_mode"] = "ip_to_ip"
+    request["source_external_ip"] = source_ip
+    request["peer_binding_digest"] = D
+    with pytest.raises(runner.RunnerError, match="execution_request"):
+        runner.Config.load(request_environment(tmp_path, runner.canonical(request)))
 
 
 

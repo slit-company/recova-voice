@@ -375,7 +375,15 @@ class RedactedSmokeStatus(_StrictModel):
     remaining_attempts: int = Field(ge=0, le=3)
     max_duration_seconds: Literal[60]
     attempts: list[RedactedAttemptStatus] = Field(max_length=3)
-ExecutionStage = Literal["register", "outbound_call", "inbound_call", "unregister"]
+ExecutionMode = Literal["legacy_registration", "ip_to_ip_no_register"]
+ExecutionStage = Literal[
+    "register",
+    "peer_attach",
+    "outbound_call",
+    "inbound_call",
+    "unregister",
+    "peer_detach",
+]
 ExecutionState = Literal[
     "sealed",
     "running",
@@ -390,9 +398,11 @@ ExecutionStageState = Literal[
 ]
 _STAGE_ORDINALS = {
     "register": 1,
+    "peer_attach": 1,
     "outbound_call": 2,
     "inbound_call": 3,
     "unregister": 4,
+    "peer_detach": 4,
 }
 RedactedTerminalClass = Literal[
     "authority_unavailable",
@@ -401,6 +411,8 @@ RedactedTerminalClass = Literal[
     "contract_mismatch",
     "expired",
     "inbound_bound",
+    "peer_attached",
+    "peer_detached",
     "registered",
     "replay",
     "stock_unavailable",
@@ -430,13 +442,13 @@ class _ExecutionBinding(_StrictModel):
 
 class ExecutionSealRequest(_ExecutionBinding):
     schema_version: Literal["recova-g008-execution-seal-v1"]
+    execution_mode: ExecutionMode = "legacy_registration"
     destination_hmac_digest: Digest = Field(pattern=r"^[0-9a-f]{64}$")
-    stages: tuple[
-        Literal["register"],
-        Literal["outbound_call"],
-        Literal["inbound_call"],
-        Literal["unregister"],
-    ]
+    owned_target_digest: Digest | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    source_external_ipv4: str | None = None
+    peer_signaling_ipv4_cidr: str | None = None
+    peer_signaling_udp_port: int | None = Field(default=None, ge=1, le=65535)
+    stages: tuple[ExecutionStage, ExecutionStage, ExecutionStage, ExecutionStage]
     live_window_starts_at: datetime
     live_window_expires_at: datetime
     retry_count: Literal[0]
@@ -456,21 +468,50 @@ class ExecutionSealRequest(_ExecutionBinding):
         return value.astimezone(timezone.utc)
 
     @model_validator(mode="after")
-    def require_positive_live_window(self) -> ExecutionSealRequest:
+    def require_mode_binding(self) -> ExecutionSealRequest:
         if self.live_window_expires_at <= self.live_window_starts_at:
             raise ValueError("live window expiry must follow its start")
+        expected_stages = (
+            ("register", "outbound_call", "inbound_call", "unregister")
+            if self.execution_mode == "legacy_registration"
+            else ("peer_attach", "outbound_call", "inbound_call", "peer_detach")
+        )
+        if self.stages != expected_stages:
+            raise ValueError("execution stages must match execution mode")
+        network_values = (
+            self.source_external_ipv4,
+            self.peer_signaling_ipv4_cidr,
+            self.peer_signaling_udp_port,
+            self.owned_target_digest,
+        )
+        if self.execution_mode == "legacy_registration":
+            if any(value is not None for value in network_values):
+                raise ValueError("IP-to-IP binding is invalid for legacy registration")
+            return self
+        import ipaddress
+
+        if any(value is None for value in network_values):
+            raise ValueError("IP-to-IP mode requires exact source, peer, and owned target")
+        source = ipaddress.ip_address(self.source_external_ipv4)
+        peer = ipaddress.ip_network(self.peer_signaling_ipv4_cidr, strict=True)
+        if source.version != 4 or peer.version != 4 or peer.prefixlen != 32:
+            raise ValueError("IP-to-IP mode requires canonical IPv4 and peer /32")
+        if self.source_external_ipv4 != str(source) or self.peer_signaling_ipv4_cidr != str(peer):
+            raise ValueError("IP-to-IP addresses must be canonical")
+        if self.peer_signaling_udp_port != 5060:
+            raise ValueError("IP-to-IP peer signaling port must be 5060/UDP")
         return self
 
 
 class ExecutionSealReceipt(_ExecutionBinding):
     schema_version: Literal["recova-g008-execution-seal-v1"]
+    execution_mode: ExecutionMode = "legacy_registration"
     destination_hmac_digest: Digest = Field(pattern=r"^[0-9a-f]{64}$")
-    stages: tuple[
-        Literal["register"],
-        Literal["outbound_call"],
-        Literal["inbound_call"],
-        Literal["unregister"],
-    ]
+    owned_target_digest: Digest | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    source_external_ipv4: str | None = None
+    peer_signaling_ipv4_cidr: str | None = None
+    peer_signaling_udp_port: int | None = Field(default=None, ge=1, le=65535)
+    stages: tuple[ExecutionStage, ExecutionStage, ExecutionStage, ExecutionStage]
     live_window_starts_at: datetime
     live_window_expires_at: datetime
     retry_count: Literal[0]
@@ -485,27 +526,14 @@ class ExecutionSealReceipt(_ExecutionBinding):
     completed_at: datetime | None = None
     contained_at: datetime | None = None
     terminal_class: RedactedTerminalClass | None = None
-    final_evidence_digest: Digest | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
-    final_evidence_signature_digest: Digest | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
-    final_evidence_key_digest: Digest | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
+    final_evidence_digest: Digest | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    final_evidence_signature_digest: Digest | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    final_evidence_key_digest: Digest | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     final_evidence_key_id: Identifier | None = None
-    containment_evidence_digest: Digest | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
-    containment_evidence_signature_digest: Digest | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
-    containment_evidence_key_digest: Digest | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
+    containment_evidence_digest: Digest | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    containment_evidence_signature_digest: Digest | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    containment_evidence_key_digest: Digest | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     containment_evidence_key_id: Identifier | None = None
-
 
 class ExecutionStageStartRequest(_ExecutionBinding):
     stage: ExecutionStage
@@ -529,20 +557,17 @@ class ExecutionStageFinalizeRequest(ExecutionStageStartRequest):
 
     @model_validator(mode="after")
     def require_generic_stage(self) -> ExecutionStageFinalizeRequest:
-        if (self.stage, self.ordinal) not in {
-            ("outbound_call", 2),
-            ("inbound_call", 3),
-        }:
+        if self.stage in {"register", "unregister"}:
             raise ValueError("terminal registration stages require signed attestation")
         return self
 
     @model_validator(mode="after")
     def require_stage_terminal_class(self) -> ExecutionStageFinalizeRequest:
         succeeded_classes = {
-            "register": "registered",
+            "peer_attach": "peer_attached",
             "outbound_call": "call_completed",
             "inbound_call": "inbound_bound",
-            "unregister": "unregistered",
+            "peer_detach": "peer_detached",
         }
         if self.stage_state == "succeeded":
             if self.terminal_class != succeeded_classes[self.stage]:
@@ -590,17 +615,17 @@ class ExecutionStageReceipt(_ExecutionBinding):
             or self.registration_operation_uuid is not None
         )
         is_terminal_registration = (
-            self.ordinal in {1, 4}
+            self.stage in {"register", "unregister"}
             and self.state in {"succeeded", "failed", "contained"}
         )
         if _STAGE_ORDINALS[self.stage] != self.ordinal:
             raise ValueError("stage ordinal mismatch")
         if partially_linked != linked or (is_terminal_registration and not linked):
             raise ValueError("terminal registration stage identity is incomplete")
-        if self.prior_register_gate_id is not None and self.ordinal != 4:
+        if self.prior_register_gate_id is not None and self.stage != "unregister":
             raise ValueError("prior register identity is valid only for unregister")
         if (
-            self.ordinal == 4
+            self.stage == "unregister"
             and self.state in {"succeeded", "failed", "contained"}
             and self.prior_register_gate_id is None
         ):

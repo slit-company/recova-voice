@@ -72,6 +72,7 @@ def context():
         "schema_version": "recova-phase-c-live-context.v1", "project_id": "slit-497603", "region": "asia-northeast3",
         "run_id": "phase-c-test", "activation_nonce": "0123456789abcdef", "successor_review_payload_digest": f"sha256:{H}", "live_window_start_utc": timestamp(-20), "live_window_end_utc": timestamp(1200),
         "phase_b": {"manifest_sha256": H, "network_self_link": "https://www.googleapis.com/compute/v1/projects/slit-497603/global/networks/phase-b", "subnet_self_link": "https://www.googleapis.com/compute/v1/projects/slit-497603/regions/asia-northeast3/subnetworks/phase-b", "subnet_ipv4_cidr": "10.73.96.0/24", "private_ip_google_access": True, "ingress_deny_rule_name": "deny-in", "egress_deny_rule_name": "deny-out", "phase_b_source_sha256": H2, "backend_identity": "gcs://phase-c-state/state", "backend_generation": "1", "backend_serial": "0", "canonical_state_sha256": H3, "non_sensitive_outputs_sha256": H4, "prearm_canonical_inventory_sha256": H, "prearm_verification_receipt_sha256": H2},
+        "execution_contract": {"sip_connection_mode": "registration", "source_external_ipv4": "", "peer_signaling_ipv4_cidr": "", "peer_signaling_udp_port": "0", "owned_target_sha256": "", "stage_sequence": ["register", "outbound_call", "inbound_call", "unregister"], "register_attempt_budget": "1", "unregister_attempt_budget": "1", "total_call_attempt_budget": "3", "retry_count": "0", "concurrency_count": "1", "call_deadline_seconds": "60", "peer_detach_required": False, "containment_cleanup_required": True},
         "supplier": {"signaling_ipv4_cidr": "203.0.113.8/32", "signaling_udp_port": "5060", "remote_ipv4_cidrs": ["203.0.113.8/32"], "remote_rtp_udp_port_min": "10000", "remote_rtp_udp_port_max": "10010", "remote_rtcp_udp_port_min": "10011", "remote_rtcp_udp_port_max": "10020", "max_concurrent_calls": "1", "calls_per_second": "1", "evidence_sha256": H, "endpoint_binding_canonical_sha256": H2, "endpoint_binding_verification_sha256": H3, "customer_external_ipv4": "203.0.113.10", "bound_signaling_ipv4_cidr": "203.0.113.8/32", "bound_signaling_remote_udp_port": "5060", "candidate_sip_listen_udp_port": "5090", "bound_media_ipv4_cidrs": ["203.0.113.8/32"], "bound_remote_rtp_udp_port_min": "10000", "bound_remote_rtp_udp_port_max": "10010", "bound_remote_rtcp_udp_port_min": "10011", "bound_remote_rtcp_udp_port_max": "10020"},
         "host_policy": {"policy_sha256": H, "tuple_binding_sha256": H2, "verification_receipt_sha256": H3, "candidate_sip_listen_udp_port": "5090", "candidate_local_rtp_udp_port_min": "40000", "candidate_local_rtp_udp_port_max": "40009", "candidate_local_rtcp_udp_port_min": "41000", "candidate_local_rtcp_udp_port_max": "41009", "issued_at_utc": timestamp(-30), "expires_at_utc": timestamp(1300)},
         "recova_destination": {"canonical_receipt_sha256": H, "verification_receipt_sha256": H2, "control_ipv4_cidrs": ["10.20.30.41/32", "10.20.30.42/32"], "media_ipv4_cidrs": ["10.20.30.43/32"], "f1_source_ipv4_cidrs": ["10.20.30.40/32"], "control_endpoint_sha256": H2, "media_endpoint_sha256": H3, "certificate_binding_sha256": H4, "f1_mtls_endpoint_path": "https://f1.recova.internal/dispatch", "f2_https_endpoint_path": "https://f2.recova.internal/callback", "f3_wss_endpoint_path": "wss://f3.recova.internal/media", "f4_https_endpoint_path": "https://f4.recova.internal/secrets", "f5_https_endpoint_path": "https://f5.recova.internal/logs", "f12_mtls_endpoint_path": "https://f12.recova.internal/authority"},
@@ -169,6 +170,47 @@ def test_valid_bundle_verifies_all_eight_source_roles(tmp_path, authority, conte
     assert set(result) == {"verified", "schema_version", "bundle_sha256", "aggregate_payload_sha256", "iam_provisioning_payload_sha256", "authorized_context_sha256", "run_id_digest", "activation_nonce_digest", "valid_from_utc", "expires_at_utc", "effective_cutoff_utc", "trusted_keyset_sha256"}
     iam_payload = bundle["receipts"]["iam_provisioning"]["payload"]
     assert result["iam_provisioning_payload_sha256"] == sha(canonical(iam_payload).encode())
+
+
+def test_ip_to_ip_context_binds_exact_source_peer_target_and_cleanup(tmp_path, authority, context):
+    ip_context = copy.deepcopy(context)
+    ip_context["execution_contract"] = {
+        "sip_connection_mode": "ip_to_ip", "source_external_ipv4": ip_context["supplier"]["customer_external_ipv4"],
+        "peer_signaling_ipv4_cidr": ip_context["supplier"]["signaling_ipv4_cidr"], "peer_signaling_udp_port": "5060",
+        "owned_target_sha256": H4, "stage_sequence": ["outbound_call", "inbound_call", "peer_detach"],
+        "register_attempt_budget": "0", "unregister_attempt_budget": "0", "total_call_attempt_budget": "3",
+        "retry_count": "0", "concurrency_count": "1", "call_deadline_seconds": "60",
+        "peer_detach_required": True, "containment_cleanup_required": True,
+    }
+    result = verify(tmp_path, make_bundle(ip_context, authority), ip_context)
+    assert result["verified"] == "true"
+
+
+@pytest.mark.parametrize(("field", "value", "error"), [
+    ("source_external_ipv4", "203.0.113.11", "context_execution_contract_binding"),
+    ("peer_signaling_ipv4_cidr", "203.0.113.9/32", "context_execution_contract_binding"),
+    ("peer_signaling_udp_port", "5061", "context_execution_contract_ip_to_ip"),
+    ("owned_target_sha256", "not-a-digest", "context_execution_contract_target"),
+    ("total_call_attempt_budget", "4", "context_execution_contract_budget"),
+    ("retry_count", "1", "context_execution_contract_budget"),
+    ("concurrency_count", "2", "context_execution_contract_budget"),
+    ("call_deadline_seconds", "61", "context_execution_contract_budget"),
+    ("peer_detach_required", False, "context_execution_contract_ip_to_ip"),
+    ("containment_cleanup_required", False, "context_execution_contract_budget"),
+])
+def test_ip_to_ip_context_rejects_unbounded_or_unbound_values(tmp_path, context, field, value, error):
+    ip_context = copy.deepcopy(context)
+    ip_context["execution_contract"] = {
+        "sip_connection_mode": "ip_to_ip", "source_external_ipv4": ip_context["supplier"]["customer_external_ipv4"],
+        "peer_signaling_ipv4_cidr": ip_context["supplier"]["signaling_ipv4_cidr"], "peer_signaling_udp_port": "5060",
+        "owned_target_sha256": H4, "stage_sequence": ["outbound_call", "inbound_call", "peer_detach"],
+        "register_attempt_budget": "0", "unregister_attempt_budget": "0", "total_call_attempt_budget": "3",
+        "retry_count": "0", "concurrency_count": "1", "call_deadline_seconds": "60",
+        "peer_detach_required": True, "containment_cleanup_required": True,
+    }
+    ip_context["execution_contract"][field] = value
+    with pytest.raises(verifier.VerificationError, match=error):
+        verifier._validate_context(ip_context)
 
 
 def test_null_iam_provisioning_pre_live_omits_role_and_returns_empty_digest(

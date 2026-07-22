@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -34,7 +35,12 @@ from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 
 SCHEMA_VERSION = "recova-g008-execution-seal-v1"
 EXECUTION_REQUEST_SCHEMA = "recova-g008-execution-request-v1"
-STAGES = (("register", 1), ("outbound_call", 2), ("inbound_call", 3), ("unregister", 4))
+LEGACY_STAGES = (("register", 1), ("outbound_call", 2), ("inbound_call", 3), ("unregister", 4))
+IP_TO_IP_STAGES = (("outbound_call", 1), ("inbound_call", 2))
+SIP_MODES = {"registration", "ip_to_ip"}
+PEER_PORT = 5060
+PEER_TRANSPORT = "udp"
+STAGES = LEGACY_STAGES
 KEYSET_PATH = Path("/opt/g008/trusted/phase_c_live_preflight_v1.json")
 TRUSTED_KEYSET_SHA256 = "00645f3af8230c742951c12f17a713afde209de12182cd6e3722ac59445507aa"
 EXECUTION_KEY_ID = "recova-g008-authority-v1"
@@ -610,6 +616,9 @@ class Config:
     request_mode: str
     answer_hook_url: str
     status_hook_url: str
+    sip_mode: str = "registration"
+    source_external_ip: str | None = None
+    peer_binding_digest: str | None = None
     contingency_direction: str | None = None
     execution_bundle_path: Path = EXECUTION_BUNDLE_PATH
 
@@ -632,6 +641,7 @@ class Config:
             "application_id", "run_id", "attempt_id", "authority_deadline",
             "idempotency_key", "route_evidence_handle", "route_profile_digest",
             "request_mode", "answer_hook_url", "status_hook_url", "contingency_direction",
+            "sip_mode", "source_external_ip", "peer_binding_digest",
         }
         if (
             not isinstance(request, dict)
@@ -673,6 +683,19 @@ class Config:
                 or DIGEST_RE.fullmatch(request["route_profile_digest"]) is None
             ):
                 raise ValueError
+            if request["sip_mode"] not in SIP_MODES:
+                raise ValueError
+            source_external_ip = request["source_external_ip"]
+            peer_binding_digest = request["peer_binding_digest"]
+            if request["sip_mode"] == "registration":
+                if source_external_ip is not None or peer_binding_digest is not None:
+                    raise ValueError
+            else:
+                parsed_source = ipaddress.ip_address(source_external_ip)
+                if parsed_source.version != 4 or not parsed_source.is_global:
+                    raise ValueError
+                if not isinstance(peer_binding_digest, str) or DIGEST_RE.fullmatch(peer_binding_digest) is None:
+                    raise ValueError
             if request["contingency_direction"] not in {None, "outbound", "inbound"}:
                 raise ValueError
         except (KeyError, TypeError, ValueError) as exc:
@@ -690,6 +713,7 @@ class Config:
             request["idempotency_key"], request["route_evidence_handle"],
             request["route_profile_digest"], request["request_mode"],
             request["answer_hook_url"], request["status_hook_url"],
+            request["sip_mode"], request["source_external_ip"], request["peer_binding_digest"],
             request["contingency_direction"],
         )
 
@@ -702,11 +726,36 @@ class Config:
             "gate_envelope_digest": self.gate_digest,
         }
 
+    def stages(self) -> tuple[tuple[str, int], ...]:
+        return LEGACY_STAGES if self.sip_mode == "registration" else IP_TO_IP_STAGES
+
+    def peer_binding(self) -> dict[str, Any]:
+        if self.sip_mode != "ip_to_ip" or self.source_external_ip is None:
+            raise RunnerError("peer_binding_unavailable")
+        return {
+            **self.binding(),
+            "source_external_ip": self.source_external_ip,
+            "peer_cidr": f"{self.source_external_ip}/32",
+            "peer_port": PEER_PORT,
+            "peer_transport": PEER_TRANSPORT,
+            "owned_target_sha256": self.owned_target_sha256,
+            "peer_binding_digest": self.peer_binding_digest,
+        }
+
 
 def validate_owned_target_binding(config: Config, secret_files: SecretFiles) -> None:
     try:
         read_private(secret_files.paths["sip-username"])
         owned_target = read_private(secret_files.paths["owned-target"])
+        peer_material = canonical(
+            {
+                "source_external_ip": config.source_external_ip,
+                "peer_cidr": f"{config.source_external_ip}/32" if config.source_external_ip else None,
+                "peer_port": PEER_PORT,
+                "peer_transport": PEER_TRANSPORT,
+                "owned_target_sha256": config.owned_target_sha256,
+            }
+        )
         authority_deadline = datetime.fromisoformat(
             config.authority_deadline.replace("Z", "+00:00")
         )
@@ -716,6 +765,12 @@ def validate_owned_target_binding(config: Config, secret_files: SecretFiles) -> 
             or config.request_mode != "diagnostic"
             or not hmac.compare_digest(
                 hashlib.sha256(owned_target).hexdigest(), config.owned_target_sha256
+            )
+            or (
+                config.sip_mode == "ip_to_ip"
+                and not hmac.compare_digest(
+                    hashlib.sha256(peer_material).hexdigest(), config.peer_binding_digest or ""
+                )
             )
         ):
             raise ValueError
@@ -739,6 +794,7 @@ class Runner:
         self.broker = broker
         self.register_completed = False
         self.runtime_started = False
+        self.peer_attached = False
         self.contained = False
         self.active_calls: list[dict[str, Any]] = []
         self.registration_attestation: str | None = None
@@ -1011,6 +1067,38 @@ class Runner:
             return
         self._stage("unregister", 4, lambda deadline: self._registration("unregister", deadline))
 
+    def _attach_peer(self, deadline: float | None) -> dict[str, Any]:
+        if deadline is None or self.config.sip_mode != "ip_to_ip" or self.peer_attached:
+            raise RunnerError("peer_attach_rejected")
+        binding = self.config.peer_binding()
+        acknowledgement = self.api.post(
+            "/v1/g008/ip-peer/attach",
+            {**binding, "retry_count": 0, "concurrency_count": 1, "deadline_seconds": 60},
+            facade=True,
+            deadline=deadline,
+        )
+        self._signed_payload(
+            acknowledgement,
+            kind="ip_peer_attachment",
+            expected={**binding, "state": "attached"},
+        )
+        self.peer_attached = True
+        return acknowledgement
+
+    def _detach_peer(self, deadline: float) -> None:
+        if not self.peer_attached:
+            return
+        binding = self.config.peer_binding()
+        acknowledgement = self.api.post(
+            "/v1/g008/ip-peer/detach", binding, facade=True, deadline=deadline
+        )
+        self._signed_payload(
+            acknowledgement,
+            kind="ip_peer_detachment",
+            expected={**binding, "state": "detached"},
+        )
+        self.peer_attached = False
+
 
     def _call(self, direction: str, deadline: float | None, *, contingency: bool = False) -> dict[str, Any]:
         if deadline is None:
@@ -1142,6 +1230,10 @@ class Runner:
             except Exception as exc:
                 failures.append(exc)
         try:
+            self._detach_peer(deadline)
+        except Exception as exc:
+            failures.append(exc)
+        try:
             acknowledgement = self.api.post(
                 "/execution/contain",
                 {**binding, "containment_class": "verified_terminal"},
@@ -1163,6 +1255,7 @@ class Runner:
 
     def _execute(self) -> None:
         binding = self.config.binding()
+        stages = self.config.stages()
         nonce_request = {**binding, "trusted_keyset_digest": TRUSTED_KEYSET_SHA256}
         consumed = self.api.post("/execution/nonce/consume", nonce_request)
         nonce_payload = self._signed_payload(
@@ -1176,7 +1269,7 @@ class Runner:
             **binding,
             "schema_version": SCHEMA_VERSION,
             "destination_hmac_digest": self.config.destination_digest,
-            "stages": [stage for stage, _ordinal in STAGES],
+            "stages": [stage for stage, _ordinal in stages],
             "retry_count": 0,
             "concurrency_count": 1,
             "call_deadline_seconds": STAGE_DEADLINE_SECONDS,
@@ -1201,17 +1294,24 @@ class Runner:
         }
         if set(seal_payload) != seal_fields:
             raise RunnerError("execution_seal_schema_rejected")
-        self.broker.configure_attestation(
-            seal_payload["registration_attestation_key_id"],
-            seal_payload["registration_attestation_public_key_sha256"],
-        )
+        if self.config.sip_mode == "registration":
+            self.broker.configure_attestation(
+                seal_payload["registration_attestation_key_id"],
+                seal_payload["registration_attestation_public_key_sha256"],
+            )
         label("sealed")
         self.runtime_started = True
         try:
-            self._stage("register", 1, lambda deadline: self._registration("register", deadline))
-            self._stage("outbound_call", 2, self._outbound)
-            self._stage("inbound_call", 3, self._inbound)
-            self._stage("unregister", 4, lambda deadline: self._registration("unregister", deadline))
+            if self.config.sip_mode == "registration":
+                self._stage("register", 1, lambda deadline: self._registration("register", deadline))
+            else:
+                self._attach_peer(time.monotonic() + STAGE_DEADLINE_SECONDS)
+            outbound_ordinal = 2 if self.config.sip_mode == "registration" else 1
+            inbound_ordinal = 3 if self.config.sip_mode == "registration" else 2
+            self._stage("outbound_call", outbound_ordinal, self._outbound)
+            self._stage("inbound_call", inbound_ordinal, self._inbound)
+            if self.config.sip_mode == "registration":
+                self._stage("unregister", 4, lambda deadline: self._registration("unregister", deadline))
             if (
                 not 2 <= self.provider_call_attempts <= 3
                 or len(self.provider_call_ids) != 2
@@ -1243,7 +1343,7 @@ class Runner:
                     "containment_receipt": self.containment_receipt,
                 },
             )
-            if payload.get("stage_receipts") != self.stage_receipts or len(self.stage_receipts) != len(STAGES):
+            if payload.get("stage_receipts") != self.stage_receipts or len(self.stage_receipts) != len(stages):
                 raise RunnerError("execution_evidence_binding_rejected")
             bundle = {
                 "schema_version": "recova-g008-execution-bundle-v2",

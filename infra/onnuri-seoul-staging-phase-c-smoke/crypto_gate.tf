@@ -2,6 +2,7 @@ locals {
   phase_c_live_crypto_enabled = var.phase_c_live_preflight_bundle_path != null
   g008_external_iam_live_requested = (
     var.sip_register_gate ||
+    var.sip_ip_to_ip_gate ||
     var.rtp_gate ||
     var.outbound_call_gate ||
     var.inbound_call_gate
@@ -52,6 +53,22 @@ locals {
       non_sensitive_outputs_sha256       = var.phase_b_dependency.non_sensitive_outputs_sha256
       prearm_canonical_inventory_sha256  = var.prearm_inventory_receipt.canonical_inventory_sha256
       prearm_verification_receipt_sha256 = var.prearm_inventory_receipt.verification_receipt_sha256
+    }
+    execution_contract = {
+      sip_connection_mode          = var.activation_receipt.sip_connection_mode
+      source_external_ipv4         = try(var.activation_receipt.source_external_ipv4, "")
+      peer_signaling_ipv4_cidr     = try(var.activation_receipt.peer_signaling_ipv4_cidr, "")
+      peer_signaling_udp_port      = tostring(try(var.activation_receipt.peer_signaling_udp_port, 0))
+      owned_target_sha256          = try(var.activation_receipt.owned_target_sha256, "")
+      stage_sequence               = var.activation_receipt.stage_sequence
+      register_attempt_budget      = tostring(var.activation_receipt.register_attempt_budget)
+      unregister_attempt_budget    = tostring(var.activation_receipt.unregister_attempt_budget)
+      total_call_attempt_budget    = tostring(var.activation_receipt.total_call_attempt_budget)
+      retry_count                  = tostring(var.activation_receipt.retry_count)
+      concurrency_count            = tostring(var.activation_receipt.concurrency_count)
+      call_deadline_seconds        = tostring(var.activation_receipt.call_deadline_seconds)
+      peer_detach_required         = var.activation_receipt.sip_connection_mode == "ip_to_ip"
+      containment_cleanup_required = true
     }
     supplier = {
       signaling_ipv4_cidr                  = var.supplier_rtp_evidence.signaling_ipv4_cidr

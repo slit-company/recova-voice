@@ -6086,6 +6086,24 @@ class TelephonyNumberInventoryClient(BaseDBClient):
             "gate_envelope_digest",
         }
 
+    @staticmethod
+    def _g008_expected_stages(execution_mode: str) -> list[tuple[int, str]]:
+        if execution_mode == "legacy_registration":
+            return [
+                (1, "register"),
+                (2, "outbound_call"),
+                (3, "inbound_call"),
+                (4, "unregister"),
+            ]
+        if execution_mode == "ip_to_ip_no_register":
+            return [
+                (1, "peer_attach"),
+                (2, "outbound_call"),
+                (3, "inbound_call"),
+                (4, "peer_detach"),
+            ]
+        raise TelephonyNumberInventoryConflictError("g008_execution_mode_invalid")
+
     @classmethod
     def _validate_g008_common(cls, payload: dict[str, Any]) -> None:
         if not isinstance(payload.get("organization_id"), int) or isinstance(
@@ -6151,12 +6169,7 @@ class TelephonyNumberInventoryClient(BaseDBClient):
             .scalars()
             .all()
         )
-        expected_stages = [
-            (1, "register"),
-            (2, "outbound_call"),
-            (3, "inbound_call"),
-            (4, "unregister"),
-        ]
+        expected_stages = self._g008_expected_stages(seal.execution_mode)
         if [(row.ordinal, row.stage) for row in stages] != expected_stages:
             raise TelephonyNumberInventoryConflictError("g008_execution_stage_set_invalid")
         return seal, stages
@@ -6173,6 +6186,11 @@ class TelephonyNumberInventoryClient(BaseDBClient):
             "execution_nonce_digest": seal.execution_nonce_digest,
             "candidate_digest": seal.candidate_digest,
             "gate_envelope_digest": seal.gate_envelope_digest,
+            "execution_mode": seal.execution_mode,
+            "owned_target_digest": seal.owned_target_digest,
+            "source_external_ipv4": seal.source_external_ipv4,
+            "peer_signaling_ipv4_cidr": seal.peer_signaling_ipv4_cidr,
+            "peer_signaling_udp_port": seal.peer_signaling_udp_port,
             "destination_hmac_digest": seal.destination_hmac_digest,
             "reserved_inbound_did_digest": seal.reserved_inbound_did_digest,
             "reserved_inbound_caller_digest": seal.reserved_inbound_caller_digest,
@@ -6300,67 +6318,74 @@ class TelephonyNumberInventoryClient(BaseDBClient):
             .all()
         )
         gates_by_stage_id = {gate.execution_stage_id: gate for gate in gates}
-        register_gate = gates_by_stage_id.get(stages[0].id)
-        unregister_gate = gates_by_stage_id.get(stages[3].id)
-        unexpected_gate = any(
-            gate.execution_stage_id not in {stages[0].id, stages[3].id}
-            for gate in gates
-        )
-        if require_completed_linkage:
-            linkage_invalid = (
-                unexpected_gate
-                or len(gates) != 2
-                or register_gate is None
-                or unregister_gate is None
-                or register_gate.operation_kind != "register"
-                or unregister_gate.operation_kind != "unregister"
-                or unregister_gate.unregisters_gate_id != register_gate.id
-                or register_gate.state != "completed"
-                or unregister_gate.state != "completed"
-            )
+        if seal.execution_mode == "ip_to_ip_no_register":
+            if gates:
+                raise TelephonyNumberInventoryConflictError(
+                    "g008_registration_linkage_invalid"
+                )
+            registration_linkage: list[dict[str, Any]] = []
         else:
-            linkage_invalid = (
-                unexpected_gate
-                or (
-                    register_gate is not None
-                    and register_gate.operation_kind != "register"
-                )
-            ) or (
-                unregister_gate is not None
-                and (
-                    unregister_gate.operation_kind != "unregister"
+            register_gate = gates_by_stage_id.get(stages[0].id)
+            unregister_gate = gates_by_stage_id.get(stages[3].id)
+            unexpected_gate = any(
+                gate.execution_stage_id not in {stages[0].id, stages[3].id}
+                for gate in gates
+            )
+            if require_completed_linkage:
+                linkage_invalid = (
+                    unexpected_gate
+                    or len(gates) != 2
                     or register_gate is None
+                    or unregister_gate is None
+                    or register_gate.operation_kind != "register"
+                    or unregister_gate.operation_kind != "unregister"
                     or unregister_gate.unregisters_gate_id != register_gate.id
+                    or register_gate.state != "completed"
+                    or unregister_gate.state != "completed"
                 )
-            )
-        if linkage_invalid:
-            raise TelephonyNumberInventoryConflictError(
-                "g008_registration_linkage_invalid"
-            )
-        registration_linkage = [
-            {
-                "ordinal": stage.ordinal,
-                "registration_gate_id": gate.id,
-                "operation_uuid": gate.operation_uuid,
-                "operation_kind": gate.operation_kind,
-                "unregisters_gate_id": gate.unregisters_gate_id,
-                "state": gate.state,
-                "request_digest": gate.request_digest,
-                "terminal_at": gate.terminal_at,
-                "execution_attestation_digest": gate.execution_attestation_digest,
-                "execution_attestation_signature_digest": (
-                    gate.execution_attestation_signature_digest
-                ),
-                "execution_attestation_key_digest": (
-                    gate.execution_attestation_key_digest
-                ),
-                "execution_attestation_key_id": gate.execution_attestation_key_id,
-                "execution_attested_at": gate.execution_attested_at,
-            }
-            for stage in stages
-            for gate in (gates_by_stage_id.get(stage.id),)
-            if gate is not None
-        ]
+            else:
+                linkage_invalid = (
+                    unexpected_gate
+                    or (
+                        register_gate is not None
+                        and register_gate.operation_kind != "register"
+                    )
+                ) or (
+                    unregister_gate is not None
+                    and (
+                        unregister_gate.operation_kind != "unregister"
+                        or register_gate is None
+                        or unregister_gate.unregisters_gate_id != register_gate.id
+                    )
+                )
+            if linkage_invalid:
+                raise TelephonyNumberInventoryConflictError(
+                    "g008_registration_linkage_invalid"
+                )
+            registration_linkage = [
+                {
+                    "ordinal": stage.ordinal,
+                    "registration_gate_id": gate.id,
+                    "operation_uuid": gate.operation_uuid,
+                    "operation_kind": gate.operation_kind,
+                    "unregisters_gate_id": gate.unregisters_gate_id,
+                    "state": gate.state,
+                    "request_digest": gate.request_digest,
+                    "terminal_at": gate.terminal_at,
+                    "execution_attestation_digest": gate.execution_attestation_digest,
+                    "execution_attestation_signature_digest": (
+                        gate.execution_attestation_signature_digest
+                    ),
+                    "execution_attestation_key_digest": (
+                        gate.execution_attestation_key_digest
+                    ),
+                    "execution_attestation_key_id": gate.execution_attestation_key_id,
+                    "execution_attested_at": gate.execution_attested_at,
+                }
+                for stage in stages
+                for gate in (gates_by_stage_id.get(stage.id),)
+                if gate is not None
+            ]
         return {
             "evidence_kind": evidence_kind,
             "evidence_at": evidence_at,
@@ -6373,6 +6398,12 @@ class TelephonyNumberInventoryClient(BaseDBClient):
     async def create_execution_seal(
         self, payload: dict[str, Any]
     ) -> dict[str, Any]:
+        payload = dict(payload)
+        payload.setdefault("execution_mode", "legacy_registration")
+        payload.setdefault("owned_target_digest", None)
+        payload.setdefault("source_external_ipv4", None)
+        payload.setdefault("peer_signaling_ipv4_cidr", None)
+        payload.setdefault("peer_signaling_udp_port", None)
         common = self._g008_common_keys()
         extras = {
             "schema_version",
@@ -6387,6 +6418,11 @@ class TelephonyNumberInventoryClient(BaseDBClient):
             "concurrency_count",
             "call_deadline_seconds",
             "sealed_at",
+            "execution_mode",
+            "owned_target_digest",
+            "source_external_ipv4",
+            "peer_signaling_ipv4_cidr",
+            "peer_signaling_udp_port",
         }
         self._validate_g008_payload(
             payload, required=common | extras, allowed=common | extras
@@ -6395,12 +6431,41 @@ class TelephonyNumberInventoryClient(BaseDBClient):
         if (
             payload["schema_version"] != "recova-g008-execution-seal-v1"
             or payload["stages"]
-            != ["register", "outbound_call", "inbound_call", "unregister"]
+            != [name for _, name in self._g008_expected_stages(payload["execution_mode"])]
             or payload["retry_count"] != 0
             or payload["concurrency_count"] != 1
             or payload["call_deadline_seconds"] != 60
         ):
             raise TelephonyNumberInventoryConflictError("g008_execution_policy_invalid")
+        network_values = (
+            payload["source_external_ipv4"],
+            payload["peer_signaling_ipv4_cidr"],
+            payload["peer_signaling_udp_port"],
+            payload["owned_target_digest"],
+        )
+        if payload["execution_mode"] == "legacy_registration":
+            if any(value is not None for value in network_values):
+                raise TelephonyNumberInventoryConflictError("g008_execution_mode_binding_invalid")
+        else:
+            import ipaddress
+
+            try:
+                source = ipaddress.ip_address(payload["source_external_ipv4"])
+                peer = ipaddress.ip_network(payload["peer_signaling_ipv4_cidr"], strict=True)
+            except ValueError:
+                raise TelephonyNumberInventoryConflictError(
+                    "g008_execution_mode_binding_invalid"
+                ) from None
+            if (
+                source.version != 4
+                or peer.version != 4
+                or peer.prefixlen != 32
+                or payload["source_external_ipv4"] != str(source)
+                or payload["peer_signaling_ipv4_cidr"] != str(peer)
+                or payload["peer_signaling_udp_port"] != 5060
+                or not _is_lowercase_sha256(payload["owned_target_digest"])
+            ):
+                raise TelephonyNumberInventoryConflictError("g008_execution_mode_binding_invalid")
         for key in (
             "destination_hmac_digest",
             "reserved_inbound_did_digest",
@@ -6463,6 +6528,11 @@ class TelephonyNumberInventoryClient(BaseDBClient):
                             existing.gate_envelope_digest,
                             payload["gate_envelope_digest"],
                         )
+                        and existing.execution_mode == payload["execution_mode"]
+                        and existing.owned_target_digest == payload["owned_target_digest"]
+                        and existing.source_external_ipv4 == payload["source_external_ipv4"]
+                        and existing.peer_signaling_ipv4_cidr == payload["peer_signaling_ipv4_cidr"]
+                        and existing.peer_signaling_udp_port == payload["peer_signaling_udp_port"]
                         and _digest_equal(
                             existing.destination_hmac_digest,
                             payload["destination_hmac_digest"],
@@ -6487,12 +6557,7 @@ class TelephonyNumberInventoryClient(BaseDBClient):
                         and [
                             (row.ordinal, row.stage) for row in existing_stages
                         ]
-                        == [
-                            (1, "register"),
-                            (2, "outbound_call"),
-                            (3, "inbound_call"),
-                            (4, "unregister"),
-                        ]
+                        == self._g008_expected_stages(payload["execution_mode"])
                     )
                     if exact_binding:
                         return self._g008_seal_data(existing, existing_stages)
@@ -6507,6 +6572,11 @@ class TelephonyNumberInventoryClient(BaseDBClient):
                     candidate_digest=payload["candidate_digest"],
                     gate_envelope_digest=payload["gate_envelope_digest"],
                     destination_hmac_digest=payload["destination_hmac_digest"],
+                    execution_mode=payload["execution_mode"],
+                    owned_target_digest=payload["owned_target_digest"],
+                    source_external_ipv4=payload["source_external_ipv4"],
+                    peer_signaling_ipv4_cidr=payload["peer_signaling_ipv4_cidr"],
+                    peer_signaling_udp_port=payload["peer_signaling_udp_port"],
                     reserved_inbound_did_digest=payload[
                         "reserved_inbound_did_digest"
                     ],

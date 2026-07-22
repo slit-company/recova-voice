@@ -22,6 +22,7 @@ GATES = (
     "cost_gate",
     "live_window_gate",
     "sip_register_gate",
+    "sip_ip_to_ip_gate",
     "rtp_gate",
     "outbound_call_gate",
     "inbound_call_gate",
@@ -148,6 +149,20 @@ def audit() -> None:
     require(signaling_port, "(var.supplier_signaling_remote_udp_port == null) == (var.supplier_signaling_ipv4_cidr == null)", "supplier signaling host and port nullability are not paired")
     require(signaling_port, "floor(var.supplier_signaling_remote_udp_port) == var.supplier_signaling_remote_udp_port", "supplier signaling port need not be an integer")
     require(signaling_port, "var.supplier_signaling_remote_udp_port >= 1 && var.supplier_signaling_remote_udp_port <= 65535", "supplier signaling port is not bounded")
+    mode = variable_blocks.get("sip_connection_mode", "")
+    require(mode, 'default     = "registration"', "legacy registration mode is not the default")
+    require(mode, '["registration", "ip_to_ip"]', "SIP mode is not closed to registration and ip_to_ip")
+    ip_gate = variable_blocks.get("sip_ip_to_ip_gate", "")
+    require(ip_gate, "default     = false", "IP-to-IP live gate does not default false")
+    require(ip_gate, "var.supplier_signaling_remote_udp_port == 5060", "IP-to-IP gate does not pin peer UDP/5060")
+    activation = variable_blocks.get("activation_receipt", "")
+    for field in ("source_external_ipv4", "peer_signaling_ipv4_cidr", "peer_signaling_udp_port", "owned_target_sha256"):
+        require(activation, field, f"IP-to-IP activation omits {field}")
+    require(activation, '["outbound_call", "inbound_call", "peer_detach"]', "IP-to-IP activation omits peer-detach sequence")
+    require(SOURCE, 'owned_target_sha256 == var.g008_execution_trigger.target_sha256', "IP-to-IP owned target is not bound to the sealed target digest")
+    require(SOURCE, 'source_external_ipv4 == var.supplier_endpoint_binding.customer_external_ipv4', "IP-to-IP source is not bound to the reserved external IPv4")
+    require(SOURCE, 'peer_signaling_udp_port == 5060', "IP-to-IP peer signaling is not fixed to UDP/5060")
+    require(SOURCE, 'cutoff_action                   = var.sip_connection_mode == "registration" ? "terminate_media_and_unregister" : "terminate_media_and_detach_peer"', "IP-to-IP containment does not detach the peer")
 
     candidate_port_variables = (
         ("candidate_local_rtp_port_min", None),

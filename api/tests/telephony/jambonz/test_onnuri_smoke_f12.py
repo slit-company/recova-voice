@@ -2371,6 +2371,58 @@ def _execution_seal_payload() -> dict[str, object]:
     }
 
 
+def _ip_to_ip_execution_seal_payload() -> dict[str, object]:
+    payload = _execution_seal_payload()
+    payload.update(
+        execution_mode="ip_to_ip_no_register",
+        owned_target_digest="4" * 64,
+        source_external_ipv4="198.51.100.20",
+        peer_signaling_ipv4_cidr="203.0.113.8/32",
+        peer_signaling_udp_port=5060,
+        stages=["peer_attach", "outbound_call", "inbound_call", "peer_detach"],
+    )
+    return payload
+
+
+def test_execution_seal_schema_accepts_bounded_ip_to_ip_mode() -> None:
+    request = ExecutionSealRequest.model_validate(_ip_to_ip_execution_seal_payload())
+
+    assert request.execution_mode == "ip_to_ip_no_register"
+    assert request.peer_signaling_ipv4_cidr == "203.0.113.8/32"
+    assert request.peer_signaling_udp_port == 5060
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("source_external_ipv4", "203.0.113.010"),
+        ("peer_signaling_ipv4_cidr", "203.0.113.0/24"),
+        ("peer_signaling_udp_port", 5061),
+        ("owned_target_digest", None),
+    ],
+)
+def test_execution_seal_schema_rejects_unbounded_ip_to_ip_mode(
+    field: str, value: object
+) -> None:
+    payload = _ip_to_ip_execution_seal_payload()
+    payload[field] = value
+
+    with pytest.raises(ValueError):
+        ExecutionSealRequest.model_validate(payload)
+
+
+def test_execution_seal_schema_preserves_legacy_registration_default() -> None:
+    request = ExecutionSealRequest.model_validate(_execution_seal_payload())
+
+    assert request.execution_mode == "legacy_registration"
+    assert request.stages == (
+        "register",
+        "outbound_call",
+        "inbound_call",
+        "unregister",
+    )
+
+
 def _execution_seal_receipt(
     *, state: str = "sealed", terminal_class: str | None = None
 ) -> dict[str, object]:

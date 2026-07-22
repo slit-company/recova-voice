@@ -718,6 +718,12 @@ class G008ExecutionSealModel(Base):
         default="recova-g008-execution-seal-v1",
         server_default=text("'recova-g008-execution-seal-v1'"),
     )
+    execution_mode = Column(
+        String(32),
+        nullable=False,
+        default="legacy_registration",
+        server_default=text("'legacy_registration'"),
+    )
     organization_id = Column(
         Integer, ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False
     )
@@ -725,6 +731,10 @@ class G008ExecutionSealModel(Base):
     candidate_digest = Column(String(64), nullable=False)
     gate_envelope_digest = Column(String(64), nullable=False)
     destination_hmac_digest = Column(String(64), nullable=False)
+    owned_target_digest = Column(String(64), nullable=True)
+    source_external_ipv4 = Column(String(15), nullable=True)
+    peer_signaling_ipv4_cidr = Column(String(18), nullable=True)
+    peer_signaling_udp_port = Column(Integer, nullable=True)
     reserved_inbound_did_digest = Column(String(64), nullable=False)
     reserved_inbound_caller_digest = Column(String(64), nullable=False)
     policy_digest = Column(String(64), nullable=False)
@@ -769,6 +779,21 @@ class G008ExecutionSealModel(Base):
         CheckConstraint(
             "schema_version = 'recova-g008-execution-seal-v1'",
             name="ck_g008_execution_seal_schema",
+        ),
+        CheckConstraint(
+            "execution_mode IN ('legacy_registration','ip_to_ip_no_register')",
+            name="ck_g008_execution_seal_mode",
+        ),
+        CheckConstraint(
+            "(execution_mode = 'legacy_registration' AND owned_target_digest IS NULL "
+            "AND source_external_ipv4 IS NULL AND peer_signaling_ipv4_cidr IS NULL "
+            "AND peer_signaling_udp_port IS NULL) OR "
+            "(execution_mode = 'ip_to_ip_no_register' AND "
+            "owned_target_digest ~ '^[0-9a-f]{64}$' AND "
+            "source_external_ipv4 ~ '^([0-9]{1,3}\\.){3}[0-9]{1,3}$' AND "
+            "peer_signaling_ipv4_cidr ~ '^([0-9]{1,3}\\.){3}[0-9]{1,3}/32$' AND "
+            "peer_signaling_udp_port = 5060)",
+            name="ck_g008_execution_seal_mode_binding",
         ),
         CheckConstraint(
             "retry_count = 0 AND concurrency_count = 1 "
@@ -908,10 +933,10 @@ class G008ExecutionStageModel(Base):
             "stock_call_id_digest", name="uq_g008_execution_stage_stock_call"
         ),
         CheckConstraint(
-            "(ordinal = 1 AND stage = 'register') OR "
+            "(ordinal = 1 AND stage IN ('register','peer_attach')) OR "
             "(ordinal = 2 AND stage = 'outbound_call') OR "
             "(ordinal = 3 AND stage = 'inbound_call') OR "
-            "(ordinal = 4 AND stage = 'unregister')",
+            "(ordinal = 4 AND stage IN ('unregister','peer_detach'))",
             name="ck_g008_execution_stage_order",
         ),
         CheckConstraint(

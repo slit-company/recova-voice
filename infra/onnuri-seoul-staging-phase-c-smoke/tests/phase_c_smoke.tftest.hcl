@@ -1674,8 +1674,8 @@ run "live_external_exact_iam_receipt_is_redacted_and_legacy_iam_is_bounded" {
   }
 
   assert {
-    condition     = local.exact_four_stage_contract_ready
-    error_message = "Exact four-stage contract readiness conjunct must be true."
+    condition     = local.exact_execution_contract_ready
+    error_message = "Exact execution contract readiness conjunct must be true."
   }
 
   assert {
@@ -1703,7 +1703,7 @@ run "live_external_exact_iam_receipt_is_redacted_and_legacy_iam_is_bounded" {
       local.bounded_live_ready &&
       local.outbound_live_enabled &&
       local.inbound_live_enabled &&
-      local.exact_four_stage_contract_ready &&
+      local.exact_execution_contract_ready &&
       google_compute_instance.candidate.desired_status == "RUNNING" &&
       !google_compute_firewall.recova_f1_https_ingress.disabled &&
       !google_compute_firewall.sip_ingress[0].disabled &&
@@ -1812,7 +1812,7 @@ run "live_external_exact_iam_receipt_is_redacted_and_legacy_iam_is_bounded" {
       local.bounded_live_ready &&
       local.outbound_live_enabled &&
       local.inbound_live_enabled &&
-      local.exact_four_stage_contract_ready &&
+      local.exact_execution_contract_ready &&
       google_compute_instance.candidate.desired_status == "RUNNING" &&
       !google_compute_firewall.recova_f1_https_ingress.disabled &&
       !google_compute_firewall.sip_ingress[0].disabled &&

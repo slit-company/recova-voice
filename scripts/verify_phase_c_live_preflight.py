@@ -53,9 +53,10 @@ DECIMAL = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]*[1-9])?\Z")
 B64URL = re.compile(r"[A-Za-z0-9_-]+\Z")
 MINIMUM_APPLY_RUNWAY = timedelta(minutes=15)
 
-CONTEXT_KEYS = ("schema_version", "project_id", "region", "run_id", "activation_nonce", "successor_review_payload_digest", "live_window_start_utc", "live_window_end_utc", "phase_b", "supplier", "host_policy", "recova_destination", "candidate_boot", "secrets", "bootstrap", "execution", "provider", "derivative", "f12", "authority", "cost", "iam_provisioning")
+CONTEXT_KEYS = ("schema_version", "project_id", "region", "run_id", "activation_nonce", "successor_review_payload_digest", "live_window_start_utc", "live_window_end_utc", "phase_b", "execution_contract", "supplier", "host_policy", "recova_destination", "candidate_boot", "secrets", "bootstrap", "execution", "provider", "derivative", "f12", "authority", "cost", "iam_provisioning")
 SUBSECTION_KEYS = {
     "phase_b": ("manifest_sha256", "network_self_link", "subnet_self_link", "subnet_ipv4_cidr", "private_ip_google_access", "ingress_deny_rule_name", "egress_deny_rule_name", "phase_b_source_sha256", "backend_identity", "backend_generation", "backend_serial", "canonical_state_sha256", "non_sensitive_outputs_sha256", "prearm_canonical_inventory_sha256", "prearm_verification_receipt_sha256"),
+    "execution_contract": ("sip_connection_mode", "source_external_ipv4", "peer_signaling_ipv4_cidr", "peer_signaling_udp_port", "owned_target_sha256", "stage_sequence", "register_attempt_budget", "unregister_attempt_budget", "total_call_attempt_budget", "retry_count", "concurrency_count", "call_deadline_seconds", "peer_detach_required", "containment_cleanup_required"),
     "supplier": ("signaling_ipv4_cidr", "signaling_udp_port", "remote_ipv4_cidrs", "remote_rtp_udp_port_min", "remote_rtp_udp_port_max", "remote_rtcp_udp_port_min", "remote_rtcp_udp_port_max", "max_concurrent_calls", "calls_per_second", "evidence_sha256", "endpoint_binding_canonical_sha256", "endpoint_binding_verification_sha256", "customer_external_ipv4", "bound_signaling_ipv4_cidr", "bound_signaling_remote_udp_port", "candidate_sip_listen_udp_port", "bound_media_ipv4_cidrs", "bound_remote_rtp_udp_port_min", "bound_remote_rtp_udp_port_max", "bound_remote_rtcp_udp_port_min", "bound_remote_rtcp_udp_port_max"),
     "host_policy": ("policy_sha256", "tuple_binding_sha256", "verification_receipt_sha256", "candidate_sip_listen_udp_port", "candidate_local_rtp_udp_port_min", "candidate_local_rtp_udp_port_max", "candidate_local_rtcp_udp_port_min", "candidate_local_rtcp_udp_port_max", "issued_at_utc", "expires_at_utc"),
     "recova_destination": ("canonical_receipt_sha256", "verification_receipt_sha256", "control_ipv4_cidrs", "media_ipv4_cidrs", "f1_source_ipv4_cidrs", "control_endpoint_sha256", "media_endpoint_sha256", "certificate_binding_sha256", "f1_mtls_endpoint_path", "f2_https_endpoint_path", "f3_wss_endpoint_path", "f4_https_endpoint_path", "f5_https_endpoint_path", "f12_mtls_endpoint_path"),
@@ -365,6 +366,45 @@ def _validate_context(context: Any) -> dict[str, Any]:
     if not re.fullmatch(r"https://www\.googleapis\.com/compute/v1/projects/slit-497603/regions/asia-northeast3/subnetworks/[a-z][a-z0-9-]{0,62}", phase_b["subnet_self_link"] or ""):
         _fail("context_phase_b_network")
 
+    execution_contract = context["execution_contract"]
+    mode = execution_contract["sip_connection_mode"]
+    if mode not in ("registration", "ip_to_ip"):
+        _fail("context_execution_contract_mode")
+    for key in (
+        "register_attempt_budget", "unregister_attempt_budget", "total_call_attempt_budget",
+        "retry_count", "concurrency_count", "call_deadline_seconds",
+    ):
+        if not isinstance(execution_contract[key], str) or not UINT.fullmatch(execution_contract[key]):
+            _fail("context_execution_contract_budget")
+    if (
+        execution_contract["total_call_attempt_budget"] != "3"
+        or execution_contract["retry_count"] != "0"
+        or execution_contract["concurrency_count"] != "1"
+        or execution_contract["call_deadline_seconds"] != "60"
+        or execution_contract["containment_cleanup_required"] is not True
+    ):
+        _fail("context_execution_contract_budget")
+    if mode == "registration":
+        if (
+            execution_contract["stage_sequence"] != ["register", "outbound_call", "inbound_call", "unregister"]
+            or execution_contract["register_attempt_budget"] != "1"
+            or execution_contract["unregister_attempt_budget"] != "1"
+            or execution_contract["peer_detach_required"] is not False
+        ):
+            _fail("context_execution_contract_registration")
+    else:
+        _canonical_ipv4(execution_contract["source_external_ipv4"], "context_execution_contract_source")
+        _canonical_cidr(execution_contract["peer_signaling_ipv4_cidr"], "context_execution_contract_peer", 32)
+        _hex(execution_contract["owned_target_sha256"], "context_execution_contract_target")
+        if (
+            execution_contract["stage_sequence"] != ["outbound_call", "inbound_call", "peer_detach"]
+            or execution_contract["register_attempt_budget"] != "0"
+            or execution_contract["unregister_attempt_budget"] != "0"
+            or execution_contract["peer_signaling_udp_port"] != "5060"
+            or execution_contract["peer_detach_required"] is not True
+        ):
+            _fail("context_execution_contract_ip_to_ip")
+
     supplier = context["supplier"]
     _canonical_cidr(supplier["signaling_ipv4_cidr"], "context_supplier_network", 32)
     _canonical_cidr(supplier["bound_signaling_ipv4_cidr"], "context_supplier_network", 32)
@@ -397,6 +437,11 @@ def _validate_context(context: Any) -> dict[str, Any]:
         _fail("context_supplier_limit")
     for key in ("evidence_sha256", "endpoint_binding_canonical_sha256", "endpoint_binding_verification_sha256"):
         _hex(supplier[key], "context_supplier_digest")
+    if mode == "ip_to_ip" and (
+        execution_contract["peer_signaling_ipv4_cidr"] != supplier["signaling_ipv4_cidr"]
+        or execution_contract["source_external_ipv4"] != supplier["customer_external_ipv4"]
+    ):
+        _fail("context_execution_contract_binding")
 
     host_policy = context["host_policy"]
     for key in ("policy_sha256", "tuple_binding_sha256", "verification_receipt_sha256"):
