@@ -36,7 +36,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 SCHEMA_VERSION = "recova-g008-execution-seal-v1"
 EXECUTION_REQUEST_SCHEMA = "recova-g008-execution-request-v1"
 LEGACY_STAGES = (("register", 1), ("outbound_call", 2), ("inbound_call", 3), ("unregister", 4))
-IP_TO_IP_STAGES = (("outbound_call", 1), ("inbound_call", 2))
+IP_TO_IP_STAGES = (("peer_attach", 1), ("outbound_call", 2), ("inbound_call", 3), ("peer_detach", 4))
 SIP_MODES = {"registration", "ip_to_ip"}
 PEER_PORT = 5060
 PEER_TRANSPORT = "udp"
@@ -618,6 +618,7 @@ class Config:
     status_hook_url: str
     sip_mode: str = "registration"
     source_external_ip: str | None = None
+    peer_signaling_ipv4_cidr: str | None = None
     peer_binding_digest: str | None = None
     contingency_direction: str | None = None
     execution_bundle_path: Path = EXECUTION_BUNDLE_PATH
@@ -641,7 +642,7 @@ class Config:
             "application_id", "run_id", "attempt_id", "authority_deadline",
             "idempotency_key", "route_evidence_handle", "route_profile_digest",
             "request_mode", "answer_hook_url", "status_hook_url", "contingency_direction",
-            "sip_mode", "source_external_ip", "peer_binding_digest",
+            "sip_mode", "source_external_ip", "peer_signaling_ipv4_cidr", "peer_binding_digest",
         }
         if (
             not isinstance(request, dict)
@@ -686,13 +687,21 @@ class Config:
             if request["sip_mode"] not in SIP_MODES:
                 raise ValueError
             source_external_ip = request["source_external_ip"]
+            peer_signaling_ipv4_cidr = request["peer_signaling_ipv4_cidr"]
             peer_binding_digest = request["peer_binding_digest"]
             if request["sip_mode"] == "registration":
-                if source_external_ip is not None or peer_binding_digest is not None:
+                if source_external_ip is not None or peer_signaling_ipv4_cidr is not None or peer_binding_digest is not None:
                     raise ValueError
             else:
                 parsed_source = ipaddress.ip_address(source_external_ip)
-                if parsed_source.version != 4 or not parsed_source.is_global:
+                parsed_peer = ipaddress.ip_network(peer_signaling_ipv4_cidr, strict=True)
+                if (
+                    parsed_source.version != 4
+                    or not parsed_source.is_global
+                    or parsed_peer.version != 4
+                    or parsed_peer.prefixlen != 32
+                    or str(parsed_peer) != peer_signaling_ipv4_cidr
+                ):
                     raise ValueError
                 if not isinstance(peer_binding_digest, str) or DIGEST_RE.fullmatch(peer_binding_digest) is None:
                     raise ValueError
@@ -713,7 +722,7 @@ class Config:
             request["idempotency_key"], request["route_evidence_handle"],
             request["route_profile_digest"], request["request_mode"],
             request["answer_hook_url"], request["status_hook_url"],
-            request["sip_mode"], request["source_external_ip"], request["peer_binding_digest"],
+            request["sip_mode"], request["source_external_ip"], request["peer_signaling_ipv4_cidr"], request["peer_binding_digest"],
             request["contingency_direction"],
         )
 
@@ -730,12 +739,12 @@ class Config:
         return LEGACY_STAGES if self.sip_mode == "registration" else IP_TO_IP_STAGES
 
     def peer_binding(self) -> dict[str, Any]:
-        if self.sip_mode != "ip_to_ip" or self.source_external_ip is None:
+        if self.sip_mode != "ip_to_ip" or self.source_external_ip is None or self.peer_signaling_ipv4_cidr is None:
             raise RunnerError("peer_binding_unavailable")
         return {
             **self.binding(),
             "source_external_ip": self.source_external_ip,
-            "peer_cidr": f"{self.source_external_ip}/32",
+            "peer_cidr": self.peer_signaling_ipv4_cidr,
             "peer_port": PEER_PORT,
             "peer_transport": PEER_TRANSPORT,
             "owned_target_sha256": self.owned_target_sha256,
@@ -750,7 +759,7 @@ def validate_owned_target_binding(config: Config, secret_files: SecretFiles) -> 
         peer_material = canonical(
             {
                 "source_external_ip": config.source_external_ip,
-                "peer_cidr": f"{config.source_external_ip}/32" if config.source_external_ip else None,
+                "peer_cidr": config.peer_signaling_ipv4_cidr,
                 "peer_port": PEER_PORT,
                 "peer_transport": PEER_TRANSPORT,
                 "owned_target_sha256": config.owned_target_sha256,
@@ -939,8 +948,10 @@ class Runner:
             raise RunnerError("stage_receipt_binding_rejected")
         terminal_class = {
             "register": "registered",
+            "peer_attach": "peer_attached",
             "outbound_call": "call_completed",
             "inbound_call": "inbound_bound",
+            "peer_detach": "peer_detached",
             "unregister": "unregistered",
         }[name]
         if receipt.get("state") != "succeeded" or receipt.get("terminal_class") != terminal_class:
@@ -1269,6 +1280,11 @@ class Runner:
             **binding,
             "schema_version": SCHEMA_VERSION,
             "destination_hmac_digest": self.config.destination_digest,
+            "execution_mode": "legacy_registration" if self.config.sip_mode == "registration" else "ip_to_ip_no_register",
+            "owned_target_digest": self.config.owned_target_sha256 if self.config.sip_mode == "ip_to_ip" else None,
+            "source_external_ipv4": self.config.source_external_ip,
+            "peer_signaling_ipv4_cidr": self.config.peer_signaling_ipv4_cidr,
+            "peer_signaling_udp_port": PEER_PORT if self.config.sip_mode == "ip_to_ip" else None,
             "stages": [stage for stage, _ordinal in stages],
             "retry_count": 0,
             "concurrency_count": 1,
@@ -1305,13 +1321,13 @@ class Runner:
             if self.config.sip_mode == "registration":
                 self._stage("register", 1, lambda deadline: self._registration("register", deadline))
             else:
-                self._attach_peer(time.monotonic() + STAGE_DEADLINE_SECONDS)
-            outbound_ordinal = 2 if self.config.sip_mode == "registration" else 1
-            inbound_ordinal = 3 if self.config.sip_mode == "registration" else 2
-            self._stage("outbound_call", outbound_ordinal, self._outbound)
-            self._stage("inbound_call", inbound_ordinal, self._inbound)
+                self._stage("peer_attach", 1, self._attach_peer)
+            self._stage("outbound_call", 2, self._outbound)
+            self._stage("inbound_call", 3, self._inbound)
             if self.config.sip_mode == "registration":
                 self._stage("unregister", 4, lambda deadline: self._registration("unregister", deadline))
+            else:
+                self._stage("peer_detach", 4, lambda deadline: self._detach_peer(deadline or time.monotonic()))
             if (
                 not 2 <= self.provider_call_attempts <= 3
                 or len(self.provider_call_ids) != 2

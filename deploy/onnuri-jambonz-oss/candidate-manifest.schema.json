@@ -579,7 +579,7 @@
               "const": "evidence:evidence/g008-live-smoke-runner.py"
             },
             "sha256": {
-              "const": "sha256:f1517747eac6a4a7bf28e4e2c4d00825481959462bcd911ab8a2d5bcee3a256c"
+              "const": "sha256:2c92d21b3ed2e33b5b8eb808d4a21345cef202c7cf5a14fd1e26383c815e7f44"
 
             }
           }
@@ -763,7 +763,7 @@
               "const": "evidence/g008-live-smoke-runner.py"
             },
             "sha256": {
-              "const": "f1517747eac6a4a7bf28e4e2c4d00825481959462bcd911ab8a2d5bcee3a256c"
+              "const": "2c92d21b3ed2e33b5b8eb808d4a21345cef202c7cf5a14fd1e26383c815e7f44"
 
             },
             "content_type": {

@@ -28,8 +28,10 @@ REGISTER_OPERATION_UUID = "33333333-3333-4333-8333-333333333333"
 UNREGISTER_OPERATION_UUID = "44444444-4444-4444-8444-444444444444"
 STAGE_UUIDS = {
     "register": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "peer_attach": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
     "outbound_call": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     "inbound_call": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    "peer_detach": "ffffffff-ffff-4fff-8fff-ffffffffffff",
     "unregister": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
 }
 ATTESTATION_PRIVATE_KEY = ec.derive_private_key(1, ec.SECP256R1())
@@ -84,6 +86,7 @@ def config(tmp_path: Path) -> runner.Config:
         answer_hook_url="https://hooks.invalid/answer",
         status_hook_url="https://hooks.invalid/status",
         sip_mode="registration",
+        peer_signaling_ipv4_cidr=None,
         execution_bundle_path=tmp_path / "execution-bundle.json",
     )
 
@@ -219,8 +222,10 @@ class FakeApi:
                 "state": "succeeded",
                 "terminal_class": {
                     "register": "registered",
+                    "peer_attach": "peer_attached",
                     "outbound_call": "call_completed",
                     "inbound_call": "inbound_bound",
+                    "peer_detach": "peer_detached",
                     "unregister": "unregistered",
                 }[stage],
             }
@@ -231,7 +236,7 @@ class FakeApi:
                         REGISTER_OPERATION_UUID if stage == "register" else UNREGISTER_OPERATION_UUID
                     ),
                 )
-            else:
+            elif stage in {"outbound_call", "inbound_call"}:
                 started = 1_000 if stage == "outbound_call" else 3_000
                 receipt.update(
                     provider_call_id_digest=("1" if stage == "outbound_call" else "2") * 64,
@@ -776,6 +781,7 @@ def execution_request() -> dict:
         "contingency_direction": None,
         "sip_mode": "registration",
         "source_external_ip": None,
+        "peer_signaling_ipv4_cidr": None,
         "peer_binding_digest": None,
     }
 
@@ -842,12 +848,13 @@ def test_execution_request_loads_exact_contract_and_fixed_endpoints(tmp_path: Pa
 def ip_to_ip_config(tmp_path: Path) -> runner.Config:
     subject = config(tmp_path)
     source_external_ip = "203.0.113.10"
+    peer_signaling_ipv4_cidr = "198.51.100.8/32"
     owned_target_sha256 = hashlib.sha256(b"target").hexdigest()
     peer_binding_digest = hashlib.sha256(
         runner.canonical(
             {
                 "source_external_ip": source_external_ip,
-                "peer_cidr": f"{source_external_ip}/32",
+                "peer_cidr": peer_signaling_ipv4_cidr,
                 "peer_port": 5060,
                 "peer_transport": "udp",
                 "owned_target_sha256": owned_target_sha256,
@@ -856,6 +863,7 @@ def ip_to_ip_config(tmp_path: Path) -> runner.Config:
     ).hexdigest()
     object.__setattr__(subject, "sip_mode", "ip_to_ip")
     object.__setattr__(subject, "source_external_ip", source_external_ip)
+    object.__setattr__(subject, "peer_signaling_ipv4_cidr", peer_signaling_ipv4_cidr)
     object.__setattr__(subject, "peer_binding_digest", peer_binding_digest)
     return subject
 
@@ -873,14 +881,14 @@ def test_ip_to_ip_mode_uses_exact_peer_without_registration_and_detaches(tmp_pat
     assert paths.count("/v1/g008/ip-peer/attach") == 1
     assert paths.count("/v1/g008/ip-peer/detach") == 1
     attach = next(payload for path, payload, _ in api.calls if path == "/v1/g008/ip-peer/attach")
-    assert attach["peer_cidr"] == "203.0.113.10/32"
+    assert attach["peer_cidr"] == "198.51.100.8/32"
     assert attach["peer_port"] == 5060
     assert attach["peer_transport"] == "udp"
     assert attach["retry_count"] == 0
     assert attach["concurrency_count"] == 1
     assert attach["deadline_seconds"] == 60
     assert [receipt["payload"]["stage"] for receipt in subject.stage_receipts] == [
-        "outbound_call", "inbound_call"
+        "peer_attach", "outbound_call", "inbound_call", "peer_detach"
     ]
 
 
@@ -889,6 +897,7 @@ def test_ip_to_ip_request_rejects_non_external_or_non_ipv4_source(tmp_path: Path
     request = execution_request()
     request["sip_mode"] = "ip_to_ip"
     request["source_external_ip"] = source_ip
+    request["peer_signaling_ipv4_cidr"] = "198.51.100.8/32"
     request["peer_binding_digest"] = D
     with pytest.raises(runner.RunnerError, match="execution_request"):
         runner.Config.load(request_environment(tmp_path, runner.canonical(request)))
